@@ -15,10 +15,10 @@ const dbPath = path.join(d1Dir, sqliteFile);
 console.log(`Connecting to local D1 database at: ${dbPath}`);
 const db = new DatabaseSync(dbPath);
 
-console.log("\n--- TEST 1: Volunteer Sign-Up Flow ---");
+console.log("\n--- TEST 1: Sign-Up Sheet Flow ---");
 // Create Event
 const testIdSuffix = Date.now().toString();
-const volunteerEventId = "test-volunteer-" + testIdSuffix;
+const signupEventId = "test-signup-" + testIdSuffix;
 const adminToken = "secret-admin-token-" + testIdSuffix;
 const now = new Date().toISOString();
 
@@ -26,11 +26,11 @@ db.prepare(`
   INSERT INTO events (id, type, title, event_date, description, location, organizer_name, organizer_email, admin_token, status, settings, timezone, created_at, updated_at)
   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 `).run(
-  volunteerEventId,
+  signupEventId,
   "SIGNUP_SHEET",
   "Park Cleanup 2026",
   "2026-10-17",
-  "Annual community volunteering event",
+  "Annual community cleanup event",
   "Central Park",
   "Sarah Chen",
   "sarah@example.com",
@@ -49,12 +49,12 @@ const slot2Id = "slot-lead-organizer-" + testIdSuffix;
 db.prepare(`
   INSERT INTO event_slots (id, event_id, title, start_time, end_time, capacity, display_order)
   VALUES (?, ?, ?, ?, ?, ?, ?)
-`).run(slot1Id, volunteerEventId, "Morning Setup", "08:00", "10:00", 2, 0);
+`).run(slot1Id, signupEventId, "Morning Setup", "08:00", "10:00", 2, 0);
 
 db.prepare(`
   INSERT INTO event_slots (id, event_id, title, start_time, end_time, capacity, display_order)
   VALUES (?, ?, ?, ?, ?, ?, ?)
-`).run(slot2Id, volunteerEventId, "Lead Organizer", "08:00", "14:00", 1, 1);
+`).run(slot2Id, signupEventId, "Lead Organizer", "08:00", "14:00", 1, 1);
 
 console.log("✓ Event and slots created successfully.");
 
@@ -62,13 +62,13 @@ console.log("✓ Event and slots created successfully.");
 db.prepare(`
   INSERT INTO signups (id, slot_id, event_id, participant_name, participant_email, edit_token, custom_fields, status, created_at)
   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-`).run("signup-1-" + testIdSuffix, slot1Id, volunteerEventId, "Alice Walker", "alice@example.com", "alice-token", JSON.stringify({ comment: "Bringing shovel" }), "CONFIRMED", now);
+`).run("signup-1-" + testIdSuffix, slot1Id, signupEventId, "Alice Walker", "alice@example.com", "alice-token", JSON.stringify({ comment: "Bringing shovel" }), "CONFIRMED", now);
 
 // Participant 2 signs up for slot 1
 db.prepare(`
   INSERT INTO signups (id, slot_id, event_id, participant_name, participant_email, edit_token, custom_fields, status, created_at)
   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-`).run("signup-2-" + testIdSuffix, slot1Id, volunteerEventId, "Bob Smith", "bob@example.com", "bob-token", JSON.stringify({ comment: "Bringing snacks" }), "CONFIRMED", now);
+`).run("signup-2-" + testIdSuffix, slot1Id, signupEventId, "Bob Smith", "bob@example.com", "bob-token", JSON.stringify({ comment: "Bringing snacks" }), "CONFIRMED", now);
 
 // Check remaining capacity for slot 1
 const slot1Signups = db.prepare(`SELECT count(*) as count FROM signups WHERE slot_id = ? AND status = 'CONFIRMED'`).get(slot1Id);

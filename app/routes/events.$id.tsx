@@ -276,7 +276,7 @@ export async function action({ request, params, context }: ActionFunctionArgs) {
     return secretMatches(presentedAdmin, event.adminToken);
   };
 
-  // 1. Volunteer Slot Sign Up (transactional capacity guard)
+  // 1. Sign-Up Slot Claim (transactional capacity guard)
   if (intent === "signup") {
     const slotId = formData.get("slotId") as string;
     const participantName = (formData.get("participantName") as string)?.trim();
@@ -331,7 +331,7 @@ export async function action({ request, params, context }: ActionFunctionArgs) {
       throw e;
     }
 
-    // Send confirmation email to volunteer if email provided
+    // Send confirmation email to participant if email provided
     if (participantEmail) {
       const cancelUrl = `${url.origin}/events/${eventId}?cancel_token=${encodeURIComponent(editTokenPlain)}`;
       const shiftPrefix = ((targetSlot as { shiftName?: string | null }).shiftName || "").trim();
@@ -856,7 +856,7 @@ export default function EventView() {
           <div className="space-y-3">
             <div className="flex items-center gap-2.5 flex-wrap">
               <span className="text-xs font-bold uppercase tracking-wider px-3 py-1 rounded-full bg-blue-50 text-blue-700 border border-blue-100">
-                {event.type === "SIGNUP_SHEET" ? "Volunteer Sign-Up Sheet" : "Meeting Availability Poll"}
+                {event.type === "SIGNUP_SHEET" ? "Sign-Up Sheet" : "Meeting Availability Poll"}
               </span>
               <span
                 className={`text-xs px-3 py-1 rounded-full font-semibold border inline-flex items-center gap-1.5 ${
@@ -1252,7 +1252,7 @@ export default function EventView() {
       )}
 
       {/* ===================================================================== */}
-      {/* SECTION 1: VOLUNTEER SIGNUP SHEET VIEW                                */}
+      {/* SECTION 1: SIGNUP SHEET VIEW                                */}
       {/* ===================================================================== */}
       {event.type === "SIGNUP_SHEET" && (
         <div className="space-y-6">
@@ -1382,7 +1382,7 @@ export default function EventView() {
                                     <input type="hidden" name="adminToken" value={adminToken || ""} />
                                     <button
                                       type="submit"
-                                      title="Cancel volunteer entry"
+                                      title="Cancel entry"
                                       className="text-slate-400 hover:text-rose-600 p-1 transition-colors"
                                     >
                                       <X className="w-3.5 h-3.5" />
@@ -1702,12 +1702,12 @@ export default function EventView() {
         </div>
       )}
 
-      {/* Volunteer Signup Dialog Modal */}
+      {/* Signup Dialog Modal */}
       {selectedSlotForSignup && (
         <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-50 flex items-center justify-center p-4 animate-fade-in">
           <div className="bg-white rounded-3xl max-w-md w-full p-8 shadow-2xl space-y-6">
             <div className="flex items-center justify-between">
-              <h3 className="font-extrabold text-xl text-slate-900">Claim Volunteer Spot</h3>
+              <h3 className="font-extrabold text-xl text-slate-900">Claim Spot</h3>
               <button
                 type="button"
                 onClick={() => setSelectedSlotForSignup(null)}

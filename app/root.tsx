@@ -24,11 +24,11 @@ export const links: LinksFunction = () => [
 export const meta: MetaFunction = () => [
   { charset: "utf-8" },
   { name: "viewport", content: "width=device-width, initial-scale=1" },
-  { title: "ManyMano — Volunteer Sign-Ups & Meeting Polls, No Sign-Up Needed" },
+  { title: "ManyMano — Sign-Up Sheets & Meeting Polls, No Account Needed" },
   {
     name: "description",
     content:
-      "Free volunteer sign-up sheets and meeting polls. No accounts, no ads — create and share in seconds.",
+      "Free sign-up sheets and meeting polls. No accounts, no ads — create and share in seconds.",
   },
 ];
 
@@ -144,7 +144,7 @@ export default function App() {
             <div className="flex items-center gap-2">
               <span className="font-semibold text-slate-700">ManyMano</span>
               <span>—</span>
-              <span>Free volunteer sign-ups & meeting polls. No accounts, no ads.</span>
+              <span>Free sign-up sheets & meeting polls. No accounts, no ads.</span>
             </div>
             <div className="flex items-center gap-5 text-slate-400">
               <a

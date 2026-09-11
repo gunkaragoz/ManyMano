@@ -27,7 +27,7 @@ export default function Index() {
 
       {/* Two Mode Cards */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-8 max-w-4xl mx-auto">
-        {/* Card 1: Volunteer Signups */}
+        {/* Card 1: Sign-Up Sheet */}
         <div className="bg-white border border-slate-200/80 rounded-3xl p-8 sm:p-10 shadow-[0_2px_12px_rgba(0,0,0,0.03)] hover:shadow-[0_8px_24px_rgba(0,0,0,0.06)] hover:border-blue-200 transition-all duration-200 flex flex-col justify-between space-y-8">
           <div className="space-y-4">
             <div className="w-12 h-12 rounded-2xl bg-blue-50 text-blue-600 flex items-center justify-center border border-blue-100">
@@ -35,9 +35,9 @@ export default function Index() {
             </div>
             
             <div className="space-y-2">
-              <h2 className="text-2xl font-bold text-slate-900 tracking-tight">Volunteer Sign-Ups</h2>
+              <h2 className="text-2xl font-bold text-slate-900 tracking-tight">Sign-Up Sheets</h2>
               <p className="text-sm text-slate-500 leading-relaxed">
-                Slot limits, shifts, potluck food lists, and community tasks. Volunteers claim spots instantly with zero account signup.
+                Slot limits, shifts, potluck food lists, and community tasks. People claim spots instantly with zero account signup.
               </p>
             </div>
 

@@ -1,6 +1,6 @@
 # ManyMano 🤝
 
-> An easy, ad-free tool for volunteer sign-ups and meeting time polls. No accounts — create and share in seconds. Free forever, open source. Built to run 100% free on **Cloudflare Pages & D1** with zero subscription costs.
+> An easy, ad-free tool for sign-up sheets and meeting time polls. No accounts — create and share in seconds. Free forever, open source. Built to run 100% free on **Cloudflare Pages & D1** with zero subscription costs.
 
 [![Deploy to Cloudflare](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/manymano/manymano)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
@@ -9,13 +9,13 @@
 
 ## ✨ Features
 
-### 📋 1. Volunteer & Slot Sign-Ups
-- **Slot Limits & Capacity Tracking**: Define slots with exact headcount limits (e.g. 2 volunteers) or unlimited capacity.
+### 📋 1. Sign-Up Sheets
+- **Slot Limits & Capacity Tracking**: Define slots with exact headcount limits (e.g. 2 spots) or unlimited capacity.
 - **Overbooking Guard**: Transactional capacity re-check on sign-up.
-- **Custom Attendee Notes**: Collect volunteer comments or equipment notes (kept to 500 chars, visible to link holders).
+- **Custom Attendee Notes**: Collect participant comments or equipment notes (kept to 500 chars, visible to link holders).
 - **Instant Calendar Invites**: Direct RFC 5545 `.ics` file generation right at the edge—no email mandatory. Organizer email is omitted from public calendar files.
 - **Zero Login Barrier**: Participants sign up in 5 seconds with name & optional email.
-- **Private Edit Links**: Volunteers who share an email get a cancel link; organizers can remove anyone.
+- **Private Edit Links**: Participants who share an email get a cancel link; organizers can remove anyone.
 - **Organizer Admin Mode**: Attendance rosters, CSV export (organizer-only), and full event delete. Admin link upgrades to an HttpOnly cookie and secrets are stored hashed.
 - **No accounts needed**: Participants sign up in seconds with name & optional email; organizers can delete anytime.
 

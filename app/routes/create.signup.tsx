@@ -131,18 +131,18 @@ export async function action({ request, context }: ActionFunctionArgs) {
   await sendEmail({
     apiKey: env.RESEND_API_KEY,
     to: organizerEmail,
-    subject: `Your volunteer sheet: "${title}" is ready!`,
+    subject: `Your sign-up sheet: "${title}" is ready!`,
     html: `
       <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto; padding: 24px; color: #1e293b;">
         <h2 style="font-size: 22px; font-weight: 700; color: #0f172a; margin-top: 0;">Your sign-up sheet "${escapeHtml(title)}" is ready!</h2>
         <p>Hi ${escapeHtml(organizerName)},</p>
         <p>Here are your links:</p>
         <div style="background: #f8fafc; border: 1px solid #e2e8f0; padding: 18px; border-radius: 12px; margin: 20px 0;">
-          <p style="margin: 0 0 12px 0;"><strong>Public Link for Volunteers:</strong><br><a href="${escapeHtml(publicUrl)}" style="color: #2563eb;">${escapeHtml(publicUrl)}</a></p>
+          <p style="margin: 0 0 12px 0;"><strong>Public Link for Participants:</strong><br><a href="${escapeHtml(publicUrl)}" style="color: #2563eb;">${escapeHtml(publicUrl)}</a></p>
           <p style="margin: 0;"><strong>Secret Management Link (Keep Private!):</strong><br><a href="${escapeHtml(adminUrl)}" style="color: #2563eb;">${escapeHtml(adminUrl)}</a></p>
         </div>
         ${eventDate ? `<p><strong>Date:</strong> ${escapeHtml(eventDate)}</p>` : ""}
-        <p style="font-size: 13px; color: #64748b;">Use the secret management link to view RSVPs, download CSV spreadsheets, and manage volunteers. You can delete it anytime from Organizer Admin Mode.</p>
+        <p style="font-size: 13px; color: #64748b;">Use the secret management link to view RSVPs, download CSV spreadsheets, and manage sign-ups. You can delete it anytime from Organizer Admin Mode.</p>
         <p style="margin-top: 24px; font-weight: 600;">— ManyMano</p>
       </div>
     `,
@@ -312,7 +312,7 @@ export default function CreateSignupSheet() {
           </div>
           <div>
             <h1 className="text-2xl sm:text-3xl font-extrabold text-slate-900 tracking-tight">
-              Create Volunteer Sign-Up Sheet
+              Create Sign-Up Sheet
             </h1>
             <p className="text-xs text-slate-500 mt-0.5">
               Set up shifts with tasks and spots for your event. No registration or password required.
@@ -398,7 +398,7 @@ export default function CreateSignupSheet() {
                 rows={3}
                 value={details.description}
                 onChange={(e) => updateDetails({ description: e.target.value })}
-                placeholder="Details for volunteers, what to bring, parking notes, or instructions..."
+                placeholder="Details for participants, what to bring, parking notes, or instructions..."
                 className="w-full px-4 py-3 rounded-xl border border-slate-200/90 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all placeholder:text-slate-400 leading-relaxed"
               />
             </div>

@@ -49,7 +49,7 @@ export async function loader({ params, request, context }: LoaderFunctionArgs) {
   let csvRows: string[][] = [];
 
   if (event.type === "SIGNUP_SHEET") {
-    csvRows.push(["Shift", "Task", "Volunteer Name", "Email", "Notes/Comments", "Status", "Date Signed Up"]);
+    csvRows.push(["Shift", "Task", "Name", "Email", "Notes/Comments", "Status", "Date Signed Up"]);
     const eventSignups = await db
       .select()
       .from(signups)
