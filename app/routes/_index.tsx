@@ -57,7 +57,7 @@ export default function Index() {
           </div>
 
           <Link
-            to="/create?type=SIGNUP_SHEET"
+            to="/create/signup"
             className="w-full text-center py-3.5 px-5 rounded-2xl bg-blue-600 text-white font-semibold text-sm hover:bg-blue-700 shadow-sm transition-all hover:scale-[1.01] active:scale-[0.99]"
           >
             Create Sign-Up Sheet →
@@ -95,7 +95,7 @@ export default function Index() {
           </div>
 
           <Link
-            to="/create?type=TIME_POLL"
+            to="/create/poll"
             className="w-full text-center py-3.5 px-5 rounded-2xl bg-slate-900 text-white font-semibold text-sm hover:bg-slate-800 shadow-sm transition-all hover:scale-[1.01] active:scale-[0.99]"
           >
             Create Meeting Poll →
