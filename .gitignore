@@ -1,0 +1,8 @@
+node_modules
+.wrangler
+build
+.cache
+.env
+*.local
+.pnpm-store
+.DS_Store

@@ -1,0 +1,41 @@
+{
+  "name": "manymano",
+  "private": true,
+  "sideEffects": false,
+  "type": "module",
+  "scripts": {
+    "build": "remix vite:build",
+    "dev": "remix vite:dev",
+    "start": "wrangler pages dev ./build/client",
+    "typecheck": "tsc",
+    "db:generate": "drizzle-kit generate",
+    "db:migrate:local": "wrangler d1 migrations apply manymano-db --local",
+    "db:migrate:remote": "wrangler d1 migrations apply manymano-db --remote",
+    "deploy": "npm run build && wrangler pages deploy ./build/client"
+  },
+  "dependencies": {
+    "@remix-run/cloudflare": "^2.16.0",
+    "@remix-run/react": "^2.16.0",
+    "clsx": "^2.1.1",
+    "drizzle-orm": "^0.40.0",
+    "isbot": "^5.1.23",
+    "lucide-react": "^1.16.0",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "tailwind-merge": "^3.0.2"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20250224.0",
+    "@remix-run/dev": "^2.16.0",
+    "@types/react": "^18.3.18",
+    "@types/react-dom": "^18.3.5",
+    "autoprefixer": "^10.4.20",
+    "drizzle-kit": "^0.30.4",
+    "postcss": "^8.5.2",
+    "tailwindcss": "^3.4.17",
+    "typescript": "^5.7.3",
+    "vite": "^5.4.14",
+    "vite-tsconfig-paths": "^5.1.4",
+    "wrangler": "^3.111.0"
+  }
+}

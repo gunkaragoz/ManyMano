@@ -1,0 +1,10 @@
+name = "manymano"
+compatibility_date = "2024-09-23"
+compatibility_flags = ["nodejs_compat"]
+pages_build_output_dir = "./build/client"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "manymano-db"
+database_id = "local-manymano-id"
+migrations_dir = "./drizzle/migrations"
