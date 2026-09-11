@@ -4,8 +4,8 @@
   "sideEffects": false,
   "type": "module",
   "scripts": {
-    "build": "remix vite:build",
-    "dev": "remix vite:dev",
+    "build": "VITE_CJS_IGNORE_WARNING=true remix vite:build",
+    "dev": "VITE_CJS_IGNORE_WARNING=true remix vite:dev",
     "start": "wrangler pages dev ./build/client",
     "typecheck": "tsc",
     "db:generate": "drizzle-kit generate",
