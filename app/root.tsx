@@ -10,6 +10,7 @@ import {
   useNavigation,
 } from "@remix-run/react";
 import { useEffect, useState } from "react";
+import { HeartHandshake } from "lucide-react";
 import stylesheet from "~/tailwind.css?url";
 import {
   CREATE_STICKY_HEADER_EVENT,
@@ -19,6 +20,8 @@ import {
 
 export const links: LinksFunction = () => [
   { rel: "stylesheet", href: stylesheet },
+  { rel: "icon", type: "image/svg+xml", href: "/favicon.svg" },
+  { rel: "apple-touch-icon", href: "/favicon.svg" },
 ];
 
 export const meta: MetaFunction = () => [
@@ -76,12 +79,13 @@ export default function App() {
         <header className="sticky top-0 z-40 bg-[#fafafc]/80 backdrop-blur-md border-b border-slate-200/80 transition-all">
           <div className="max-w-5xl mx-auto px-6 sm:px-8 h-18 py-4 flex items-center justify-between gap-3">
             <Link to="/" className="flex items-center gap-3 group shrink-0">
-              <div className="w-8 h-8 rounded-lg bg-blue-600 flex items-center justify-center text-white font-bold text-sm shadow-sm group-hover:bg-blue-700 transition-colors">
-                M
+              <div className="w-8 h-8 rounded-lg bg-white border-2 border-blue-600 flex items-center justify-center text-green-600 shadow-sm group-hover:bg-blue-50 transition-colors">
+                <HeartHandshake className="w-5 h-5" aria-hidden="true" />
               </div>
               <div className="flex items-center gap-2">
-                <span className="font-bold text-base tracking-tight text-slate-900">
-                  ManyMano
+                <span className="font-bold text-base tracking-tight">
+                  <span className="text-blue-600">Many</span>
+                  <span className="text-green-600">Mano</span>
                 </span>
                 <span className="text-[10px] font-semibold tracking-wide px-2 py-0.5 rounded-full bg-slate-100 text-slate-600 border border-slate-200/60">
                   Free forever
@@ -142,7 +146,10 @@ export default function App() {
         <footer className="border-t border-slate-200/60 bg-white/60 py-8 mt-16">
           <div className="max-w-5xl mx-auto px-6 sm:px-8 flex flex-col sm:flex-row items-center justify-between gap-4 text-xs text-slate-500">
             <div className="flex items-center gap-2">
-              <span className="font-semibold text-slate-700">ManyMano</span>
+              <span className="font-semibold">
+                <span className="text-blue-600">Many</span>
+                <span className="text-green-600">Mano</span>
+              </span>
               <span>—</span>
               <span>Free sign-up sheets & meeting polls. No accounts, no ads.</span>
             </div>

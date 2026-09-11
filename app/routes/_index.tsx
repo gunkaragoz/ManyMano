@@ -65,9 +65,9 @@ export default function Index() {
         </div>
 
         {/* Card 2: Meeting Time Finder */}
-        <div className="bg-white border border-slate-200/80 rounded-3xl p-8 sm:p-10 shadow-[0_2px_12px_rgba(0,0,0,0.03)] hover:shadow-[0_8px_24px_rgba(0,0,0,0.06)] hover:border-emerald-200 transition-all duration-200 flex flex-col justify-between space-y-8">
+        <div className="bg-white border border-slate-200/80 rounded-3xl p-8 sm:p-10 shadow-[0_2px_12px_rgba(0,0,0,0.03)] hover:shadow-[0_8px_24px_rgba(0,0,0,0.06)] hover:border-green-200 transition-all duration-200 flex flex-col justify-between space-y-8">
           <div className="space-y-4">
-            <div className="w-12 h-12 rounded-2xl bg-emerald-50 text-emerald-600 flex items-center justify-center border border-emerald-100">
+            <div className="w-12 h-12 rounded-2xl bg-green-50 text-green-600 flex items-center justify-center border border-green-100">
               <CalendarDays className="w-6 h-6" />
             </div>
 
@@ -80,15 +80,15 @@ export default function Index() {
 
             <ul className="space-y-2.5 text-xs text-slate-600 pt-2">
               <li className="flex items-center gap-2.5">
-                <span className="w-4 h-4 rounded-full bg-emerald-100 text-emerald-700 flex items-center justify-center"><Check className="w-3 h-3" /></span>
+                <span className="w-4 h-4 rounded-full bg-green-100 text-green-700 flex items-center justify-center"><Check className="w-3 h-3" /></span>
                 <span>Responsive consensus matrix with fast 1-click voting</span>
               </li>
               <li className="flex items-center gap-2.5">
-                <span className="w-4 h-4 rounded-full bg-emerald-100 text-emerald-700 flex items-center justify-center"><Check className="w-3 h-3" /></span>
+                <span className="w-4 h-4 rounded-full bg-green-100 text-green-700 flex items-center justify-center"><Check className="w-3 h-3" /></span>
                 <span>Automatic local time zone conversion for attendees</span>
               </li>
               <li className="flex items-center gap-2.5">
-                <span className="w-4 h-4 rounded-full bg-emerald-100 text-emerald-700 flex items-center justify-center"><Check className="w-3 h-3" /></span>
+                <span className="w-4 h-4 rounded-full bg-green-100 text-green-700 flex items-center justify-center"><Check className="w-3 h-3" /></span>
                 <span>Real-time consensus star & calendar (.ics) sync</span>
               </li>
             </ul>
@@ -96,7 +96,7 @@ export default function Index() {
 
           <Link
             to="/create/poll"
-            className="w-full text-center py-3.5 px-5 rounded-2xl bg-emerald-600 text-white font-semibold text-sm hover:bg-emerald-700 shadow-sm transition-all hover:scale-[1.01] active:scale-[0.99] inline-flex items-center justify-center gap-2"
+            className="w-full text-center py-3.5 px-5 rounded-2xl bg-green-600 text-white font-semibold text-sm hover:bg-green-700 shadow-sm transition-all hover:scale-[1.01] active:scale-[0.99] inline-flex items-center justify-center gap-2"
           >
             Create Meeting Poll <ArrowRight className="w-4 h-4" />
           </Link>

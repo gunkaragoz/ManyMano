@@ -786,9 +786,9 @@ export default function EventView() {
     <div className="space-y-10 py-2">
       {/* Event Created Banner with 1-Click Copy Links */}
       {justCreated && isAdmin && (
-        <div className="bg-white border-2 border-emerald-500/80 rounded-3xl p-6 sm:p-8 shadow-sm space-y-5 animate-fade-in">
+        <div className="bg-white border-2 border-green-500/80 rounded-3xl p-6 sm:p-8 shadow-sm space-y-5 animate-fade-in">
           <div className="flex items-center gap-3">
-            <span className="w-9 h-9 rounded-full bg-emerald-100 text-emerald-700 flex items-center justify-center">
+            <span className="w-9 h-9 rounded-full bg-green-100 text-green-700 flex items-center justify-center">
               <PartyPopper className="w-5 h-5" />
             </span>
             <div>
@@ -864,7 +864,7 @@ export default function EventView() {
 
       {/* Action Notification */}
       {justCancelled && (
-        <div className="p-4 rounded-2xl bg-emerald-50 border border-emerald-200/80 text-emerald-800 text-sm font-semibold flex items-center gap-2.5 animate-fade-in">
+        <div className="p-4 rounded-2xl bg-green-50 border border-green-200/80 text-green-800 text-sm font-semibold flex items-center gap-2.5 animate-fade-in">
           <CircleCheck className="w-4 h-4 shrink-0" />
           <span>Your entry was removed.</span>
         </div>
@@ -876,7 +876,7 @@ export default function EventView() {
         </div>
       )}
       {actionData?.message && (
-        <div className="p-4 rounded-2xl bg-emerald-50 border border-emerald-200/80 text-emerald-800 text-sm font-semibold flex items-center gap-2.5 animate-fade-in">
+        <div className="p-4 rounded-2xl bg-green-50 border border-green-200/80 text-green-800 text-sm font-semibold flex items-center gap-2.5 animate-fade-in">
           <CircleCheck className="w-4 h-4 shrink-0" />
           <span>{actionData.message}</span>
         </div>
@@ -1337,7 +1337,7 @@ export default function EventView() {
                                   ? "bg-slate-100 text-slate-500 border-slate-200"
                                   : spotsLeft <= 1
                                   ? "bg-amber-50 text-amber-700 border-amber-200"
-                                  : "bg-emerald-50 text-emerald-700 border-emerald-200"
+                                  : "bg-green-50 text-green-700 border-green-200"
                               }`}
                             >
                               {isFull ? "Filled" : `${spotsLeft} spot${spotsLeft === 1 ? "" : "s"} left`}
@@ -1588,7 +1588,7 @@ export default function EventView() {
                         return (
                           <td key={s.id} className="p-3 text-center border-r border-slate-100">
                             {resp === "YES" && (
-                              <span className="inline-flex items-center justify-center w-8 h-8 rounded-xl bg-emerald-500 text-white shadow-sm">
+                              <span className="inline-flex items-center justify-center w-8 h-8 rounded-xl bg-green-500 text-white shadow-sm">
                                 <Check className="w-4 h-4" />
                               </span>
                             )}
@@ -1636,7 +1636,7 @@ export default function EventView() {
                               onClick={() => cycleSlotVote(s.id)}
                               className={`w-9 h-9 rounded-xl font-bold text-xs transition-all shadow-sm inline-flex items-center justify-center ${
                                 cur === "YES"
-                                  ? "bg-emerald-500 text-white scale-105"
+                                  ? "bg-green-500 text-white scale-105"
                                   : cur === "MAYBE"
                                   ? "bg-amber-400 text-slate-900 scale-105"
                                   : "bg-white border border-slate-300 hover:border-blue-500 text-slate-400"
@@ -1693,7 +1693,7 @@ export default function EventView() {
               <div className="p-5 sm:p-6 bg-[#fafafc] border-t border-slate-200/80 flex flex-col sm:flex-row items-center justify-between gap-4">
                 <div className="flex items-center gap-4 text-xs text-slate-500">
                   <span className="flex items-center gap-1.5">
-                    <span className="w-4 h-4 rounded-lg bg-emerald-500 text-white inline-flex items-center justify-center"><Check className="w-3 h-3" /></span>
+                    <span className="w-4 h-4 rounded-lg bg-green-500 text-white inline-flex items-center justify-center"><Check className="w-3 h-3" /></span>
                     <span>Available</span>
                   </span>
                   <span className="flex items-center gap-1.5">

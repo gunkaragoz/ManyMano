@@ -35,10 +35,10 @@ export default function CreateChooser() {
         {/* Card 2: Meeting Poll */}
         <Link
           to="/create/poll"
-          className="group bg-white border border-slate-200/80 rounded-3xl p-8 shadow-[0_2px_12px_rgba(0,0,0,0.03)] hover:shadow-[0_8px_24px_rgba(0,0,0,0.06)] hover:border-emerald-300 transition-all flex flex-col justify-between space-y-6"
+          className="group bg-white border border-slate-200/80 rounded-3xl p-8 shadow-[0_2px_12px_rgba(0,0,0,0.03)] hover:shadow-[0_8px_24px_rgba(0,0,0,0.06)] hover:border-green-300 transition-all flex flex-col justify-between space-y-6"
         >
           <div className="space-y-3">
-            <div className="w-12 h-12 rounded-2xl bg-emerald-50 text-emerald-600 flex items-center justify-center border border-emerald-100 group-hover:scale-105 transition-transform">
+            <div className="w-12 h-12 rounded-2xl bg-green-50 text-green-600 flex items-center justify-center border border-green-100 group-hover:scale-105 transition-transform">
               <CalendarDays className="w-6 h-6" />
             </div>
             <h2 className="text-xl font-bold text-slate-900">Meeting Time Finder</h2>
@@ -46,7 +46,7 @@ export default function CreateChooser() {
               Propose candidate time slots on a clean consensus grid and let everyone vote.
             </p>
           </div>
-          <span className="text-xs font-bold text-emerald-600 flex items-center gap-1">
+          <span className="text-xs font-bold text-green-600 flex items-center gap-1">
             <span>Create Poll</span>
             <ArrowRight className="w-3.5 h-3.5" />
           </span>
