@@ -24,13 +24,13 @@ export async function action({ request, context }: ActionFunctionArgs) {
 
   // Validation
   if (!title) {
-    return json({ error: "Event title is required." }, { status: 400 });
+    return json({ error: "Please enter an event title." }, { status: 400 });
   }
   if (!organizerName) {
-    return json({ error: "Organizer name is required." }, { status: 400 });
+    return json({ error: "Please enter your organizer name." }, { status: 400 });
   }
   if (!organizerEmail || !organizerEmail.includes("@")) {
-    return json({ error: "A valid organizer email is required to receive the secret management link." }, { status: 400 });
+    return json({ error: "A valid email is required to send your secret management link." }, { status: 400 });
   }
 
   // Parse slots
@@ -91,22 +91,22 @@ export async function action({ request, context }: ActionFunctionArgs) {
   const adminUrl = `${url.origin}/events/${eventId}?admin=${adminToken}`;
   const publicUrl = `${url.origin}/events/${eventId}`;
 
-  // Send email to organizer
+  // Send email to organizer (if Resend configured)
   await sendEmail({
     apiKey: env.RESEND_API_KEY,
     to: organizerEmail,
     subject: `Your ManyMano event: "${title}" is ready!`,
     html: `
-      <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
-        <h2>Your event "${title}" is live!</h2>
+      <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto; padding: 24px; color: #1e293b;">
+        <h2 style="font-size: 22px; font-weight: 700; color: #0f172a; margin-top: 0;">Your event "${title}" is ready! 🎉</h2>
         <p>Hi ${organizerName},</p>
         <p>Your event has been created. Here are your links:</p>
-        <div style="background: #f1f5f9; padding: 15px; border-radius: 8px; margin: 20px 0;">
-          <p><strong>Public Link for Participants:</strong><br><a href="${publicUrl}">${publicUrl}</a></p>
-          <p><strong>Secret Admin Link (Keep Private!):</strong><br><a href="${adminUrl}">${adminUrl}</a></p>
+        <div style="background: #f8fafc; border: 1px solid #e2e8f0; padding: 18px; border-radius: 12px; margin: 20px 0;">
+          <p style="margin: 0 0 12px 0;"><strong>Public Link for Attendees:</strong><br><a href="${publicUrl}" style="color: #2563eb;">${publicUrl}</a></p>
+          <p style="margin: 0;"><strong>Secret Management Link (Keep Private!):</strong><br><a href="${adminUrl}" style="color: #2563eb;">${adminUrl}</a></p>
         </div>
-        <p>You can use the secret admin link anytime to view responses, export CSVs, or finalize times.</p>
-        <p>— The ManyMano Team</p>
+        <p style="font-size: 13px; color: #64748b;">Bookmark your secret management link to view RSVPs, download CSV spreadsheets, and manage your event anytime.</p>
+        <p style="margin-top: 24px; font-weight: 600;">— ManyMano</p>
       </div>
     `,
   });
@@ -122,10 +122,18 @@ export default function CreateEvent() {
   const navigation = useNavigation();
   const isSubmitting = navigation.state === "submitting";
 
-  // Initial slot templates depending on type
-  const [slots, setSlots] = useState<Array<{ id: number; title: string; capacity: number; startTime: string; endTime: string }>>([
-    { id: 1, title: defaultType === "SIGNUP_SHEET" ? "Morning Setup Crew" : "Wed Oct 14 @ 10:00 AM – 11:00 AM", capacity: defaultType === "SIGNUP_SHEET" ? 3 : 99, startTime: "", endTime: "" },
-    { id: 2, title: defaultType === "SIGNUP_SHEET" ? "Afternoon Greeters" : "Thu Oct 15 @ 2:00 PM – 3:00 PM", capacity: defaultType === "SIGNUP_SHEET" ? 2 : 99, startTime: "", endTime: "" },
+  // Initial slots state
+  const [slots, setSlots] = useState<Array<{ id: number; title: string; capacity: number }>>([
+    {
+      id: 1,
+      title: defaultType === "SIGNUP_SHEET" ? "Morning Welcome & Check-in" : "Wednesday, Oct 14 @ 10:00 AM – 11:00 AM",
+      capacity: defaultType === "SIGNUP_SHEET" ? 2 : 999,
+    },
+    {
+      id: 2,
+      title: defaultType === "SIGNUP_SHEET" ? "Snack & Drink Table" : "Thursday, Oct 15 @ 2:00 PM – 3:00 PM",
+      capacity: defaultType === "SIGNUP_SHEET" ? 3 : 999,
+    },
   ]);
 
   const addSlot = () => {
@@ -134,9 +142,7 @@ export default function CreateEvent() {
       {
         id: Date.now(),
         title: "",
-        capacity: eventType === "SIGNUP_SHEET" ? 1 : 99,
-        startTime: "",
-        endTime: "",
+        capacity: eventType === "SIGNUP_SHEET" ? 1 : 999,
       },
     ]);
   };
@@ -147,30 +153,34 @@ export default function CreateEvent() {
   };
 
   return (
-    <div className="max-w-3xl mx-auto space-y-8">
-      <div>
-        <h1 className="text-3xl font-bold tracking-tight text-slate-900">Create a New Event</h1>
-        <p className="text-sm text-slate-600 mt-1">
-          Completely free. No account or password needed. You will receive an instant secret link to manage your event.
+    <div className="max-w-2xl mx-auto space-y-10 py-4">
+      {/* Header */}
+      <div className="space-y-2">
+        <h1 className="text-3xl font-extrabold text-slate-900 tracking-tight">Create a New Event</h1>
+        <p className="text-sm text-slate-500">
+          Takes less than a minute. No password or registration required.
         </p>
       </div>
 
       {actionData?.error && (
-        <div className="p-4 rounded-xl bg-rose-50 border border-rose-200 text-rose-700 text-sm font-medium">
-          ⚠️ {actionData.error}
+        <div className="p-4 rounded-2xl bg-rose-50 border border-rose-200/80 text-rose-800 text-sm font-medium flex items-center gap-2">
+          <span>⚠️</span>
+          <span>{actionData.error}</span>
         </div>
       )}
 
-      <Form method="post" className="bg-white border border-slate-200 rounded-2xl p-6 sm:p-8 shadow-sm space-y-6">
-        {/* Type Selection */}
-        <div>
-          <label className="block text-sm font-bold text-slate-900 mb-2">Select Event Type</label>
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+      <Form method="post" className="bg-white border border-slate-200/80 rounded-3xl p-8 sm:p-10 shadow-[0_2px_12px_rgba(0,0,0,0.03)] space-y-10">
+        {/* Step 1: Type Switcher */}
+        <div className="space-y-3">
+          <label className="block text-xs font-bold uppercase tracking-wider text-slate-500">
+            Step 1 • What are you coordinating?
+          </label>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <label
-              className={`cursor-pointer rounded-xl p-4 border-2 transition-all flex flex-col justify-between ${
+              className={`cursor-pointer rounded-2xl p-5 border-2 transition-all flex flex-col justify-between space-y-3 ${
                 eventType === "SIGNUP_SHEET"
-                  ? "border-blue-600 bg-blue-50/50 shadow-sm"
-                  : "border-slate-200 hover:border-slate-300"
+                  ? "border-blue-600 bg-blue-50/40 shadow-sm"
+                  : "border-slate-200 hover:border-slate-300 bg-white"
               }`}
             >
               <input
@@ -178,24 +188,34 @@ export default function CreateEvent() {
                 name="type"
                 value="SIGNUP_SHEET"
                 checked={eventType === "SIGNUP_SHEET"}
-                onChange={() => setEventType("SIGNUP_SHEET")}
+                onChange={() => {
+                  setEventType("SIGNUP_SHEET");
+                  setSlots([
+                    { id: 1, title: "Morning Welcome & Check-in", capacity: 2 },
+                    { id: 2, title: "Snack & Drink Table", capacity: 3 },
+                  ]);
+                }}
                 className="sr-only"
               />
+              <div className="flex items-center justify-between">
+                <span className="text-2xl">📋</span>
+                {eventType === "SIGNUP_SHEET" && (
+                  <span className="w-5 h-5 rounded-full bg-blue-600 text-white flex items-center justify-center text-xs font-bold">✓</span>
+                )}
+              </div>
               <div className="space-y-1">
-                <div className="flex items-center gap-2 font-bold text-slate-900">
-                  <span>📋 Volunteer Sign-Up Sheet</span>
-                </div>
-                <p className="text-xs text-slate-500">
-                  Like SignUpGenius. Define tasks, roles, or potluck items with specific slot limits and sign-up requirements.
+                <div className="font-bold text-slate-900 text-base">Volunteer Sign-Up Sheet</div>
+                <p className="text-xs text-slate-500 leading-relaxed">
+                  Roles, shifts, food items, or equipment with specific slot limits.
                 </p>
               </div>
             </label>
 
             <label
-              className={`cursor-pointer rounded-xl p-4 border-2 transition-all flex flex-col justify-between ${
+              className={`cursor-pointer rounded-2xl p-5 border-2 transition-all flex flex-col justify-between space-y-3 ${
                 eventType === "TIME_POLL"
-                  ? "border-blue-600 bg-blue-50/50 shadow-sm"
-                  : "border-slate-200 hover:border-slate-300"
+                  ? "border-blue-600 bg-blue-50/40 shadow-sm"
+                  : "border-slate-200 hover:border-slate-300 bg-white"
               }`}
             >
               <input
@@ -203,110 +223,132 @@ export default function CreateEvent() {
                 name="type"
                 value="TIME_POLL"
                 checked={eventType === "TIME_POLL"}
-                onChange={() => setEventType("TIME_POLL")}
+                onChange={() => {
+                  setEventType("TIME_POLL");
+                  setSlots([
+                    { id: 1, title: "Wednesday, Oct 14 @ 10:00 AM – 11:00 AM", capacity: 999 },
+                    { id: 2, title: "Thursday, Oct 15 @ 2:00 PM – 3:00 PM", capacity: 999 },
+                  ]);
+                }}
                 className="sr-only"
               />
+              <div className="flex items-center justify-between">
+                <span className="text-2xl">📅</span>
+                {eventType === "TIME_POLL" && (
+                  <span className="w-5 h-5 rounded-full bg-blue-600 text-white flex items-center justify-center text-xs font-bold">✓</span>
+                )}
+              </div>
               <div className="space-y-1">
-                <div className="flex items-center gap-2 font-bold text-slate-900">
-                  <span>📅 Meeting Time Finder</span>
-                </div>
-                <p className="text-xs text-slate-500">
-                  Like original Doodle. Propose candidate dates & times to find when attendees are available.
+                <div className="font-bold text-slate-900 text-base">Meeting Time Finder</div>
+                <p className="text-xs text-slate-500 leading-relaxed">
+                  Classic Doodle availability matrix to vote on dates & times.
                 </p>
               </div>
             </label>
           </div>
         </div>
 
-        {/* General Details */}
-        <div className="space-y-4 pt-2 border-t border-slate-100">
-          <div>
-            <label className="block text-xs font-bold uppercase tracking-wider text-slate-700 mb-1">
-              Event Title *
-            </label>
-            <input
-              type="text"
-              name="title"
-              required
-              placeholder={eventType === "SIGNUP_SHEET" ? "e.g., Saturday Park Cleanup" : "e.g., Q4 Roadmap Planning Session"}
-              className="w-full px-3.5 py-2.5 rounded-lg border border-slate-300 focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
-            />
-          </div>
+        {/* Step 2: Event Details */}
+        <div className="space-y-5 pt-2 border-t border-slate-100">
+          <label className="block text-xs font-bold uppercase tracking-wider text-slate-500">
+            Step 2 • Event Details
+          </label>
 
-          <div>
-            <label className="block text-xs font-bold uppercase tracking-wider text-slate-700 mb-1">
-              Description / Notes (Optional)
-            </label>
-            <textarea
-              name="description"
-              rows={3}
-              placeholder="Add details, instructions, parking info, or meeting agenda..."
-              className="w-full px-3.5 py-2.5 rounded-lg border border-slate-300 focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
-            />
-          </div>
-
-          <div>
-            <label className="block text-xs font-bold uppercase tracking-wider text-slate-700 mb-1">
-              Location / Video Link (Optional)
-            </label>
-            <input
-              type="text"
-              name="location"
-              placeholder="e.g. 123 Community Center or https://meet.google.com/xyz"
-              className="w-full px-3.5 py-2.5 rounded-lg border border-slate-300 focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
-            />
-          </div>
-
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <div className="space-y-4">
             <div>
-              <label className="block text-xs font-bold uppercase tracking-wider text-slate-700 mb-1">
-                Organizer Name *
+              <label className="block text-xs font-semibold text-slate-700 mb-1.5">
+                Event Title *
               </label>
               <input
                 type="text"
-                name="organizerName"
+                name="title"
                 required
-                placeholder="Jane Smith"
-                className="w-full px-3.5 py-2.5 rounded-lg border border-slate-300 focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
+                placeholder={
+                  eventType === "SIGNUP_SHEET"
+                    ? "e.g., Spring Community Garden Cleanup"
+                    : "e.g., Product Roadmap Kickoff"
+                }
+                className="w-full px-4 py-3 rounded-xl border border-slate-200/90 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all placeholder:text-slate-400"
               />
             </div>
+
             <div>
-              <label className="block text-xs font-bold uppercase tracking-wider text-slate-700 mb-1">
-                Organizer Email *
+              <label className="block text-xs font-semibold text-slate-700 mb-1.5">
+                Description / Notes (Optional)
+              </label>
+              <textarea
+                name="description"
+                rows={3}
+                placeholder="Share any background details, what to bring, or meeting agendas..."
+                className="w-full px-4 py-3 rounded-xl border border-slate-200/90 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all placeholder:text-slate-400 leading-relaxed"
+              />
+            </div>
+
+            <div>
+              <label className="block text-xs font-semibold text-slate-700 mb-1.5">
+                Location or Link (Optional)
               </label>
               <input
-                type="email"
-                name="organizerEmail"
-                required
-                placeholder="jane@example.com"
-                className="w-full px-3.5 py-2.5 rounded-lg border border-slate-300 focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
+                type="text"
+                name="location"
+                placeholder="e.g., Park North Gate or https://meet.google.com/abc-defg"
+                className="w-full px-4 py-3 rounded-xl border border-slate-200/90 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all placeholder:text-slate-400"
               />
-              <span className="text-[11px] text-slate-500 mt-0.5 block">
-                Your secret organizer management link will be sent here.
-              </span>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-1">
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 mb-1.5">
+                  Your Name *
+                </label>
+                <input
+                  type="text"
+                  name="organizerName"
+                  required
+                  placeholder="e.g., Sarah Chen"
+                  className="w-full px-4 py-3 rounded-xl border border-slate-200/90 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all placeholder:text-slate-400"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 mb-1.5">
+                  Your Email *
+                </label>
+                <input
+                  type="email"
+                  name="organizerEmail"
+                  required
+                  placeholder="sarah@example.com"
+                  className="w-full px-4 py-3 rounded-xl border border-slate-200/90 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all placeholder:text-slate-400"
+                />
+                <span className="text-[11px] text-slate-500 mt-1 block">
+                  We'll email your secret link to manage this event anytime.
+                </span>
+              </div>
             </div>
           </div>
         </div>
 
-        {/* Dynamic Slots / Options */}
-        <div className="space-y-3 pt-4 border-t border-slate-100">
+        {/* Step 3: Slots / Options */}
+        <div className="space-y-4 pt-2 border-t border-slate-100">
           <div className="flex items-center justify-between">
             <div>
-              <label className="block text-xs font-bold uppercase tracking-wider text-slate-700">
-                {eventType === "SIGNUP_SHEET" ? "Slots & Items" : "Candidate Meeting Options"} *
+              <label className="block text-xs font-bold uppercase tracking-wider text-slate-500">
+                Step 3 • {eventType === "SIGNUP_SHEET" ? "Slots & Items" : "Proposed Meeting Times"}
               </label>
-              <p className="text-xs text-slate-500">
+              <p className="text-xs text-slate-500 mt-0.5">
                 {eventType === "SIGNUP_SHEET"
-                  ? "Define volunteer roles, shifts, or items needed with participant capacity."
-                  : "List candidate dates & times for participants to vote on."}
+                  ? "Set role or item names and how many people can sign up for each."
+                  : "List the candidate date & time options for attendees to vote on."}
               </p>
             </div>
+
             <button
               type="button"
               onClick={addSlot}
-              className="px-3 py-1.5 text-xs font-semibold rounded-lg border border-blue-200 text-blue-700 bg-blue-50 hover:bg-blue-100 transition-colors"
+              className="px-3 py-1.5 text-xs font-semibold rounded-xl border border-slate-200 hover:border-blue-400 hover:text-blue-600 bg-white transition-all shadow-sm flex items-center gap-1 shrink-0"
             >
-              + Add Option
+              <span>+ Add Option</span>
             </button>
           </div>
 
@@ -314,41 +356,39 @@ export default function CreateEvent() {
             {slots.map((slot, index) => (
               <div
                 key={slot.id}
-                className="flex items-center gap-3 p-3 bg-slate-50 rounded-xl border border-slate-200"
+                className="flex items-center gap-3 p-3 sm:p-3.5 bg-slate-50/70 rounded-2xl border border-slate-200/80 transition-all hover:bg-slate-50"
               >
-                <div className="text-xs font-bold text-slate-400 w-5 text-center">
+                <span className="text-xs font-bold text-slate-400 w-5 text-center shrink-0">
                   {index + 1}.
-                </div>
+                </span>
 
-                <div className="flex-1 grid grid-cols-1 sm:grid-cols-3 gap-2">
-                  <div className={eventType === "SIGNUP_SHEET" ? "sm:col-span-2" : "sm:col-span-3"}>
+                <div className="flex-1 grid grid-cols-1 sm:grid-cols-4 gap-2.5">
+                  <div className={eventType === "SIGNUP_SHEET" ? "sm:col-span-3" : "sm:col-span-4"}>
                     <input
                       type="text"
                       name="slotTitle"
                       required
                       placeholder={
                         eventType === "SIGNUP_SHEET"
-                          ? "Role or item (e.g., Morning Shift or Watermelon)"
-                          : "Date & Time (e.g., Friday Oct 16 @ 1:00 PM - 2:00 PM)"
+                          ? "Role or item (e.g. Afternoon Clean Up Crew)"
+                          : "Option (e.g. Friday Oct 16 @ 1:00 PM – 2:00 PM)"
                       }
                       defaultValue={slot.title}
-                      className="w-full px-3 py-2 text-xs rounded-lg border border-slate-300 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      className="w-full px-3.5 py-2.5 text-xs sm:text-sm rounded-xl border border-slate-200 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500"
                     />
                   </div>
 
                   {eventType === "SIGNUP_SHEET" && (
-                    <div>
-                      <div className="flex items-center gap-1.5">
-                        <span className="text-xs text-slate-500 whitespace-nowrap">Cap:</span>
-                        <input
-                          type="number"
-                          name="slotCapacity"
-                          min="1"
-                          max="999"
-                          defaultValue={slot.capacity}
-                          className="w-full px-2.5 py-2 text-xs rounded-lg border border-slate-300 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
-                        />
-                      </div>
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs text-slate-500 whitespace-nowrap">Spots:</span>
+                      <input
+                        type="number"
+                        name="slotCapacity"
+                        min="1"
+                        max="999"
+                        defaultValue={slot.capacity}
+                        className="w-full px-3 py-2.5 text-xs sm:text-sm rounded-xl border border-slate-200 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500"
+                      />
                     </div>
                   )}
                   {eventType === "TIME_POLL" && (
@@ -360,7 +400,7 @@ export default function CreateEvent() {
                   type="button"
                   onClick={() => removeSlot(slot.id)}
                   disabled={slots.length <= 1}
-                  className="text-slate-400 hover:text-rose-500 font-bold px-2 py-1 disabled:opacity-30 transition-colors"
+                  className="text-slate-400 hover:text-rose-500 font-bold px-2 py-1 disabled:opacity-20 transition-colors"
                 >
                   ✕
                 </button>
@@ -369,12 +409,12 @@ export default function CreateEvent() {
           </div>
         </div>
 
-        {/* Submit Button */}
-        <div className="pt-4 border-t border-slate-100 flex items-center justify-end gap-3">
+        {/* Submit */}
+        <div className="pt-4 border-t border-slate-100 flex items-center justify-end">
           <button
             type="submit"
             disabled={isSubmitting}
-            className="px-6 py-3 rounded-xl bg-blue-600 text-white font-bold text-sm hover:bg-blue-700 shadow-md transition-all disabled:opacity-50 flex items-center gap-2"
+            className="w-full sm:w-auto px-8 py-4 rounded-2xl bg-blue-600 hover:bg-blue-700 text-white font-bold text-sm shadow-sm transition-all hover:scale-[1.01] active:scale-[0.99] disabled:opacity-50 flex items-center justify-center gap-2"
           >
             {isSubmitting ? (
               <>
@@ -382,7 +422,7 @@ export default function CreateEvent() {
                 <span>Creating Event...</span>
               </>
             ) : (
-              <span>Create Event & Generate Links →</span>
+              <span>Create Event & Get Links →</span>
             )}
           </button>
         </div>
