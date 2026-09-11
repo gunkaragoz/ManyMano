@@ -10,6 +10,8 @@ export default function Index() {
           <span>Zero accounts needed</span>
           <span className="text-slate-300">•</span>
           <span>No ads or tracking</span>
+          <span className="text-slate-300">•</span>
+          <span>Auto-deletes after 90 days</span>
         </div>
 
         <h1 className="text-4xl sm:text-5xl font-extrabold tracking-tight text-slate-900 leading-[1.15]">
@@ -41,15 +43,15 @@ export default function Index() {
 
             <ul className="space-y-2.5 text-xs text-slate-600 pt-2">
               <li className="flex items-center gap-2.5">
-                <span className="w-4 h-4 rounded-full bg-emerald-100 text-emerald-700 flex items-center justify-center"><Check className="w-3 h-3" /></span>
+                <span className="w-4 h-4 rounded-full bg-blue-100 text-blue-700 flex items-center justify-center"><Check className="w-3 h-3" /></span>
                 <span>Automatic slot limits & real-time spots remaining</span>
               </li>
               <li className="flex items-center gap-2.5">
-                <span className="w-4 h-4 rounded-full bg-emerald-100 text-emerald-700 flex items-center justify-center"><Check className="w-3 h-3" /></span>
+                <span className="w-4 h-4 rounded-full bg-blue-100 text-blue-700 flex items-center justify-center"><Check className="w-3 h-3" /></span>
                 <span>Custom attendee questions (equipment, notes, sizes)</span>
               </li>
               <li className="flex items-center gap-2.5">
-                <span className="w-4 h-4 rounded-full bg-emerald-100 text-emerald-700 flex items-center justify-center"><Check className="w-3 h-3" /></span>
+                <span className="w-4 h-4 rounded-full bg-blue-100 text-blue-700 flex items-center justify-center"><Check className="w-3 h-3" /></span>
                 <span>Secret organizer link with 1-click CSV roster export</span>
               </li>
             </ul>
@@ -95,7 +97,7 @@ export default function Index() {
 
           <Link
             to="/create/poll"
-            className="w-full text-center py-3.5 px-5 rounded-2xl bg-slate-900 text-white font-semibold text-sm hover:bg-slate-800 shadow-sm transition-all hover:scale-[1.01] active:scale-[0.99] inline-flex items-center justify-center gap-2"
+            className="w-full text-center py-3.5 px-5 rounded-2xl bg-emerald-600 text-white font-semibold text-sm hover:bg-emerald-700 shadow-sm transition-all hover:scale-[1.01] active:scale-[0.99] inline-flex items-center justify-center gap-2"
           >
             Create Meeting Poll <ArrowRight className="w-4 h-4" />
           </Link>
@@ -110,8 +112,8 @@ export default function Index() {
             <p className="text-xs text-slate-500">Every event gets a public link to share and a secret link to manage.</p>
           </div>
           <div className="space-y-1.5 p-4">
-            <div className="text-sm font-bold text-slate-900">2. Privacy First</div>
-            <p className="text-xs text-slate-500">No passwords, no data selling, no advertising trackers.</p>
+            <div className="text-sm font-bold text-slate-900">2. Easy & Throwaway</div>
+            <p className="text-xs text-slate-500">No passwords or accounts. Create, share, forget — events auto-delete after 90 days.</p>
           </div>
           <div className="space-y-1.5 p-4">
             <div className="text-sm font-bold text-slate-900">3. Free & Open Source</div>

@@ -14,7 +14,8 @@ export async function sendEmail({
   html,
 }: SendEmailParams): Promise<{ success: boolean; error?: string }> {
   if (!apiKey) {
-    console.log(`[Email Mock (No RESEND_API_KEY configured)] To: ${to}, Subject: "${subject}"`);
+    // Intentionally omit recipient/subject: server logs are not the place for PII.
+    console.log(`[Email disabled] Skipped outbound email (no RESEND_API_KEY).`);
     return { success: true };
   }
 
@@ -34,14 +35,14 @@ export async function sendEmail({
     });
 
     if (!res.ok) {
-      const errBody = await res.text();
-      console.error("Resend API error:", errBody);
-      return { success: false, error: errBody };
+      // Do not log recipient PII or full provider body; keep a status-only line.
+      console.error(`Resend API error: status ${res.status}`);
+      return { success: false, error: `Email provider error (${res.status})` };
     }
 
     return { success: true };
   } catch (err: any) {
-    console.error("Failed to send email:", err);
-    return { success: false, error: err?.message || String(err) };
+    console.error("Failed to send email.");
+    return { success: false, error: "Email send failed" };
   }
 }

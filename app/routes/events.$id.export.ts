@@ -1,6 +1,8 @@
 import type { LoaderFunctionArgs } from "@remix-run/cloudflare";
 import { eq, and } from "drizzle-orm";
 import { getDb, events, eventSlots, signups, pollVotes, pollVoteEntries } from "~/db";
+import { getPresentedAdminToken, secretMatches, checkAdminRateLimit } from "~/utils/auth";
+import { isExpired, pruneExpiredEvents } from "~/utils/retention";
 
 export async function loader({ params, request, context }: LoaderFunctionArgs) {
   const env = context.cloudflare.env as { DB: D1Database };
@@ -11,9 +13,29 @@ export async function loader({ params, request, context }: LoaderFunctionArgs) {
     throw new Response("Event not found", { status: 404 });
   }
 
+  try {
+    await pruneExpiredEvents(db);
+  } catch {}
+
   const [event] = await db.select().from(events).where(eq(events.id, eventId)).limit(1);
   if (!event) {
     throw new Response("Event not found", { status: 404 });
+  }
+  if (isExpired(event.createdAt)) {
+    throw new Response("This event expired and was auto-deleted.", { status: 410 });
+  }
+
+  // CSV contains emails/notes — organizer only.
+  const presented = getPresentedAdminToken(request, eventId);
+  const clientIp = request.headers.get("cf-connecting-ip") || "unknown";
+  const allowed =
+    presented &&
+    checkAdminRateLimit(`export:${clientIp}:${eventId}`) &&
+    (await secretMatches(presented, event.adminToken));
+  if (!allowed) {
+    throw new Response("Unauthorized. This roster export requires the organizer link.", {
+      status: 403,
+    });
   }
 
   const slots = await db
@@ -90,6 +112,8 @@ export async function loader({ params, request, context }: LoaderFunctionArgs) {
     headers: {
       "Content-Type": "text/csv; charset=utf-8",
       "Content-Disposition": `attachment; filename="${event.title.replace(/[^a-zA-Z0-9_-]/g, "_")}_roster.csv"`,
+      "Cache-Control": "private, no-store",
+      "Referrer-Policy": "no-referrer",
     },
   });
 }

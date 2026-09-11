@@ -21,7 +21,7 @@ export const meta: MetaFunction = () => [
   {
     name: "description",
     content:
-      "A free, privacy-first open-source tool for volunteer sign-ups and meeting polls. No ads, no bloat.",
+      "A free, easy-to-use open-source tool for throwaway volunteer sign-ups and meeting polls. No accounts, auto-deletes after 90 days.",
   },
 ];
 
@@ -80,7 +80,7 @@ export default function App() {
             <div className="flex items-center gap-2">
               <span className="font-semibold text-slate-700">ManyMano</span>
               <span>—</span>
-              <span>Free, privacy-first community coordination. No ads, no paywalls.</span>
+              <span>Free, easy throwaway coordination. No accounts, auto-deletes after 90 days.</span>
             </div>
             <div className="flex items-center gap-5 text-slate-400">
               <a

@@ -12,6 +12,9 @@ import {
   generateUniquePublicId,
 } from "~/utils/ids";
 import { sendEmail } from "~/utils/email";
+import { escapeHtml } from "~/utils/sanitize";
+import { buildAdminCookie, hashSecretForStorage } from "~/utils/auth";
+import { pruneExpiredEvents } from "~/utils/retention";
 
 export async function loader({ request }: LoaderFunctionArgs) {
   return json({});
@@ -20,6 +23,9 @@ export async function loader({ request }: LoaderFunctionArgs) {
 export async function action({ request, context }: ActionFunctionArgs) {
   const env = context.cloudflare.env as { DB: D1Database; RESEND_API_KEY?: string };
   const db = getDb(env.DB);
+  try {
+    await pruneExpiredEvents(db);
+  } catch {}
   const formData = await request.formData();
 
   const title = (formData.get("title") as string)?.trim();
@@ -83,6 +89,7 @@ export async function action({ request, context }: ActionFunctionArgs) {
     return existing.length > 0;
   });
   const adminToken = generateSecretToken();
+  const adminTokenStored = await hashSecretForStorage(adminToken);
   const now = new Date().toISOString();
 
   // Insert into D1
@@ -95,7 +102,7 @@ export async function action({ request, context }: ActionFunctionArgs) {
     location,
     organizerName,
     organizerEmail,
-    adminToken,
+    adminToken: adminTokenStored,
     status: "OPEN",
     settings: JSON.stringify({}),
     timezone,
@@ -126,21 +133,23 @@ export async function action({ request, context }: ActionFunctionArgs) {
     subject: `Your volunteer sheet: "${title}" is ready!`,
     html: `
       <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto; padding: 24px; color: #1e293b;">
-        <h2 style="font-size: 22px; font-weight: 700; color: #0f172a; margin-top: 0;">Your sign-up sheet "${title}" is ready!</h2>
-        <p>Hi ${organizerName},</p>
+        <h2 style="font-size: 22px; font-weight: 700; color: #0f172a; margin-top: 0;">Your sign-up sheet "${escapeHtml(title)}" is ready!</h2>
+        <p>Hi ${escapeHtml(organizerName)},</p>
         <p>Here are your links:</p>
         <div style="background: #f8fafc; border: 1px solid #e2e8f0; padding: 18px; border-radius: 12px; margin: 20px 0;">
-          <p style="margin: 0 0 12px 0;"><strong>Public Link for Volunteers:</strong><br><a href="${publicUrl}" style="color: #2563eb;">${publicUrl}</a></p>
-          <p style="margin: 0;"><strong>Secret Management Link (Keep Private!):</strong><br><a href="${adminUrl}" style="color: #2563eb;">${adminUrl}</a></p>
+          <p style="margin: 0 0 12px 0;"><strong>Public Link for Volunteers:</strong><br><a href="${escapeHtml(publicUrl)}" style="color: #2563eb;">${escapeHtml(publicUrl)}</a></p>
+          <p style="margin: 0;"><strong>Secret Management Link (Keep Private!):</strong><br><a href="${escapeHtml(adminUrl)}" style="color: #2563eb;">${escapeHtml(adminUrl)}</a></p>
         </div>
-        ${eventDate ? `<p><strong>Date:</strong> ${eventDate}</p>` : ""}
-        <p style="font-size: 13px; color: #64748b;">Use the secret management link to view RSVPs, download CSV spreadsheets, and manage volunteers.</p>
+        ${eventDate ? `<p><strong>Date:</strong> ${escapeHtml(eventDate)}</p>` : ""}
+        <p style="font-size: 13px; color: #64748b;">Use the secret management link to view RSVPs, download CSV spreadsheets, and manage volunteers. Throwaway event: auto-deletes 90 days after creation — delete it anytime from Organizer Admin Mode.</p>
         <p style="margin-top: 24px; font-weight: 600;">— ManyMano</p>
       </div>
     `,
   });
 
-  return redirect(`/events/${eventId}?admin=${adminToken}&created=1`);
+  const headers = new Headers();
+  headers.append("Set-Cookie", buildAdminCookie(eventId, adminToken));
+  return redirect(`/events/${eventId}?admin=${adminToken}&created=1`, { headers });
 }
 
 type SignupDetails = {
