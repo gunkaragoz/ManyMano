@@ -274,7 +274,145 @@ export async function action({ request, params, context }: ActionFunctionArgs) {
     return json({ success: true, message: "Meeting has been officially locked and finalized!" });
   }
 
+  const requireAdmin = (token: string | null) => {
+    return Boolean(token && token === event.adminToken);
+  };
+
+  // 5. Update Event Details (admin only)
+  if (intent === "update_event") {
+    const adminToken = formData.get("adminToken") as string;
+    if (!requireAdmin(adminToken)) {
+      return json({ error: "Unauthorized." }, { status: 403 });
+    }
+
+    const title = (formData.get("title") as string)?.trim();
+    const description = (formData.get("description") as string)?.trim() || null;
+    const eventDate = (formData.get("eventDate") as string)?.trim() || null;
+    const location = (formData.get("location") as string)?.trim() || null;
+    const organizerName = (formData.get("organizerName") as string)?.trim();
+
+    if (!title) {
+      return json({ error: "Event title is required." }, { status: 400 });
+    }
+    if (!organizerName) {
+      return json({ error: "Organizer name is required." }, { status: 400 });
+    }
+
+    await db
+      .update(events)
+      .set({ title, description, eventDate, location, organizerName, updatedAt: now })
+      .where(eq(events.id, eventId));
+
+    return json({ success: true, message: "Event details updated." });
+  }
+
+  // 6. Add Slot (admin only)
+  if (intent === "add_slot") {
+    const adminToken = formData.get("adminToken") as string;
+    if (!requireAdmin(adminToken)) {
+      return json({ error: "Unauthorized." }, { status: 403 });
+    }
+
+    const title = (formData.get("slotTitle") as string)?.trim();
+    const startTime = (formData.get("slotStartTime") as string)?.trim() || null;
+    const endTime = (formData.get("slotEndTime") as string)?.trim() || null;
+    const capacityRaw = (formData.get("slotCapacity") as string)?.trim() || "1";
+    if (!title && !startTime) {
+      return json({ error: "Give the new option a title or time." }, { status: 400 });
+    }
+
+    const existingSlots = await db.select().from(eventSlots).where(eq(eventSlots.eventId, eventId));
+    const maxOrder = existingSlots.reduce((m, s) => Math.max(m, s.displayOrder ?? 0), -1);
+
+    await db.insert(eventSlots).values({
+      id: crypto.randomUUID(),
+      eventId,
+      title: title || (endTime ? `${startTime} – ${endTime}` : (startTime as string)),
+      capacity: event.type === "SIGNUP_SHEET" ? parseInt(capacityRaw, 10) || 1 : 999,
+      startTime,
+      endTime,
+      displayOrder: maxOrder + 1,
+    });
+
+    return json({ success: true, message: "New option added." });
+  }
+
+  // 7. Update Slot (admin only)
+  if (intent === "update_slot") {
+    const adminToken = formData.get("adminToken") as string;
+    if (!requireAdmin(adminToken)) {
+      return json({ error: "Unauthorized." }, { status: 403 });
+    }
+
+    const slotId = formData.get("slotId") as string;
+    const title = (formData.get("slotTitle") as string)?.trim();
+    const startTime = (formData.get("slotStartTime") as string)?.trim() || null;
+    const endTime = (formData.get("slotEndTime") as string)?.trim() || null;
+    const capacityRaw = (formData.get("slotCapacity") as string)?.trim();
+
+    const [target] = await db.select().from(eventSlots).where(eq(eventSlots.id, slotId)).limit(1);
+    if (!target || target.eventId !== eventId) {
+      return json({ error: "Slot not found." }, { status: 404 });
+    }
+    if (!title) {
+      return json({ error: "Slot title is required." }, { status: 400 });
+    }
+
+    await db
+      .update(eventSlots)
+      .set({
+        title,
+        startTime,
+        endTime,
+        ...(event.type === "SIGNUP_SHEET" && capacityRaw
+          ? { capacity: parseInt(capacityRaw, 10) || target.capacity }
+          : {}),
+      })
+      .where(eq(eventSlots.id, slotId));
+
+    return json({ success: true, message: "Option updated." });
+  }
+
+  // 8. Delete Slot (admin only, cascades signups/votes for that slot)
+  if (intent === "delete_slot") {
+    const adminToken = formData.get("adminToken") as string;
+    if (!requireAdmin(adminToken)) {
+      return json({ error: "Unauthorized." }, { status: 403 });
+    }
+
+    const slotId = formData.get("slotId") as string;
+    const [target] = await db.select().from(eventSlots).where(eq(eventSlots.id, slotId)).limit(1);
+    if (!target || target.eventId !== eventId) {
+      return json({ error: "Slot not found." }, { status: 404 });
+    }
+
+    // Remove dependent rows first (D1/cascade safety)
+    await db.delete(signups).where(eq(signups.slotId, slotId));
+    await db.delete(pollVoteEntries).where(eq(pollVoteEntries.slotId, slotId));
+    await db.delete(eventSlots).where(eq(eventSlots.id, slotId));
+
+    if (event.winningSlotId === slotId) {
+      await db
+        .update(events)
+        .set({ winningSlotId: null, status: "OPEN", updatedAt: now })
+        .where(eq(events.id, eventId));
+    }
+
+    return json({ success: true, message: "Option deleted." });
+  }
+
   return json({ error: "Unknown intent" }, { status: 400 });
+}
+
+function formatTime(t: string | null | undefined): string {
+  if (!t) return "";
+  const m = t.match(/^(\d{1,2}):(\d{2})/);
+  if (!m) return t;
+  let h = parseInt(m[1], 10);
+  const min = m[2];
+  const ampm = h >= 12 ? "PM" : "AM";
+  h = h % 12 || 12;
+  return `${h}:${min} ${ampm}`;
 }
 
 export default function EventView() {
@@ -287,6 +425,7 @@ export default function EventView() {
   const justCreated = Boolean(searchParams.get("created"));
   const [selectedSlotForSignup, setSelectedSlotForSignup] = useState<{ id: string; title: string } | null>(null);
   const [copiedLink, setCopiedLink] = useState<string | null>(null);
+  const [showEdit, setShowEdit] = useState(false);
 
   // Active poll vote states for interactive row: Record<slotId, 'NO' | 'YES' | 'MAYBE'>
   const [userVotes, setUserVotes] = useState<Record<string, "NO" | "YES" | "MAYBE">>({});
@@ -304,11 +443,33 @@ export default function EventView() {
     }));
   };
 
-  const copyToClipboard = (text: string, label: string) => {
-    if (typeof navigator !== "undefined" && navigator.clipboard) {
-      navigator.clipboard.writeText(text);
+  const copyToClipboard = async (text: string, label: string) => {
+    const markCopied = () => {
       setCopiedLink(label);
       setTimeout(() => setCopiedLink(null), 2500);
+    };
+    try {
+      if (typeof navigator !== "undefined" && navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(text);
+        markCopied();
+        return;
+      }
+      throw new Error("clipboard-api-unavailable");
+    } catch (_) {
+      // Fallback for non-secure contexts / denied permissions
+      try {
+        const ta = document.createElement("textarea");
+        ta.value = text;
+        ta.style.position = "fixed";
+        ta.style.opacity = "0";
+        document.body.appendChild(ta);
+        ta.select();
+        document.execCommand("copy");
+        document.body.removeChild(ta);
+        markCopied();
+      } catch (__: unknown) {
+        window.prompt("Copy this link:", text);
+      }
     }
   };
 
@@ -497,6 +658,17 @@ export default function EventView() {
                 <span>Export CSV Roster</span>
               </a>
             )}
+
+            {isAdmin && (
+              <button
+                type="button"
+                onClick={() => setShowEdit((v) => !v)}
+                className="px-4 py-2.5 text-xs font-semibold rounded-xl bg-slate-900 hover:bg-slate-800 text-white transition-all shadow-sm flex items-center justify-center gap-2"
+              >
+                <span>✏️</span>
+                <span>{showEdit ? "Close Editor" : "Edit Event"}</span>
+              </button>
+            )}
           </div>
         </div>
 
@@ -508,11 +680,239 @@ export default function EventView() {
               <span>Organizer Admin Mode Active</span>
             </div>
             <span className="text-xs text-amber-700/90">
-              You are viewing with your private admin token. You can cancel entries and finalize options.
+              You are viewing with your private admin token. You can edit details, manage options, cancel entries and finalize.
             </span>
           </div>
         )}
       </div>
+
+      {/* ===================================================================== */}
+      {/* ADMIN EDIT PANEL                                                      */}
+      {/* ===================================================================== */}
+      {isAdmin && showEdit && (
+        <div className="bg-white border border-slate-200/80 rounded-3xl p-6 sm:p-8 shadow-[0_2px_12px_rgba(0,0,0,0.03)] space-y-8 animate-fade-in">
+          <div className="flex items-center justify-between">
+            <h2 className="text-lg font-bold text-slate-900 tracking-tight">✏️ Edit Event</h2>
+            <button
+              type="button"
+              onClick={() => setShowEdit(false)}
+              className="px-3.5 py-1.5 text-xs font-semibold rounded-xl border border-slate-200 hover:border-slate-300 hover:bg-slate-50 bg-white text-slate-600 transition-all shadow-sm"
+            >
+              Close ✕
+            </button>
+          </div>
+
+          {/* Edit details form */}
+          <Form method="post" className="space-y-4">
+            <input type="hidden" name="intent" value="update_event" />
+            <input type="hidden" name="adminToken" value={adminToken || ""} />
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div className="sm:col-span-2">
+                <label className="block text-xs font-semibold text-slate-700 mb-1.5">Event Title *</label>
+                <input
+                  type="text"
+                  name="title"
+                  required
+                  defaultValue={event.title}
+                  className="w-full px-4 py-3 rounded-xl border border-slate-200/90 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all placeholder:text-slate-400"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 mb-1.5">Date</label>
+                <input
+                  type="date"
+                  name="eventDate"
+                  defaultValue={event.eventDate || ""}
+                  className="w-full px-4 py-3 rounded-xl border border-slate-200/90 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all text-slate-800"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 mb-1.5">Location</label>
+                <input
+                  type="text"
+                  name="location"
+                  defaultValue={event.location || ""}
+                  placeholder="e.g. Central Park, Zoom link…"
+                  className="w-full px-4 py-3 rounded-xl border border-slate-200/90 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all placeholder:text-slate-400"
+                />
+              </div>
+              <div className="sm:col-span-2">
+                <label className="block text-xs font-semibold text-slate-700 mb-1.5">Description</label>
+                <textarea
+                  name="description"
+                  rows={3}
+                  defaultValue={event.description || ""}
+                  className="w-full px-4 py-3 rounded-xl border border-slate-200/90 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all placeholder:text-slate-400 leading-relaxed"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 mb-1.5">Organizer Name *</label>
+                <input
+                  type="text"
+                  name="organizerName"
+                  required
+                  defaultValue={event.organizerName}
+                  className="w-full px-4 py-3 rounded-xl border border-slate-200/90 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all placeholder:text-slate-400"
+                />
+              </div>
+            </div>
+            <button
+              type="submit"
+              disabled={isSubmitting}
+              className="px-6 py-3 rounded-2xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold shadow-sm transition-all hover:scale-[1.02] active:scale-[0.98] disabled:opacity-50"
+            >
+              {isSubmitting ? "Saving…" : "Save Details"}
+            </button>
+          </Form>
+
+          {/* Manage options / slots */}
+          <div className="space-y-4 pt-6 border-t border-slate-100">
+            <h3 className="text-sm font-bold text-slate-900 tracking-tight">
+              {event.type === "SIGNUP_SHEET" ? "Manage Shifts / Roles" : "Manage Time Options"}
+            </h3>
+            <div className="space-y-3.5">
+              {slots.map((s) => (
+                <Form
+                  key={s.id}
+                  method="post"
+                  className="flex flex-col lg:flex-row gap-2.5 items-stretch lg:items-end bg-slate-50/70 border border-slate-200/80 rounded-2xl p-4 transition-all"
+                >
+                  <input type="hidden" name="intent" value="update_slot" />
+                  <input type="hidden" name="adminToken" value={adminToken || ""} />
+                  <input type="hidden" name="slotId" value={s.id} />
+                  <div className="flex-1 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2.5">
+                    <div className="sm:col-span-2 lg:col-span-2">
+                      <label className="block text-[10px] uppercase font-bold text-slate-400 mb-1">Title *</label>
+                      <input
+                        type="text"
+                        name="slotTitle"
+                        required
+                        defaultValue={s.title}
+                        className="w-full px-3 py-2 rounded-xl border border-slate-200 text-xs bg-white focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-[10px] uppercase font-bold text-slate-400 mb-1">Start</label>
+                      <input
+                        type="text"
+                        name="slotStartTime"
+                        defaultValue={s.startTime || ""}
+                        placeholder="9:00 AM"
+                        className="w-full px-3 py-2 rounded-xl border border-slate-200 text-xs bg-white focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all placeholder:text-slate-400"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-[10px] uppercase font-bold text-slate-400 mb-1">End</label>
+                      <input
+                        type="text"
+                        name="slotEndTime"
+                        defaultValue={s.endTime || ""}
+                        placeholder="11:00 AM"
+                        className="w-full px-3 py-2 rounded-xl border border-slate-200 text-xs bg-white focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all placeholder:text-slate-400"
+                      />
+                    </div>
+                    {event.type === "SIGNUP_SHEET" && (
+                      <div>
+                        <label className="block text-[10px] uppercase font-bold text-slate-400 mb-1">Capacity</label>
+                        <input
+                          type="number"
+                          name="slotCapacity"
+                          min={1}
+                          defaultValue={s.capacity}
+                          className="w-full px-3 py-2 rounded-xl border border-slate-200 text-xs bg-white focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all"
+                        />
+                      </div>
+                    )}
+                  </div>
+                  <div className="flex gap-2 shrink-0">
+                    <button
+                      type="submit"
+                      disabled={isSubmitting}
+                      className="px-4 py-2 rounded-xl bg-white border border-slate-200 hover:border-slate-300 text-slate-700 text-xs font-semibold shadow-sm transition-all disabled:opacity-50"
+                    >
+                      Save
+                    </button>
+                    <button
+                      type="submit"
+                      name="intent"
+                      value="delete_slot"
+                      formMethod="post"
+                      onClick={(e) => {
+                        if (!window.confirm(`Delete "${s.title}"? Existing signups/votes for it will be removed.`)) {
+                          e.preventDefault();
+                        }
+                      }}
+                      className="px-4 py-2 rounded-xl bg-white border border-rose-200 hover:border-rose-300 text-rose-600 hover:bg-rose-50 text-xs font-semibold shadow-sm transition-all"
+                    >
+                      Delete
+                    </button>
+                  </div>
+                </Form>
+              ))}
+            </div>
+
+            {/* Add new slot */}
+            <Form
+              method="post"
+              className="flex flex-col lg:flex-row gap-2.5 items-stretch lg:items-end bg-slate-50/70 border border-slate-200/80 rounded-2xl p-4 transition-all"
+            >
+              <input type="hidden" name="intent" value="add_slot" />
+              <input type="hidden" name="adminToken" value={adminToken || ""} />
+              <div className="flex-1 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2.5">
+                <div className="sm:col-span-2 lg:col-span-2">
+                  <label className="block text-[10px] uppercase font-bold text-slate-400 mb-1">New option title</label>
+                  <input
+                    type="text"
+                    name="slotTitle"
+                    placeholder={event.type === "SIGNUP_SHEET" ? "e.g. Setup crew" : "e.g. Mon 10am – 11am"}
+                    className="w-full px-3 py-2 rounded-xl border border-slate-200 text-xs bg-white focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all placeholder:text-slate-400"
+                  />
+                </div>
+                <div>
+                  <label className="block text-[10px] uppercase font-bold text-slate-400 mb-1">Start (opt.)</label>
+                  <input
+                    type="text"
+                    name="slotStartTime"
+                    placeholder="9:00 AM"
+                    className="w-full px-3 py-2 rounded-xl border border-slate-200 text-xs bg-white focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all placeholder:text-slate-400"
+                  />
+                </div>
+                <div>
+                  <label className="block text-[10px] uppercase font-bold text-slate-400 mb-1">End (opt.)</label>
+                  <input
+                    type="text"
+                    name="slotEndTime"
+                    placeholder="11:00 AM"
+                    className="w-full px-3 py-2 rounded-xl border border-slate-200 text-xs bg-white focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all placeholder:text-slate-400"
+                  />
+                </div>
+                {event.type === "SIGNUP_SHEET" && (
+                  <div>
+                    <label className="block text-[10px] uppercase font-bold text-slate-400 mb-1">Capacity</label>
+                    <input
+                      type="number"
+                      name="slotCapacity"
+                      min={1}
+                      defaultValue={1}
+                      className="w-full px-3 py-2 rounded-xl border border-slate-200 text-xs bg-white focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all"
+                    />
+                  </div>
+                )}
+              </div>
+              <button
+                type="submit"
+                disabled={isSubmitting}
+                className="px-5 py-2.5 rounded-2xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold shadow-sm transition-all hover:scale-[1.02] active:scale-[0.98] shrink-0 disabled:opacity-50"
+              >
+                + Add Option
+              </button>
+            </Form>
+            <p className="text-[11px] text-slate-500">
+              Deleting an option also removes its signups / votes. If it was the finalized winning time, the event reopens.
+            </p>
+          </div>
+        </div>
+      )}
 
       {/* ===================================================================== */}
       {/* SECTION 1: VOLUNTEER SIGNUP SHEET VIEW                                */}
@@ -671,6 +1071,12 @@ export default function EventView() {
                   <span>⭐ Consensus Leader</span>
                 </div>
                 <div className="text-xl font-extrabold text-slate-900">{topSlot.slot.title}</div>
+                {(topSlot.slot.startTime || topSlot.slot.endTime) && (
+                  <div className="text-xs font-semibold text-blue-700">
+                    ⏰ {formatTime(topSlot.slot.startTime)}
+                    {topSlot.slot.endTime ? ` – ${formatTime(topSlot.slot.endTime)}` : ""}
+                  </div>
+                )}
                 <div className="text-xs text-slate-600">
                   {topSlot.tally.yes} available • {topSlot.tally.maybe} if need be
                 </div>
@@ -711,6 +1117,12 @@ export default function EventView() {
                           }`}
                         >
                           <div className="font-bold text-slate-900">{s.title}</div>
+                          {(s.startTime || s.endTime) && (
+                            <div className="font-semibold text-blue-700 mt-0.5">
+                              ⏰ {formatTime(s.startTime)}
+                              {s.endTime ? ` – ${formatTime(s.endTime)}` : ""}
+                            </div>
+                          )}
                           {isWinning && (
                             <span className="inline-block mt-1 text-[10px] px-2.5 py-0.5 rounded-full bg-purple-100 text-purple-800 font-bold">
                               Selected Meeting Time 🏆
