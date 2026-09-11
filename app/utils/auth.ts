@@ -69,15 +69,19 @@ export function getPresentedAdminToken(request: Request, eventId: string): strin
 }
 
 export function buildAdminCookie(eventId: string, token: string): string {
-  // Scoped to the event path so one event's cookie never leaks to another.
+  // Scoped to /events (not /events/<id>) so the cookie is also sent on
+  // Remix single-fetch `.data` requests (e.g. `/events/<id>.data`), whose
+  // path would otherwise not match per RFC 6265 (boundary must be `/`,
+  // not `.`). The cookie NAME already scopes it to one event, and the
+  // server only accepts it for that eventId, so nothing leaks across events.
   // Secure is ignored on http://localhost by browsers but harmless to send.
   return `${cookieName(eventId)}=${encodeURIComponent(
     token
-  )}; Path=/events/${eventId}; HttpOnly; Secure; SameSite=Lax; Max-Age=31536000`;
+  )}; Path=/events; HttpOnly; Secure; SameSite=Lax; Max-Age=31536000`;
 }
 
 export function buildExpiredAdminCookie(eventId: string): string {
-  return `${cookieName(eventId)}=; Path=/events/${eventId}; HttpOnly; Secure; SameSite=Lax; Max-Age=0`;
+  return `${cookieName(eventId)}=; Path=/events; HttpOnly; Secure; SameSite=Lax; Max-Age=0`;
 }
 
 // Best-effort in-memory rate limit for admin guesses (per worker isolate).
