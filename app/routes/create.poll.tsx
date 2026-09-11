@@ -254,7 +254,7 @@ export default function CreateMeetingPoll() {
           <span>Back to Home</span>
         </Link>
         <div className="flex items-center gap-3 pt-1">
-          <div className="w-10 h-10 rounded-2xl bg-emerald-50 text-emerald-600 flex items-center justify-center border border-emerald-100">
+          <div className="w-10 h-10 rounded-2xl bg-green-50 text-green-600 flex items-center justify-center border border-green-100">
             <CalendarDays className="w-5 h-5" />
           </div>
           <div>
@@ -276,12 +276,20 @@ export default function CreateMeetingPoll() {
       )}
 
       <Form method="post" className="bg-white border border-slate-200/80 rounded-3xl p-8 sm:p-10 shadow-[0_2px_12px_rgba(0,0,0,0.03)] space-y-10">
-        {/* Step 1: Meeting Details */}
-        <div className="space-y-5">
+        <div className="relative pl-9 space-y-8">
+          {/* Thin vertical line connecting steps */}
+          <div aria-hidden="true" className="absolute left-3 top-3 bottom-3 w-px bg-green-100" />
+          {/* Step 1: Meeting Details */}
+          <div className="relative space-y-5">
           <div className="flex items-center justify-between gap-3">
-            <label className="block text-xs font-bold uppercase tracking-wider text-slate-500">
-              Step 1 • Meeting Details
-            </label>
+            <div className="flex items-center gap-2">
+              <span className="absolute -left-9 top-0 w-6 h-6 rounded-full bg-green-600 text-white text-xs font-extrabold flex items-center justify-center shrink-0 ring-4 ring-white">
+                1
+              </span>
+              <label className="block text-xs font-bold uppercase tracking-wider text-slate-500">
+                Meeting Details
+              </label>
+            </div>
             <span className="text-[11px] text-slate-400" title="Your draft is saved in this tab and survives refresh. It clears after successful creation.">
               Draft auto-saved in this tab
             </span>
@@ -393,12 +401,17 @@ export default function CreateMeetingPoll() {
         </div>
 
         {/* Step 2: Proposed Time Windows */}
-        <div className="space-y-4 pt-2 border-t border-slate-100">
+        <div className="relative space-y-4">
           <div className="flex items-center justify-between">
             <div>
-              <label className="block text-xs font-bold uppercase tracking-wider text-slate-500">
-                Step 2 • Proposed Time Slots
-              </label>
+              <div className="flex items-center gap-2">
+                <span className="absolute -left-9 top-0 w-6 h-6 rounded-full bg-green-600 text-white text-xs font-extrabold flex items-center justify-center shrink-0 ring-4 ring-white">
+                  2
+                </span>
+                <label className="block text-xs font-bold uppercase tracking-wider text-slate-500">
+                  Proposed Time Slots
+                </label>
+              </div>
               <p className="text-xs text-slate-500 mt-0.5">
                 Add candidate time windows for participants to vote Yes / (If need be) / No.
               </p>
@@ -407,7 +420,7 @@ export default function CreateMeetingPoll() {
             <button
               type="button"
               onClick={addTimeSlot}
-              className="px-3.5 py-1.5 text-xs font-semibold rounded-2xl border border-slate-200 hover:border-blue-400 hover:text-blue-600 bg-white transition-all shadow-sm flex items-center gap-1 shrink-0"
+              className="px-3.5 py-1.5 text-xs font-semibold rounded-2xl border border-slate-200 hover:border-green-400 hover:text-green-600 bg-white transition-all shadow-sm flex items-center gap-1 shrink-0"
             >
               <span>+ Add Time Slot</span>
             </button>
@@ -478,6 +491,7 @@ export default function CreateMeetingPoll() {
             ))}
           </div>
         </div>
+        </div>
 
         {/* Submit */}
         <div className="pt-4 border-t border-slate-100 flex flex-col sm:flex-row items-stretch sm:items-center justify-end gap-3">
@@ -491,7 +505,7 @@ export default function CreateMeetingPoll() {
           <button
             type="submit"
             disabled={isSubmitting}
-            className="w-full sm:w-auto px-8 py-4 rounded-2xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-sm shadow-sm transition-all hover:scale-[1.01] active:scale-[0.99] disabled:opacity-50 flex items-center justify-center gap-2"
+            className="w-full sm:w-auto px-8 py-4 rounded-2xl bg-green-600 hover:bg-green-700 text-white font-bold text-sm shadow-sm transition-all hover:scale-[1.01] active:scale-[0.99] disabled:opacity-50 flex items-center justify-center gap-2"
           >
             {isSubmitting ? (
               <>

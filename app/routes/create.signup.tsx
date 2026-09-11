@@ -329,12 +329,20 @@ export default function CreateSignupSheet() {
       )}
 
       <Form method="post" className="bg-white border border-slate-200/80 rounded-3xl p-8 sm:p-10 shadow-[0_2px_12px_rgba(0,0,0,0.03)] space-y-10">
-        {/* Step 1: Event Details */}
-        <div className="space-y-5">
+        <div className="relative pl-9 space-y-8">
+          {/* Thin vertical line connecting steps */}
+          <div aria-hidden="true" className="absolute left-3 top-3 bottom-3 w-px bg-blue-100" />
+          {/* Step 1: Event Details */}
+          <div className="relative space-y-5">
           <div className="flex items-center justify-between gap-3">
-            <label className="block text-xs font-bold uppercase tracking-wider text-slate-500">
-              Step 1 • Event Details
-            </label>
+            <div className="flex items-center gap-2">
+              <span className="absolute -left-9 top-0 w-6 h-6 rounded-full bg-blue-600 text-white text-xs font-extrabold flex items-center justify-center shrink-0 ring-4 ring-white">
+                1
+              </span>
+              <label className="block text-xs font-bold uppercase tracking-wider text-slate-500">
+                Event Details
+              </label>
+            </div>
             <span className="text-[11px] text-slate-400" title="Your draft is saved in this tab and survives refresh. It clears after successful creation.">
               Draft auto-saved in this tab
             </span>
@@ -446,12 +454,17 @@ export default function CreateSignupSheet() {
         </div>
 
         {/* Step 2: Shifts & Tasks */}
-        <div className="space-y-4 pt-2 border-t border-slate-100">
+        <div className="relative space-y-4">
           <div className="flex items-center justify-between">
             <div>
-              <label className="block text-xs font-bold uppercase tracking-wider text-slate-500">
-                Step 2 • Shifts & Tasks
-              </label>
+              <div className="flex items-center gap-2">
+                <span className="absolute -left-9 top-0 w-6 h-6 rounded-full bg-blue-600 text-white text-xs font-extrabold flex items-center justify-center shrink-0 ring-4 ring-white">
+                  2
+                </span>
+                <label className="block text-xs font-bold uppercase tracking-wider text-slate-500">
+                  Shifts & Tasks
+                </label>
+              </div>
               <p className="text-xs text-slate-500 mt-0.5">
                 Name each shift (optional), set its time, then add one or more tasks sharing that time.
               </p>
@@ -595,6 +608,7 @@ export default function CreateSignupSheet() {
               </div>
             ))}
           </div>
+        </div>
         </div>
 
         {/* Submit */}
