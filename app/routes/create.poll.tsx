@@ -4,7 +4,7 @@ import { Form, useActionData, useNavigation, Link } from "@remix-run/react";
 import { useEffect, useRef } from "react";
 import { ArrowLeft, ArrowRight, CalendarDays, TriangleAlert, X } from "lucide-react";
 import { usePersistentState } from "~/utils/usePersistentState";
-import { useCreateStickyHeader } from "~/utils/useCreateStickyHeader";
+import { useCreateStickyHeader, formatStickyDate } from "~/utils/useCreateStickyHeader";
 import { getDb, events, eventSlots } from "~/db";
 import { eq } from "drizzle-orm";
 import {
@@ -316,6 +316,11 @@ export default function CreateMeetingPoll() {
                   onChange={(e) => updateDetails({ eventDate: e.target.value })}
                   className="w-full px-4 py-3 rounded-xl border border-slate-200/90 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all text-slate-800"
                 />
+                {(details.eventDate || todayStr) && (
+                  <span className="text-[11px] text-slate-500 mt-1 block">
+                    {formatStickyDate(details.eventDate || todayStr)}
+                  </span>
+                )}
               </div>
 
               <div>

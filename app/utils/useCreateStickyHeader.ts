@@ -84,6 +84,7 @@ export function formatStickyDate(value: string): string {
   const parsed = new Date(`${raw}T00:00:00`);
   if (Number.isNaN(parsed.getTime())) return raw;
   return parsed.toLocaleDateString("en-US", {
+    weekday: "short",
     month: "short",
     day: "numeric",
     year: "numeric",
