@@ -14,6 +14,7 @@ export const events = sqliteTable("events", {
   settings: text("settings").notNull().default("{}"), // JSON string
   winningSlotId: text("winning_slot_id"),
   timezone: text("timezone").notNull().default("UTC"),
+  durationMinutes: integer("duration_minutes"), // NULL = All day (TIME_POLL only)
   createdAt: text("created_at").notNull(),
   updatedAt: text("updated_at").notNull(),
 });
@@ -25,6 +26,7 @@ export const eventSlots = sqliteTable("event_slots", {
     .references(() => events.id, { onDelete: "cascade" }),
   title: text("title").notNull(),
   shiftName: text("shift_name"),
+  slotDate: text("slot_date"), // 'YYYY-MM-DD' per-option date for TIME_POLL multi-day
   startTime: text("start_time"),
   endTime: text("end_time"),
   capacity: integer("capacity").notNull().default(1), // -1 for unlimited

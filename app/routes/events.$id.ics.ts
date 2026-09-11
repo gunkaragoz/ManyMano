@@ -1,7 +1,7 @@
 import type { LoaderFunctionArgs } from "@remix-run/cloudflare";
 import { eq } from "drizzle-orm";
 import { getDb, events, eventSlots } from "~/db";
-import { generateICS, pickCalendarSlot } from "~/utils/calendar";
+import { generateICS, pickCalendarSlot, effectiveDateForSlot } from "~/utils/calendar";
 import { getPresentedAdminToken, secretMatches } from "~/utils/auth";
 import { isExpired, pruneExpiredEvents } from "~/utils/retention";
 
@@ -46,7 +46,7 @@ export async function loader({ params, request, context }: LoaderFunctionArgs) {
     title: event.title,
     description: event.description,
     location: event.location,
-    eventDate: event.eventDate,
+    eventDate: picked ? effectiveDateForSlot(picked, event.eventDate) : event.eventDate,
     startTime: picked?.startTime ?? null,
     endTime: picked?.endTime ?? null,
     organizerName: event.organizerName,

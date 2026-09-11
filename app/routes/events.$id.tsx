@@ -37,7 +37,7 @@ import {
   secretMatches,
 } from "~/utils/auth";
 import { expiryDateFor, isExpired, pruneExpiredEvents, RETENTION_DAYS } from "~/utils/retention";
-import { buildGoogleCalendarUrl, pickCalendarSlot } from "~/utils/calendar";
+import { buildGoogleCalendarUrl, pickCalendarSlot, effectiveDateForSlot, formatSlotDateLabel, formatDurationLabel } from "~/utils/calendar";
 import {
   SITE_NAME,
   mergeParentMeta,
@@ -93,6 +93,7 @@ function publicEventShape(e: typeof events.$inferSelect) {
     status: e.status,
     winningSlotId: e.winningSlotId,
     timezone: e.timezone,
+    durationMinutes: (e as { durationMinutes?: number | null }).durationMinutes ?? null,
     createdAt: e.createdAt,
     updatedAt: e.updatedAt,
     expiresAt: expiryDateFor(e.createdAt),
@@ -185,12 +186,24 @@ export async function loader({ params, request, context }: LoaderFunctionArgs) {
     return redirect(clean.toString(), { headers });
   }
 
-  // Fetch slots
-  const slots = await db
+  // Fetch slots (polls: chronological by day then time; sheets keep author order)
+  const rawSlots = await db
     .select()
     .from(eventSlots)
     .where(eq(eventSlots.eventId, eventId))
     .orderBy(eventSlots.displayOrder);
+  const slots =
+    event.type === "TIME_POLL"
+      ? [...rawSlots].sort((a, b) => {
+          const dateCmp = ((a as { slotDate?: string | null }).slotDate || "").localeCompare(
+            (b as { slotDate?: string | null }).slotDate || ""
+          );
+          if (dateCmp !== 0) return dateCmp;
+          const timeCmp = (a.startTime || "").localeCompare(b.startTime || "");
+          if (timeCmp !== 0) return timeCmp;
+          return (a.displayOrder ?? 0) - (b.displayOrder ?? 0);
+        })
+      : rawSlots;
 
   if (event.type === "SIGNUP_SHEET") {
     // Fetch signups — never expose emails or edit tokens to non-admins,
@@ -585,11 +598,13 @@ export async function action({ request, params, context }: ActionFunctionArgs) {
 
     const title = (formData.get("slotTitle") as string)?.trim();
     const shiftName = (formData.get("slotShiftName") as string)?.trim() || null;
+    const slotDateRaw = ((formData.get("slotDate") as string) || "").trim();
+    const slotDate = /^\d{4}-\d{2}-\d{2}$/.test(slotDateRaw) ? slotDateRaw : null;
     const startTime = (formData.get("slotStartTime") as string)?.trim() || null;
     const endTime = (formData.get("slotEndTime") as string)?.trim() || null;
     const capacityRaw = (formData.get("slotCapacity") as string)?.trim() || "1";
-    if (!title && !startTime && !shiftName) {
-      return json({ error: "Give the new option a title or time." }, { status: 400 });
+    if (!title && !startTime && !shiftName && !slotDate) {
+      return json({ error: "Give the new option a title, day or time." }, { status: 400 });
     }
 
     const existingSlots = await db.select().from(eventSlots).where(eq(eventSlots.eventId, eventId));
@@ -598,8 +613,9 @@ export async function action({ request, params, context }: ActionFunctionArgs) {
     await db.insert(eventSlots).values({
       id: generateInternalId(),
       eventId,
-      title: title || shiftName || (endTime ? `${startTime} – ${endTime}` : (startTime as string)),
+      title: title || shiftName || (endTime ? `${startTime} – ${endTime}` : (startTime as string)) || slotDate || "New option",
       shiftName,
+      slotDate,
       capacity: event.type === "SIGNUP_SHEET" ? parseInt(capacityRaw, 10) || 1 : 999,
       startTime,
       endTime,
@@ -618,6 +634,8 @@ export async function action({ request, params, context }: ActionFunctionArgs) {
     const slotId = formData.get("slotId") as string;
     const title = (formData.get("slotTitle") as string)?.trim();
     const shiftName = (formData.get("slotShiftName") as string)?.trim() || null;
+    const slotDateRaw = ((formData.get("slotDate") as string) || "").trim();
+    const slotDate = slotDateRaw === "" ? null : (/^\d{4}-\d{2}-\d{2}$/.test(slotDateRaw) ? slotDateRaw : null);
     const startTime = (formData.get("slotStartTime") as string)?.trim() || null;
     const endTime = (formData.get("slotEndTime") as string)?.trim() || null;
     const capacityRaw = (formData.get("slotCapacity") as string)?.trim();
@@ -635,6 +653,7 @@ export async function action({ request, params, context }: ActionFunctionArgs) {
       .set({
         title,
         shiftName,
+        slotDate,
         startTime,
         endTime,
         ...(event.type === "SIGNUP_SHEET" && capacityRaw
@@ -790,6 +809,35 @@ export default function EventView() {
     return { slot: bestSlot, tally: bestTally };
   }, [pollData, slots]);
 
+  // Day groups for the calendar-grid vote table: consecutive columns that
+  // share a slotDate render under one day header. Slots arrive sorted by
+  // (slotDate, startTime) from the loader.
+  type PollSlotRow = (typeof slots)[number];
+  const dayGroups = useMemo(() => {
+    const groups: Array<{ key: string; label: string; slots: PollSlotRow[] }> = [];
+    const indexByKey = new Map<string, number>();
+    slots.forEach((s) => {
+      const raw = ((s as { slotDate?: string | null }).slotDate || "").trim();
+      const key = raw || "__undated__";
+      const label = raw ? formatSlotDateLabel(raw) : "Undated";
+      const existing = indexByKey.get(key);
+      if (existing !== undefined) {
+        groups[existing].slots.push(s);
+      } else {
+        indexByKey.set(key, groups.length);
+        groups.push({ key, label, slots: [s] });
+      }
+    });
+    return groups;
+  }, [slots]);
+
+  const pollDateRange = useMemo(() => {
+    if (event.type !== "TIME_POLL" || dayGroups.length === 0) return null;
+    const dated = dayGroups.filter((g) => g.key !== "__undated__");
+    if (dated.length === 0) return null;
+    if (dated.length === 1) return dated[0].label;
+    return `${dated[0].label} – ${dated[dated.length - 1].label}`;
+  }, [event.type, dayGroups]);
   // Group signup slots into shifts sharing name + time window.
   // Each slot is one task; a shift card lists its tasks.
   type SlotRow = (typeof slots)[number];
@@ -839,7 +887,7 @@ export default function EventView() {
       title: event.title,
       description: event.description,
       location: event.location,
-      eventDate: event.eventDate,
+      eventDate: calendarSlot ? effectiveDateForSlot(calendarSlot, event.eventDate) : event.eventDate,
       startTime: calendarSlot?.startTime ?? null,
       endTime: calendarSlot?.endTime ?? null,
       url: origin ? `${origin}/events/${event.id}` : null,
@@ -1016,6 +1064,18 @@ export default function EventView() {
               <User className="w-3.5 h-3.5 text-slate-500" />
               Organized by:&nbsp;<strong className="text-slate-800 font-semibold">{event.organizerName}</strong>
             </span>
+            {event.type === "TIME_POLL" && (
+              <span className="inline-flex items-center gap-1.5 text-xs font-semibold text-slate-700 bg-slate-100/90 px-3 py-1.5 rounded-full border border-slate-200/80">
+                <Clock className="w-3.5 h-3.5 text-slate-500" />
+                {formatDurationLabel((event as { durationMinutes?: number | null }).durationMinutes)}
+              </span>
+            )}
+            {event.type === "TIME_POLL" && pollDateRange && (
+              <span className="inline-flex items-center gap-1.5 text-xs font-semibold text-slate-700 bg-slate-100/90 px-3 py-1.5 rounded-full border border-slate-200/80">
+                <CalendarDays className="w-3.5 h-3.5 text-slate-500" />
+                {pollDateRange} · {slots.length} option{slots.length === 1 ? "" : "s"}
+              </span>
+            )}
           </div>
           <p className="text-xs text-slate-400 pt-0.5">
             Anyone with the link can see names/notes. Organizer can delete anytime below.
@@ -1209,6 +1269,17 @@ export default function EventView() {
                         className="w-full px-3 py-2 rounded-xl border border-slate-200 text-xs bg-white focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all"
                       />
                     </div>
+                    {event.type === "TIME_POLL" && (
+                      <div className="lg:col-span-2">
+                        <label className="block text-[10px] uppercase font-bold text-slate-400 mb-1">Day</label>
+                        <input
+                          type="date"
+                          name="slotDate"
+                          defaultValue={(s as { slotDate?: string | null }).slotDate || ""}
+                          className="w-full px-3 py-2 rounded-xl border border-slate-200 text-xs bg-white focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all"
+                        />
+                      </div>
+                    )}
                     <div className="lg:col-span-2">
                       <label className="block text-[10px] uppercase font-bold text-slate-400 mb-1">Start</label>
                       <input
@@ -1315,6 +1386,16 @@ export default function EventView() {
                     className="w-full px-3 py-2 rounded-xl border border-slate-200 text-xs bg-white focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all placeholder:text-slate-400"
                   />
                 </div>
+                {event.type === "TIME_POLL" && (
+                  <div className="lg:col-span-2">
+                    <label className="block text-[10px] uppercase font-bold text-slate-400 mb-1">Day</label>
+                    <input
+                      type="date"
+                      name="slotDate"
+                      className="w-full px-3 py-2 rounded-xl border border-slate-200 text-xs bg-white focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all"
+                    />
+                  </div>
+                )}
                 {event.type === "SIGNUP_SHEET" && (
                   <div className="lg:col-span-2">
                     <label className="block text-[10px] uppercase font-bold text-slate-400 mb-1">Capacity</label>
@@ -1588,10 +1669,25 @@ export default function EventView() {
             <div className="overflow-x-auto">
               <table className="w-full text-left border-collapse text-xs">
                 <thead>
-                  <tr className="bg-slate-50/80 border-b border-slate-200/80 text-slate-700 font-bold">
-                    <th className="p-4 sm:p-5 w-52 min-w-[200px] sticky left-0 bg-slate-50 border-r border-slate-200/80">
+                  {/* Day-group row: one header per day spanning its time options */}
+                  <tr className="bg-slate-100/80 border-b border-slate-200/80 text-slate-700 font-bold">
+                    <th
+                      rowSpan={2}
+                      className="p-4 sm:p-5 w-52 min-w-[200px] sticky left-0 bg-slate-100 border-r border-slate-200/80 align-bottom"
+                    >
                       Participants ({pollData.votes.length})
                     </th>
+                    {dayGroups.map((g) => (
+                      <th
+                        key={g.key}
+                        colSpan={g.slots.length}
+                        className="p-2.5 text-center border-r border-slate-200/80 text-[11px] uppercase tracking-wider text-slate-600 bg-slate-100/60"
+                      >
+                        {g.label}
+                      </th>
+                    ))}
+                  </tr>
+                  <tr className="bg-slate-50/80 border-b border-slate-200/80 text-slate-700 font-bold">
                     {slots.map((s) => {
                       const isWinning = event.winningSlotId === s.id;
                       return (
@@ -1601,13 +1697,11 @@ export default function EventView() {
                             isWinning ? "bg-purple-50/60 text-purple-900" : ""
                           }`}
                         >
-                          <div className="font-bold text-slate-900">{s.title}</div>
-                          {(s.startTime || s.endTime) && (
-                            <div className="font-semibold text-blue-700 mt-0.5 inline-flex items-center justify-center gap-1">
-                              <Clock className="w-3 h-3" /> {formatTime(s.startTime)}
-                              {s.endTime ? ` – ${formatTime(s.endTime)}` : ""}
-                            </div>
-                          )}
+                          <div className="font-bold text-slate-900">
+                            {s.startTime || s.endTime
+                              ? `${formatTime(s.startTime)}${s.endTime ? ` – ${formatTime(s.endTime)}` : ""}`
+                              : "All day"}
+                          </div>
                           {isWinning && (
                             <span className="mt-1 text-[10px] px-2.5 py-0.5 rounded-full bg-purple-100 text-purple-800 font-bold inline-flex items-center gap-1">
                               <Trophy className="w-3 h-3" /> Selected Meeting Time

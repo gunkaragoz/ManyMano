@@ -38,11 +38,24 @@ export async function loader({ params, request, context }: LoaderFunctionArgs) {
     });
   }
 
-  const slots = await db
+  const rawSlots = await db
     .select()
     .from(eventSlots)
     .where(eq(eventSlots.eventId, eventId))
     .orderBy(eventSlots.displayOrder);
+  // Match the voting grid: polls sort chronologically by day then time.
+  const slots =
+    event.type === "TIME_POLL"
+      ? [...rawSlots].sort((a, b) => {
+          const dateCmp = ((a as { slotDate?: string | null }).slotDate || "").localeCompare(
+            (b as { slotDate?: string | null }).slotDate || ""
+          );
+          if (dateCmp !== 0) return dateCmp;
+          const timeCmp = (a.startTime || "").localeCompare(b.startTime || "");
+          if (timeCmp !== 0) return timeCmp;
+          return (a.displayOrder ?? 0) - (b.displayOrder ?? 0);
+        })
+      : rawSlots;
 
   const slotMap = new Map(slots.map((s) => [s.id, s]));
 

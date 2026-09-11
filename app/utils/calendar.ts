@@ -16,6 +16,7 @@ export interface CalendarEventParams {
 
 export interface CalendarSlotLike {
   id: string;
+  slotDate?: string | null;
   startTime?: string | null;
   endTime?: string | null;
 }
@@ -133,8 +134,9 @@ export function resolveEventDates(args: {
 
 /**
  * Pick which slot represents the event on the calendar.
- * Winning (finalized) slot first, then the earliest slot that has a time,
- * then simply the first slot. Returns null when there are no slots.
+ * Winning (finalized) slot first, then the earliest slot by
+ * (slotDate, startTime), then simply the first slot.
+ * Returns null when there are no slots.
  */
 export function pickCalendarSlot<T extends CalendarSlotLike>(
   slots: T[],
@@ -148,12 +150,62 @@ export function pickCalendarSlot<T extends CalendarSlotLike>(
   const withTime = slots.filter((s) => parseTimeString(s.startTime));
   if (withTime.length > 0) {
     return [...withTime].sort((a, b) => {
+      const dateCmp = (a.slotDate || "").localeCompare(b.slotDate || "");
+      if (dateCmp !== 0) return dateCmp;
       const ta = parseTimeString(a.startTime)!;
       const tb = parseTimeString(b.startTime)!;
       return ta.hours * 60 + ta.minutes - (tb.hours * 60 + tb.minutes);
     })[0];
   }
+  const withDate = slots.filter((s) => s.slotDate);
+  if (withDate.length > 0) {
+    return [...withDate].sort((a, b) => (a.slotDate || "").localeCompare(b.slotDate || ""))[0];
+  }
   return slots[0];
+}
+
+/** Effective event date for a slot: per-slot date wins, else the event-level date. */
+export function effectiveDateForSlot(
+  slot: CalendarSlotLike,
+  eventDate?: string | null
+): string | null {
+  return slot.slotDate || eventDate || null;
+}
+
+/** Add minutes to a "HH:MM" time string. Returns "HH:MM" (wraps past midnight). */
+export function addMinutesToTimeString(time: string, minutes: number): string {
+  const parsed = parseTimeString(time);
+  if (!parsed) return time;
+  const total = parsed.hours * 60 + parsed.minutes + minutes;
+  const wrapped = ((total % (24 * 60)) + 24 * 60) % (24 * 60);
+  const h = Math.floor(wrapped / 60);
+  const m = wrapped % 60;
+  return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`;
+}
+
+/** Smart duration label: 15 -> "15 min", 60 -> "1 hr", 90 -> "1 hr 30 min", 120 -> "2 hrs". */
+export function formatDurationLabel(minutes: number | null | undefined): string {
+  if (minutes === null || minutes === undefined) return "All day";
+  const m = Math.round(minutes);
+  if (m < 60) return `${m} min`;
+  const h = Math.floor(m / 60);
+  const rem = m % 60;
+  const hPart = h === 1 ? "1 hr" : `${h} hrs`;
+  return rem === 0 ? hPart : `${hPart} ${rem} min`;
+}
+
+/** Short day label for a "YYYY-MM-DD" date, e.g. "Fri, Sep 12". Falls back to input. */
+export function formatSlotDateLabel(dateStr: string | null | undefined): string {
+  if (!dateStr) return "";
+  const m = dateStr.trim().match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (!m) return dateStr;
+  const d = new Date(Date.UTC(parseInt(m[1], 10), parseInt(m[2], 10) - 1, parseInt(m[3], 10)));
+  return d.toLocaleDateString("en-US", {
+    weekday: "short",
+    month: "short",
+    day: "numeric",
+    timeZone: "UTC",
+  });
 }
 
 /** "20261017T140000Z" — the format Google Calendar's template endpoint wants. */

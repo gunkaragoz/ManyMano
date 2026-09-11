@@ -22,6 +22,13 @@
       "when": 1789150292202,
       "tag": "0002_add_shift_name",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "6",
+      "when": 1789167979164,
+      "tag": "0003_poll_multiday",
+      "breakpoints": true
     }
   ]
 }
