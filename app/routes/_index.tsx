@@ -1,5 +1,11 @@
+import type { MetaFunction } from "@remix-run/cloudflare";
 import { Link } from "@remix-run/react";
 import { ArrowRight, CalendarDays, Check, ClipboardList } from "lucide-react";
+import { HOME_FAQ, faqPageJsonLd } from "~/utils/seo";
+
+export const meta: MetaFunction = () => [
+  { "script:ld+json": faqPageJsonLd(HOME_FAQ) },
+];
 
 export default function Index() {
   return (
@@ -120,6 +126,29 @@ export default function Index() {
           </div>
         </div>
       </div>
+
+      {/* FAQ */}
+      <section id="faq" className="max-w-3xl mx-auto pt-6 border-t border-slate-200/60">
+        <h2 className="text-2xl font-bold text-slate-900 tracking-tight text-center">
+          Frequently Asked Questions
+        </h2>
+        <div className="mt-8 space-y-4">
+          {HOME_FAQ.map((item) => (
+            <details
+              key={item.question}
+              className="group bg-white border border-slate-200/80 rounded-2xl px-6 py-4 shadow-[0_2px_12px_rgba(0,0,0,0.03)] open:border-blue-200 transition-colors"
+            >
+              <summary className="flex items-center justify-between gap-4 cursor-pointer list-none text-sm font-semibold text-slate-800">
+                {item.question}
+                <span className="text-slate-400 group-open:rotate-45 transition-transform text-lg leading-none">
+                  +
+                </span>
+              </summary>
+              <p className="mt-3 text-sm text-slate-600 leading-relaxed">{item.answer}</p>
+            </details>
+          ))}
+        </div>
+      </section>
 
     </div>
   );

@@ -297,39 +297,59 @@ export async function action({ request, params, context }: ActionFunctionArgs) {
     const editTokenPlain = generateSecretToken();
     const editTokenStored = await hashSecretForStorage(editTokenPlain);
 
-    // Atomic-ish guard: transaction re-checks capacity before insert.
-    const insertInTx = async (tx: any) => {
-      const current = await tx
-        .select({ id: signups.id })
-        .from(signups)
-        .where(and(eq(signups.slotId, slotId), eq(signups.status, "CONFIRMED")));
-      if (targetSlot.capacity > 0 && current.length >= targetSlot.capacity) {
-        throw new Error("FULL");
+    const safeName = participantName.slice(0, 120);
+    const safeEmail = participantEmail?.slice(0, 254) || null;
+    const customFields = JSON.stringify({ comment });
+
+    // D1 does not allow raw BEGIN/COMMIT via SQL (drizzle's .transaction()
+    // throws D1_ERROR under Durable-Object-backed D1, incl. local dev), so
+    // the capacity guard must be a single atomic statement instead of a
+    // check-then-insert transaction. INSERT...SELECT...WHERE fails atomically
+    // (0 rows written) when the slot is already full.
+    if (targetSlot.capacity > 0) {
+      const res = await env.DB.prepare(
+        `INSERT INTO signups (id, slot_id, event_id, participant_name, participant_email, edit_token, custom_fields, status, created_at)
+         SELECT ?1, ?2, ?3, ?4, ?5, ?6, ?7, 'CONFIRMED', ?8
+         WHERE (SELECT COUNT(*) FROM signups WHERE slot_id = ?2 AND status = 'CONFIRMED') < ?9
+         AND EXISTS (SELECT 1 FROM event_slots WHERE id = ?2 AND event_id = ?3)`
+      )
+        .bind(
+          signupId,
+          slotId,
+          eventId,
+          safeName,
+          safeEmail,
+          editTokenStored,
+          customFields,
+          now,
+          targetSlot.capacity
+        )
+        .run();
+      if ((res.meta?.changes ?? 0) === 0) {
+        // Distinguish "slot filled" from "slot deleted concurrently".
+        const [stillThere] = await db
+          .select({ id: eventSlots.id })
+          .from(eventSlots)
+          .where(eq(eventSlots.id, slotId))
+          .limit(1);
+        if (!stillThere) {
+          return json({ error: "Slot not found." }, { status: 404 });
+        }
+        return json({ error: "Sorry, this slot just filled up!" }, { status: 400 });
       }
-      await tx.insert(signups).values({
+    } else {
+      // Unlimited capacity (capacity <= 0): plain insert, no guard needed.
+      await db.insert(signups).values({
         id: signupId,
         slotId,
         eventId,
-        participantName: participantName.slice(0, 120),
-        participantEmail: participantEmail?.slice(0, 254) || null,
+        participantName: safeName,
+        participantEmail: safeEmail,
         editToken: editTokenStored,
-        customFields: JSON.stringify({ comment }),
+        customFields,
         status: "CONFIRMED",
         createdAt: now,
       });
-    };
-
-    try {
-      if ((db as any).transaction) {
-        await (db as any).transaction(insertInTx);
-      } else {
-        await insertInTx(db);
-      }
-    } catch (e: any) {
-      if (e?.message === "FULL") {
-        return json({ error: "Sorry, this slot just filled up!" }, { status: 400 });
-      }
-      throw e;
     }
 
     // Send confirmation email to participant if email provided
@@ -889,140 +909,141 @@ export default function EventView() {
       )}
 
       {/* Event Header Card */}
-      <div className="bg-white border border-slate-200/80 rounded-3xl p-8 sm:p-10 shadow-[0_2px_12px_rgba(0,0,0,0.03)] space-y-6">
-        <div className="flex flex-col md:flex-row md:items-start justify-between gap-6">
-          <div className="space-y-3">
-            <div className="flex items-center gap-2.5 flex-wrap">
-              <span className="text-xs font-bold uppercase tracking-wider px-3 py-1 rounded-full bg-blue-50 text-blue-700 border border-blue-100">
-                {event.type === "SIGNUP_SHEET" ? "Sign-Up Sheet" : "Meeting Availability Poll"}
-              </span>
-              <span
-                className={`text-xs px-3 py-1 rounded-full font-semibold border inline-flex items-center gap-1.5 ${
-                  event.status === "FINALIZED"
-                    ? "bg-purple-50 text-purple-700 border-purple-200"
-                    : "bg-emerald-50 text-emerald-700 border-emerald-200"
-                }`}
-              >
-                {event.status === "FINALIZED" ? (
-                  <>
-                    Meeting Finalized <Target className="w-3.5 h-3.5" />
-                  </>
-                ) : (
-                  "Open for Responses"
-                )}
-              </span>
-            </div>
-
-            <h1 className="text-3xl sm:text-4xl font-extrabold text-slate-900 tracking-tight">
-              {event.title}
-            </h1>
-
-            {event.description && (
-              <p className="text-sm text-slate-600 max-w-2xl leading-relaxed whitespace-pre-wrap font-normal">
-                {event.description}
-              </p>
-            )}
-
-            <div className="flex flex-wrap items-center gap-4 pt-1 text-xs text-slate-500">
-              {event.eventDate && (
-                <div className="flex items-center gap-1.5 font-semibold text-slate-800 bg-slate-100/90 px-3 py-1 rounded-full border border-slate-200/80">
-                  <CalendarDays className="w-3.5 h-3.5" />
-                  <span>{new Date(event.eventDate + "T00:00:00").toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric", year: "numeric" })}</span>
-                </div>
+      <div className="bg-white border border-slate-200/80 rounded-3xl p-6 sm:p-8 shadow-[0_2px_12px_rgba(0,0,0,0.03)] space-y-5">
+        <div className="space-y-3 min-w-0">
+          <div className="flex items-center gap-2 flex-wrap">
+            <span className="text-[11px] font-bold uppercase tracking-wider px-3 py-1 rounded-full bg-blue-50 text-blue-700 border border-blue-100">
+              {event.type === "SIGNUP_SHEET" ? "Sign-Up Sheet" : "Meeting Availability Poll"}
+            </span>
+            <span
+              className={`text-[11px] px-3 py-1 rounded-full font-semibold border inline-flex items-center gap-1.5 ${
+                event.status === "FINALIZED"
+                  ? "bg-purple-50 text-purple-700 border-purple-200"
+                  : "bg-green-50 text-green-700 border-green-200"
+              }`}
+            >
+              {event.status === "FINALIZED" ? (
+                <>
+                  Meeting Finalized <Target className="w-3 h-3" />
+                </>
+              ) : (
+                "Open for Responses"
               )}
-              {event.location && (
-                <div className="flex items-center gap-1.5">
-                  <MapPin className="w-3.5 h-3.5" />
-                  <span className="font-semibold text-slate-700">{event.location}</span>
-                </div>
-              )}
-              <div className="flex items-center gap-1.5">
-                <User className="w-3.5 h-3.5" />
-                <span>Organized by: <strong className="text-slate-800">{event.organizerName}</strong></span>
-              </div>
-            </div>
-            <p className="text-[11px] text-slate-500 pt-1">
-              Anyone with the link can see names/notes. Organizer can delete anytime below.
-            </p>
+            </span>
           </div>
 
-          {/* Quick Action Buttons */}
-          <div className="flex flex-wrap md:flex-col gap-2.5 shrink-0 pt-1 w-full md:w-64">
-            <button
-              type="button"
-              onClick={() =>
-                copyToClipboard(
-                  `${typeof window !== "undefined" ? window.location.origin : ""}/events/${event.id}`,
-                  "share"
-                )
-              }
-              className="w-full px-5 py-3.5 text-sm font-semibold rounded-2xl border border-slate-200 hover:border-slate-300 bg-white text-slate-700 transition-all shadow-sm flex items-center justify-center gap-2 hover:bg-slate-50"
-            >
-              <Link2 className="w-4 h-4" />
-              <span className="inline-flex items-center gap-1">
-                {copiedLink === "share" ? (
-                  <>
-                    Link Copied! <Check className="w-4 h-4" />
-                  </>
-                ) : (
-                  "Share Link"
-                )}
-              </span>
-            </button>
-
-            <a
-              href={googleCalendarHref}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="w-full px-5 py-3.5 text-sm font-semibold rounded-2xl bg-blue-600 hover:bg-blue-700 text-white transition-all shadow-sm flex items-center justify-center gap-2"
-            >
-              <CalendarPlus className="w-4 h-4" />
-              <span>Add to Google Calendar</span>
-            </a>
-
-            <a
-              href={icsHref}
-              download
-              className="w-full px-5 py-3 text-sm font-semibold rounded-2xl border border-blue-200/80 bg-blue-50/50 hover:bg-blue-50 text-blue-700 transition-all shadow-sm flex items-center justify-center gap-2"
-            >
-              <Download className="w-4 h-4" />
-              <span>Apple / Outlook (.ics)</span>
-            </a>
-
-            {isAdmin && (
-              <a
-                href={adminToken ? `/events/${event.id}/export?admin=${encodeURIComponent(adminToken)}` : `/events/${event.id}/export`}
-                download
-                className="w-full px-5 py-3.5 text-sm font-semibold rounded-2xl border border-slate-200 hover:border-slate-300 bg-white hover:bg-slate-50 text-slate-700 transition-all shadow-sm flex items-center justify-center gap-2"
-              >
-                <Download className="w-4 h-4" />
-                <span>Export CSV Roster</span>
-              </a>
-            )}
+          <div className="flex items-start justify-between gap-3">
+            <h1 className="text-2xl sm:text-[32px] sm:leading-[1.15] font-extrabold text-slate-900 tracking-tight min-w-0 flex-1">
+              {event.title}
+            </h1>
 
             {isAdmin && (
               <button
                 type="button"
                 onClick={() => setShowEdit((v) => !v)}
-                className="w-full px-5 py-3.5 text-sm font-semibold rounded-2xl bg-slate-900 hover:bg-slate-800 text-white transition-all shadow-sm flex items-center justify-center gap-2"
+                className="shrink-0 mt-1 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full border border-slate-200 bg-white hover:bg-slate-50 hover:border-slate-300 text-xs font-semibold text-slate-600 hover:text-slate-900 transition-all shadow-sm"
               >
-                <Pencil className="w-4 h-4" />
-                <span>{showEdit ? "Close Editor" : "Edit Event"}</span>
+                <Pencil className="w-3.5 h-3.5" />
+                {showEdit ? "Close editor" : "Edit event"}
               </button>
             )}
           </div>
+
+          {event.description && (
+            <p className="text-sm text-slate-600 max-w-2xl leading-relaxed whitespace-pre-wrap font-normal">
+              {event.description}
+            </p>
+          )}
+
+          <div className="flex flex-wrap items-center gap-2 pt-1">
+            {event.eventDate && (
+              <span className="inline-flex items-center gap-1.5 text-xs font-semibold text-slate-700 bg-slate-100/90 px-3 py-1.5 rounded-full border border-slate-200/80">
+                <CalendarDays className="w-3.5 h-3.5 text-slate-500" />
+                {new Date(event.eventDate + "T00:00:00").toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric", year: "numeric" })}
+              </span>
+            )}
+            {event.location && (
+              <span className="inline-flex items-center gap-1.5 text-xs font-semibold text-slate-700 bg-slate-100/90 px-3 py-1.5 rounded-full border border-slate-200/80">
+                <MapPin className="w-3.5 h-3.5 text-slate-500" />
+                {event.location}
+              </span>
+            )}
+            <span className="inline-flex items-center gap-1.5 text-xs font-medium text-slate-500 bg-slate-100/90 px-3 py-1.5 rounded-full border border-slate-200/80">
+              <User className="w-3.5 h-3.5 text-slate-500" />
+              Organized by:&nbsp;<strong className="text-slate-800 font-semibold">{event.organizerName}</strong>
+            </span>
+          </div>
+          <p className="text-xs text-slate-400 pt-0.5">
+            Anyone with the link can see names/notes. Organizer can delete anytime below.
+          </p>
+        </div>
+
+        {/* Quick Action Buttons — 2-column grid to avoid sidebar blank space */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-4 border-t border-slate-100">
+          <button
+            type="button"
+            onClick={() =>
+              copyToClipboard(
+                `${typeof window !== "undefined" ? window.location.origin : ""}/events/${event.id}`,
+                "share"
+              )
+            }
+            className="w-full h-11 px-4 text-sm font-semibold rounded-xl bg-slate-900 hover:bg-slate-800 text-white transition-all shadow-sm flex items-center justify-center gap-2"
+          >
+            <Link2 className="w-4 h-4" />
+            <span className="inline-flex items-center gap-1">
+              {copiedLink === "share" ? (
+                <>
+                  Link Copied! <Check className="w-4 h-4" />
+                </>
+              ) : (
+                "Share Link"
+              )}
+            </span>
+          </button>
+
+          <a
+            href={googleCalendarHref}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="w-full h-11 px-4 text-[13px] font-semibold rounded-xl border border-slate-200 bg-white hover:bg-slate-50 hover:border-slate-300 text-slate-700 transition-all shadow-sm flex items-center justify-center gap-2"
+          >
+            <CalendarPlus className="w-4 h-4 text-slate-500" />
+            <span>Add to Google Calendar</span>
+          </a>
+
+          <a
+            href={icsHref}
+            download
+            className="w-full h-11 px-4 text-[13px] font-semibold rounded-xl border border-slate-200 bg-white hover:bg-slate-50 hover:border-slate-300 text-slate-700 transition-all shadow-sm flex items-center justify-center gap-2"
+          >
+            <Download className="w-4 h-4 text-slate-500" />
+            <span>Apple / Outlook (.ics)</span>
+          </a>
+
+          {isAdmin ? (
+            <a
+              href={adminToken ? `/events/${event.id}/export?admin=${encodeURIComponent(adminToken)}` : `/events/${event.id}/export`}
+              download
+              className="w-full h-11 px-4 text-[13px] font-semibold rounded-xl border border-slate-200 bg-white hover:bg-slate-50 hover:border-slate-300 text-slate-700 transition-all shadow-sm flex items-center justify-center gap-2"
+            >
+              <Download className="w-4 h-4 text-slate-500" />
+              <span>Export CSV Roster</span>
+            </a>
+          ) : null}
         </div>
 
         {/* Admin Bar */}
         {isAdmin && (
-          <div className="pt-5 border-t border-dashed border-amber-200/90 bg-amber-50/40 -mx-8 -mb-8 sm:-mx-10 sm:-mb-10 p-6 sm:p-8 rounded-b-3xl flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
-            <div className="flex items-center gap-2.5 text-xs font-bold text-amber-900">
-              <span className="w-2.5 h-2.5 rounded-full bg-amber-500 animate-pulse" />
-              <span>Organizer Admin Mode Active</span>
-            </div>
-            <span className="text-xs text-amber-700/90">
-              You are viewing with your private admin token. You can edit details, manage options, cancel entries and finalize.
-            </span>
+          <div className="rounded-xl border border-amber-200/70 bg-amber-50/60 px-4 py-3 flex items-center gap-3">
+            <span className="w-2 h-2 rounded-full bg-amber-500 shrink-0" />
+            <p className="text-xs leading-relaxed text-amber-900">
+              <span className="font-bold">Organizer Admin Mode Active</span>
+              <span className="mx-2 text-amber-300">•</span>
+              <span className="font-normal text-amber-700/90">
+                You are viewing with your private admin token. You can edit details, manage options, cancel entries and finalize.
+              </span>
+            </p>
           </div>
         )}
       </div>

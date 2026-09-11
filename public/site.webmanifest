@@ -1,0 +1,21 @@
+{
+  "name": "ManyMano",
+  "short_name": "ManyMano",
+  "description": "Free sign-up sheets and meeting polls. No accounts, no ads.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#fafafc",
+  "theme_color": "#ffffff",
+  "icons": [
+    {
+      "src": "/favicon-32x32.png",
+      "sizes": "32x32",
+      "type": "image/png"
+    },
+    {
+      "src": "/apple-touch-icon.png",
+      "sizes": "180x180",
+      "type": "image/png"
+    }
+  ]
+}

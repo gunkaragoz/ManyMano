@@ -17,23 +17,64 @@ import {
   formatStickyDate,
   type CreateStickyHeaderDetail,
 } from "~/utils/useCreateStickyHeader";
+import {
+  DEFAULT_SITE_URL,
+  OG_IMAGE_HEIGHT,
+  OG_IMAGE_WIDTH,
+  SITE_NAME,
+  SITE_TAGLINE,
+  absoluteUrl,
+  organizationJsonLd,
+  softwareAppJsonLd,
+  websiteJsonLd,
+} from "~/utils/seo";
 
 export const links: LinksFunction = () => [
   { rel: "stylesheet", href: stylesheet },
   { rel: "icon", type: "image/svg+xml", href: "/favicon.svg" },
-  { rel: "apple-touch-icon", href: "/favicon.svg" },
+  { rel: "icon", type: "image/png", sizes: "32x32", href: "/favicon-32x32.png" },
+  { rel: "icon", type: "image/png", sizes: "16x16", href: "/favicon-16x16.png" },
+  { rel: "apple-touch-icon", sizes: "180x180", href: "/apple-touch-icon.png" },
+  { rel: "manifest", href: "/site.webmanifest" },
 ];
 
-export const meta: MetaFunction = () => [
-  { charset: "utf-8" },
-  { name: "viewport", content: "width=device-width, initial-scale=1" },
-  { title: "ManyMano — Sign-Up Sheets & Meeting Polls, No Account Needed" },
-  {
-    name: "description",
-    content:
-      "Free sign-up sheets and meeting polls. No accounts, no ads — create and share in seconds.",
-  },
-];
+const OG_TITLE = `${SITE_NAME} — Sign-Up Sheets & Meeting Polls, No Account Needed`;
+const OG_DESCRIPTION = SITE_TAGLINE;
+
+export const meta: MetaFunction = () => {
+  const siteUrl = DEFAULT_SITE_URL;
+  const ogImage = absoluteUrl("/og-cover.png", siteUrl);
+  return [
+    { charset: "utf-8" },
+    { name: "viewport", content: "width=device-width, initial-scale=1" },
+    { title: OG_TITLE },
+    {
+      name: "description",
+      content:
+        "Free sign-up sheets and meeting polls. No accounts, no ads — create and share in seconds. A free Doodle and SignUpGenius alternative.",
+    },
+    { tagName: "link", rel: "canonical", href: siteUrl + "/" },
+    { name: "robots", content: "index, follow" },
+    { name: "theme-color", content: "#ffffff" },
+    { name: "application-name", content: SITE_NAME },
+    // Open Graph
+    { property: "og:type", content: "website" },
+    { property: "og:site_name", content: SITE_NAME },
+    { property: "og:title", content: OG_TITLE },
+    { property: "og:description", content: OG_DESCRIPTION },
+    { property: "og:url", content: siteUrl + "/" },
+    { property: "og:image", content: ogImage },
+    { property: "og:image:width", content: String(OG_IMAGE_WIDTH) },
+    { property: "og:image:height", content: String(OG_IMAGE_HEIGHT) },
+    { property: "og:image:alt", content: "ManyMano — coordinate people without the chaos" },
+    { property: "og:locale", content: "en_US" },
+    // Twitter
+    { name: "twitter:card", content: "summary_large_image" },
+    { name: "twitter:title", content: OG_TITLE },
+    { name: "twitter:description", content: OG_DESCRIPTION },
+    { name: "twitter:image", content: ogImage },
+  ];
+};
 
 export default function App() {
   const navigation = useNavigation();
@@ -69,6 +110,16 @@ export default function App() {
       <head>
         <Meta />
         <Links />
+        <script
+          type="application/ld+json"
+          dangerouslySetInnerHTML={{
+            __html: JSON.stringify([
+              organizationJsonLd(DEFAULT_SITE_URL),
+              websiteJsonLd(DEFAULT_SITE_URL),
+              softwareAppJsonLd(DEFAULT_SITE_URL),
+            ]),
+          }}
+        />
       </head>
       <body className="flex flex-col min-h-screen bg-[#fafafc] text-slate-900 selection:bg-blue-100 selection:text-blue-900">
         {isLoading && (
@@ -144,7 +195,30 @@ export default function App() {
 
         {/* Minimal Clean Footer */}
         <footer className="border-t border-slate-200/60 bg-white/60 py-8 mt-16">
-          <div className="max-w-5xl mx-auto px-6 sm:px-8 flex flex-col sm:flex-row items-center justify-between gap-4 text-xs text-slate-500">
+          <div className="max-w-5xl mx-auto px-6 sm:px-8 flex flex-col gap-6 text-xs text-slate-500">
+            <nav aria-label="Footer" className="flex flex-wrap items-center justify-center gap-x-6 gap-y-2 text-slate-600 font-medium">
+              <Link to="/create/signup" className="hover:text-slate-900 transition-colors">
+                Create sign-up sheet
+              </Link>
+              <Link to="/create/poll" className="hover:text-slate-900 transition-colors">
+                Create meeting poll
+              </Link>
+              <Link to="/create" className="hover:text-slate-900 transition-colors">
+                How it works
+              </Link>
+              <a href="/#faq" className="hover:text-slate-900 transition-colors">
+                FAQ
+              </a>
+              <a
+                href="https://github.com/manymano/manymano"
+                target="_blank"
+                rel="noreferrer"
+                className="hover:text-slate-900 transition-colors"
+              >
+                GitHub
+              </a>
+            </nav>
+          <div className="flex flex-col sm:flex-row items-center justify-between gap-4">
             <div className="flex items-center gap-2">
               <span className="font-semibold">
                 <span className="text-blue-600">Many</span>
@@ -171,6 +245,7 @@ export default function App() {
                 GitHub
               </a>
             </div>
+          </div>
           </div>
         </footer>
 
