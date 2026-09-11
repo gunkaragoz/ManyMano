@@ -117,6 +117,11 @@ export const HOME_FAQ: FaqItem[] = [
     answer:
       "Propose candidate time slots, attendees vote Yes, If need be, or No, and ManyMano highlights the top consensus slot. The organizer can then lock the winning time.",
   },
+  {
+    question: "What does ManyMano mean?",
+    answer:
+      "Mano means hand in Spanish. ManyMano is phonetically playful and grammatically imperfect on purpose — it captures the idea of coordinating many hands in one place.",
+  },
 ];
 
 export function faqPageJsonLd(faqs: FaqItem[] = HOME_FAQ) {
