@@ -5,6 +5,7 @@ export const events = sqliteTable("events", {
   type: text("type").notNull(), // 'SIGNUP_SHEET' | 'TIME_POLL'
   title: text("title").notNull(),
   description: text("description"),
+  eventDate: text("event_date"), // e.g. '2026-10-17' or human readable
   location: text("location"),
   organizerName: text("organizer_name").notNull(),
   organizerEmail: text("organizer_email").notNull(),

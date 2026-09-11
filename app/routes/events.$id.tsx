@@ -442,7 +442,13 @@ export default function EventView() {
               </p>
             )}
 
-            <div className="flex flex-wrap gap-5 pt-1 text-xs text-slate-500">
+            <div className="flex flex-wrap items-center gap-4 pt-1 text-xs text-slate-500">
+              {event.eventDate && (
+                <div className="flex items-center gap-1.5 font-semibold text-slate-800 bg-slate-100/90 px-3 py-1 rounded-full border border-slate-200/80">
+                  <span>📅</span>
+                  <span>{new Date(event.eventDate + "T00:00:00").toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric", year: "numeric" })}</span>
+                </div>
+              )}
               {event.location && (
                 <div className="flex items-center gap-1.5">
                   <span>📍</span>

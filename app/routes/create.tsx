@@ -16,6 +16,7 @@ export async function action({ request, context }: ActionFunctionArgs) {
 
   const type = (formData.get("type") as string) || "SIGNUP_SHEET";
   const title = (formData.get("title") as string)?.trim();
+  const eventDate = (formData.get("eventDate") as string)?.trim() || null;
   const description = (formData.get("description") as string)?.trim() || null;
   const location = (formData.get("location") as string)?.trim() || null;
   const organizerName = (formData.get("organizerName") as string)?.trim();
@@ -30,7 +31,7 @@ export async function action({ request, context }: ActionFunctionArgs) {
     return json({ error: "Please enter your organizer name." }, { status: 400 });
   }
   if (!organizerEmail || !organizerEmail.includes("@")) {
-    return json({ error: "A valid email is required to send your secret management link." }, { status: 400 });
+    return json({ error: "A valid email is required to receive your secret management link." }, { status: 400 });
   }
 
   // Parse slots
@@ -40,17 +41,25 @@ export async function action({ request, context }: ActionFunctionArgs) {
   const slotEndTimes = formData.getAll("slotEndTime") as string[];
 
   const validSlots = slotTitles
-    .map((t, idx) => ({
-      title: t.trim(),
-      capacity: parseInt(slotCapacities[idx] || "1", 10) || 1,
-      startTime: slotStartTimes[idx]?.trim() || null,
-      endTime: slotEndTimes[idx]?.trim() || null,
-      displayOrder: idx,
-    }))
+    .map((t, idx) => {
+      const startTime = slotStartTimes[idx]?.trim() || null;
+      const endTime = slotEndTimes[idx]?.trim() || null;
+      let title = t.trim();
+      if (!title && startTime) {
+        title = endTime ? `${startTime} – ${endTime}` : startTime;
+      }
+      return {
+        title,
+        capacity: parseInt(slotCapacities[idx] || "1", 10) || 1,
+        startTime,
+        endTime,
+        displayOrder: idx,
+      };
+    })
     .filter((s) => s.title.length > 0);
 
   if (validSlots.length === 0) {
-    return json({ error: "Please add at least one slot or time option." }, { status: 400 });
+    return json({ error: "Please add at least one time slot or role." }, { status: 400 });
   }
 
   const eventId = crypto.randomUUID();
@@ -62,6 +71,7 @@ export async function action({ request, context }: ActionFunctionArgs) {
     id: eventId,
     type,
     title,
+    eventDate,
     description,
     location,
     organizerName,
@@ -86,7 +96,7 @@ export async function action({ request, context }: ActionFunctionArgs) {
     });
   }
 
-  // Compose management link
+  // Compose management links
   const url = new URL(request.url);
   const adminUrl = `${url.origin}/events/${eventId}?admin=${adminToken}`;
   const publicUrl = `${url.origin}/events/${eventId}`;
@@ -105,6 +115,7 @@ export async function action({ request, context }: ActionFunctionArgs) {
           <p style="margin: 0 0 12px 0;"><strong>Public Link for Attendees:</strong><br><a href="${publicUrl}" style="color: #2563eb;">${publicUrl}</a></p>
           <p style="margin: 0;"><strong>Secret Management Link (Keep Private!):</strong><br><a href="${adminUrl}" style="color: #2563eb;">${adminUrl}</a></p>
         </div>
+        ${eventDate ? `<p><strong>Date:</strong> ${eventDate}</p>` : ""}
         <p style="font-size: 13px; color: #64748b;">Bookmark your secret management link to view RSVPs, download CSV spreadsheets, and manage your event anytime.</p>
         <p style="margin-top: 24px; font-weight: 600;">— ManyMano</p>
       </div>
@@ -122,16 +133,29 @@ export default function CreateEvent() {
   const navigation = useNavigation();
   const isSubmitting = navigation.state === "submitting";
 
-  // Initial slots state
-  const [slots, setSlots] = useState<Array<{ id: number; title: string; capacity: number }>>([
+  // Today's date formatted for default input
+  const todayStr = new Date().toISOString().split("T")[0];
+
+  // Initial time slots
+  const [slots, setSlots] = useState<Array<{
+    id: number;
+    title: string;
+    startTime: string;
+    endTime: string;
+    capacity: number;
+  }>>([
     {
       id: 1,
-      title: defaultType === "SIGNUP_SHEET" ? "Morning Welcome & Check-in" : "Wednesday, Oct 14 @ 10:00 AM – 11:00 AM",
+      title: defaultType === "SIGNUP_SHEET" ? "Morning Welcome & Check-in" : "Morning Slot",
+      startTime: "09:00",
+      endTime: "11:00",
       capacity: defaultType === "SIGNUP_SHEET" ? 2 : 999,
     },
     {
       id: 2,
-      title: defaultType === "SIGNUP_SHEET" ? "Snack & Drink Table" : "Thursday, Oct 15 @ 2:00 PM – 3:00 PM",
+      title: defaultType === "SIGNUP_SHEET" ? "Snack & Drink Table" : "Afternoon Slot",
+      startTime: "13:00",
+      endTime: "15:00",
       capacity: defaultType === "SIGNUP_SHEET" ? 3 : 999,
     },
   ]);
@@ -142,6 +166,8 @@ export default function CreateEvent() {
       {
         id: Date.now(),
         title: "",
+        startTime: "",
+        endTime: "",
         capacity: eventType === "SIGNUP_SHEET" ? 1 : 999,
       },
     ]);
@@ -191,8 +217,8 @@ export default function CreateEvent() {
                 onChange={() => {
                   setEventType("SIGNUP_SHEET");
                   setSlots([
-                    { id: 1, title: "Morning Welcome & Check-in", capacity: 2 },
-                    { id: 2, title: "Snack & Drink Table", capacity: 3 },
+                    { id: 1, title: "Morning Welcome & Check-in", startTime: "09:00", endTime: "11:00", capacity: 2 },
+                    { id: 2, title: "Snack & Drink Table", startTime: "11:00", endTime: "13:00", capacity: 3 },
                   ]);
                 }}
                 className="sr-only"
@@ -226,8 +252,8 @@ export default function CreateEvent() {
                 onChange={() => {
                   setEventType("TIME_POLL");
                   setSlots([
-                    { id: 1, title: "Wednesday, Oct 14 @ 10:00 AM – 11:00 AM", capacity: 999 },
-                    { id: 2, title: "Thursday, Oct 15 @ 2:00 PM – 3:00 PM", capacity: 999 },
+                    { id: 1, title: "Morning Slot", startTime: "10:00", endTime: "11:00", capacity: 999 },
+                    { id: 2, title: "Afternoon Slot", startTime: "14:00", endTime: "15:00", capacity: 999 },
                   ]);
                 }}
                 className="sr-only"
@@ -248,7 +274,7 @@ export default function CreateEvent() {
           </div>
         </div>
 
-        {/* Step 2: Event Details */}
+        {/* Step 2: Event Details (Includes Event Date) */}
         <div className="space-y-5 pt-2 border-t border-slate-100">
           <label className="block text-xs font-bold uppercase tracking-wider text-slate-500">
             Step 2 • Event Details
@@ -266,10 +292,38 @@ export default function CreateEvent() {
                 placeholder={
                   eventType === "SIGNUP_SHEET"
                     ? "e.g., Spring Community Garden Cleanup"
-                    : "e.g., Product Roadmap Kickoff"
+                    : "e.g., Q4 Product Roadmap Planning"
                 }
                 className="w-full px-4 py-3 rounded-xl border border-slate-200/90 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all placeholder:text-slate-400"
               />
+            </div>
+
+            {/* Event Date & Location Row */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 mb-1.5">
+                  Event Date *
+                </label>
+                <input
+                  type="date"
+                  name="eventDate"
+                  required
+                  defaultValue={todayStr}
+                  className="w-full px-4 py-3 rounded-xl border border-slate-200/90 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all text-slate-800"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 mb-1.5">
+                  Location or Meeting Link (Optional)
+                </label>
+                <input
+                  type="text"
+                  name="location"
+                  placeholder="e.g., Park North Gate or https://meet.google.com/xyz"
+                  className="w-full px-4 py-3 rounded-xl border border-slate-200/90 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all placeholder:text-slate-400"
+                />
+              </div>
             </div>
 
             <div>
@@ -279,23 +333,12 @@ export default function CreateEvent() {
               <textarea
                 name="description"
                 rows={3}
-                placeholder="Share any background details, what to bring, or meeting agendas..."
+                placeholder="Share any background details, instructions, or meeting agenda..."
                 className="w-full px-4 py-3 rounded-xl border border-slate-200/90 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all placeholder:text-slate-400 leading-relaxed"
               />
             </div>
 
-            <div>
-              <label className="block text-xs font-semibold text-slate-700 mb-1.5">
-                Location or Link (Optional)
-              </label>
-              <input
-                type="text"
-                name="location"
-                placeholder="e.g., Park North Gate or https://meet.google.com/abc-defg"
-                className="w-full px-4 py-3 rounded-xl border border-slate-200/90 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all placeholder:text-slate-400"
-              />
-            </div>
-
+            {/* Organizer Info */}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-1">
               <div>
                 <label className="block text-xs font-semibold text-slate-700 mb-1.5">
@@ -329,81 +372,115 @@ export default function CreateEvent() {
           </div>
         </div>
 
-        {/* Step 3: Slots / Options */}
+        {/* Step 3: Time Slots */}
         <div className="space-y-4 pt-2 border-t border-slate-100">
           <div className="flex items-center justify-between">
             <div>
               <label className="block text-xs font-bold uppercase tracking-wider text-slate-500">
-                Step 3 • {eventType === "SIGNUP_SHEET" ? "Slots & Items" : "Proposed Meeting Times"}
+                Step 3 • Time Slots
               </label>
               <p className="text-xs text-slate-500 mt-0.5">
                 {eventType === "SIGNUP_SHEET"
-                  ? "Set role or item names and how many people can sign up for each."
-                  : "List the candidate date & time options for attendees to vote on."}
+                  ? "Define the shifts or time slots for the event date and how many volunteers are needed."
+                  : "Specify the candidate time windows for attendees to vote on."}
               </p>
             </div>
 
             <button
               type="button"
               onClick={addSlot}
-              className="px-3 py-1.5 text-xs font-semibold rounded-xl border border-slate-200 hover:border-blue-400 hover:text-blue-600 bg-white transition-all shadow-sm flex items-center gap-1 shrink-0"
+              className="px-3.5 py-1.5 text-xs font-semibold rounded-xl border border-slate-200 hover:border-blue-400 hover:text-blue-600 bg-white transition-all shadow-sm flex items-center gap-1 shrink-0"
             >
-              <span>+ Add Option</span>
+              <span>+ Add Time Slot</span>
             </button>
           </div>
 
-          <div className="space-y-3">
+          <div className="space-y-3.5">
             {slots.map((slot, index) => (
               <div
                 key={slot.id}
-                className="flex items-center gap-3 p-3 sm:p-3.5 bg-slate-50/70 rounded-2xl border border-slate-200/80 transition-all hover:bg-slate-50"
+                className="p-4 bg-slate-50/70 rounded-2xl border border-slate-200/80 transition-all space-y-3"
               >
-                <span className="text-xs font-bold text-slate-400 w-5 text-center shrink-0">
-                  {index + 1}.
-                </span>
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-bold text-slate-700">
+                    Slot {index + 1}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => removeSlot(slot.id)}
+                    disabled={slots.length <= 1}
+                    className="text-slate-400 hover:text-rose-500 font-bold text-xs disabled:opacity-20 transition-colors"
+                  >
+                    Remove ✕
+                  </button>
+                </div>
 
-                <div className="flex-1 grid grid-cols-1 sm:grid-cols-4 gap-2.5">
-                  <div className={eventType === "SIGNUP_SHEET" ? "sm:col-span-3" : "sm:col-span-4"}>
+                <div className="grid grid-cols-1 sm:grid-cols-12 gap-3 items-center">
+                  {/* Start and End Times */}
+                  <div className="sm:col-span-3">
+                    <label className="block text-[10px] uppercase font-bold text-slate-400 mb-1">
+                      Start Time
+                    </label>
+                    <input
+                      type="time"
+                      name="slotStartTime"
+                      defaultValue={slot.startTime}
+                      className="w-full px-3 py-2 text-xs rounded-xl border border-slate-200 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500"
+                    />
+                  </div>
+
+                  <div className="sm:col-span-3">
+                    <label className="block text-[10px] uppercase font-bold text-slate-400 mb-1">
+                      End Time
+                    </label>
+                    <input
+                      type="time"
+                      name="slotEndTime"
+                      defaultValue={slot.endTime}
+                      className="w-full px-3 py-2 text-xs rounded-xl border border-slate-200 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500"
+                    />
+                  </div>
+
+                  {/* Title or Role description */}
+                  <div className={eventType === "SIGNUP_SHEET" ? "sm:col-span-4" : "sm:col-span-6"}>
+                    <label className="block text-[10px] uppercase font-bold text-slate-400 mb-1">
+                      {eventType === "SIGNUP_SHEET" ? "Role or Item Name" : "Label / Description"}
+                    </label>
                     <input
                       type="text"
                       name="slotTitle"
                       required
                       placeholder={
                         eventType === "SIGNUP_SHEET"
-                          ? "Role or item (e.g. Afternoon Clean Up Crew)"
-                          : "Option (e.g. Friday Oct 16 @ 1:00 PM – 2:00 PM)"
+                          ? "e.g., Morning Setup Crew"
+                          : "e.g., Morning Strategy Session"
                       }
                       defaultValue={slot.title}
-                      className="w-full px-3.5 py-2.5 text-xs sm:text-sm rounded-xl border border-slate-200 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500"
+                      className="w-full px-3 py-2 text-xs rounded-xl border border-slate-200 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500"
                     />
                   </div>
 
+                  {/* Capacity for volunteers */}
                   {eventType === "SIGNUP_SHEET" && (
-                    <div className="flex items-center gap-2">
-                      <span className="text-xs text-slate-500 whitespace-nowrap">Spots:</span>
+                    <div className="sm:col-span-2">
+                      <label className="block text-[10px] uppercase font-bold text-slate-400 mb-1">
+                        Spots
+                      </label>
                       <input
                         type="number"
                         name="slotCapacity"
                         min="1"
                         max="999"
                         defaultValue={slot.capacity}
-                        className="w-full px-3 py-2.5 text-xs sm:text-sm rounded-xl border border-slate-200 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500"
+                        className="w-full px-3 py-2 text-xs rounded-xl border border-slate-200 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500"
                       />
                     </div>
                   )}
+
                   {eventType === "TIME_POLL" && (
                     <input type="hidden" name="slotCapacity" value="999" />
                   )}
                 </div>
-
-                <button
-                  type="button"
-                  onClick={() => removeSlot(slot.id)}
-                  disabled={slots.length <= 1}
-                  className="text-slate-400 hover:text-rose-500 font-bold px-2 py-1 disabled:opacity-20 transition-colors"
-                >
-                  ✕
-                </button>
               </div>
             ))}
           </div>

@@ -8,6 +8,13 @@
       "when": 1789099930105,
       "tag": "0000_steady_iron_monger",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "6",
+      "when": 1789100569191,
+      "tag": "0001_clever_black_tarantula",
+      "breakpoints": true
     }
   ]
 }

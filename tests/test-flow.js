@@ -23,12 +23,13 @@ const adminToken = "secret-admin-token-" + testIdSuffix;
 const now = new Date().toISOString();
 
 db.prepare(`
-  INSERT INTO events (id, type, title, description, location, organizer_name, organizer_email, admin_token, status, settings, timezone, created_at, updated_at)
-  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  INSERT INTO events (id, type, title, event_date, description, location, organizer_name, organizer_email, admin_token, status, settings, timezone, created_at, updated_at)
+  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 `).run(
   volunteerEventId,
   "SIGNUP_SHEET",
   "Park Cleanup 2026",
+  "2026-10-17",
   "Annual community volunteering event",
   "Central Park",
   "Sarah Chen",
@@ -82,12 +83,13 @@ console.log("✓ Slot capacity enforcement verified: Slot 1 is full!");
 console.log("\n--- TEST 2: Meeting Time Poll Flow (Classic Doodle) ---");
 const pollEventId = "test-poll-event-" + testIdSuffix;
 db.prepare(`
-  INSERT INTO events (id, type, title, description, location, organizer_name, organizer_email, admin_token, status, settings, timezone, created_at, updated_at)
-  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  INSERT INTO events (id, type, title, event_date, description, location, organizer_name, organizer_email, admin_token, status, settings, timezone, created_at, updated_at)
+  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 `).run(
   pollEventId,
   "TIME_POLL",
   "Design Review Meeting",
+  "2026-10-15",
   "Pick the best 60-min window",
   "Google Meet",
   "David",
