@@ -2,7 +2,7 @@
 
 > An easy, ad-free tool for sign-up sheets and meeting time polls. No accounts — create and share in seconds. Free forever, open source. Built to run 100% free on **Cloudflare Pages & D1** with zero subscription costs.
 
-[![Deploy to Cloudflare](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/manymano/manymano)
+[![Deploy to Cloudflare](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/gunkaragoz/ManyMano)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
 ---
@@ -36,7 +36,7 @@ ManyMano is architected to fit comfortably inside **Cloudflare's Free Tier**:
 - **Resend Transactional Email**: 3,000 free emails/month.
 
 ### Step 1: Deploy with Git
-1. Click the **[Deploy to Cloudflare](https://deploy.workers.cloudflare.com/?url=https://github.com/manymano/manymano)** button above.
+1. Click the **[Deploy to Cloudflare](https://deploy.workers.cloudflare.com/?url=https://github.com/gunkaragoz/ManyMano)** button above.
 2. Connect your GitHub account and fork the repository.
 
 ### Step 2: Create your free D1 Database

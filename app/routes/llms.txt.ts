@@ -33,7 +33,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     link("Create a sign-up sheet", "/create/signup"),
     link("Create a meeting poll", "/create/poll"),
     link("How it works", "/create"),
-    "- [GitHub](https://github.com/manymano/manymano)",
+    "- [GitHub](https://github.com/gunkaragoz/ManyMano)",
     "",
   ].join("\n");
 

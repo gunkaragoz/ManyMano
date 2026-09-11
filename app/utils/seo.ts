@@ -50,7 +50,7 @@ export function organizationJsonLd(siteUrl: string = DEFAULT_SITE_URL) {
     name: SITE_NAME,
     url: siteUrl,
     logo: absoluteUrl("/favicon.svg", siteUrl),
-    sameAs: ["https://github.com/manymano/manymano"],
+    sameAs: ["https://github.com/gunkaragoz/ManyMano"],
   };
 }
 
