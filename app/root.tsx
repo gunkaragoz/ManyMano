@@ -148,6 +148,14 @@ export default function App() {
             </div>
             <div className="flex items-center gap-5 text-slate-400">
               <a
+                href="https://gnkz.net"
+                target="_blank"
+                rel="noreferrer"
+                className="hover:text-slate-900 transition-colors font-medium text-slate-600"
+              >
+                gnkz.net
+              </a>
+              <a
                 href="https://github.com"
                 target="_blank"
                 rel="noreferrer"

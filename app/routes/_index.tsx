@@ -20,8 +20,7 @@ export default function Index() {
         </h1>
 
         <p className="text-base sm:text-lg text-slate-600 leading-relaxed max-w-xl mx-auto font-normal">
-          Sign-up sheets and meeting polls in seconds.
-          No accounts, no ads, no hassle.
+          Create sign-up sheets and meeting polls in seconds.
         </p>
       </div>
 

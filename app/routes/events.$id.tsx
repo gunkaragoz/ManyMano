@@ -37,6 +37,7 @@ import {
   secretMatches,
 } from "~/utils/auth";
 import { expiryDateFor, isExpired, pruneExpiredEvents, RETENTION_DAYS } from "~/utils/retention";
+import { buildGoogleCalendarUrl, pickCalendarSlot } from "~/utils/calendar";
 
 function publicEventShape(e: typeof events.$inferSelect) {
   return {
@@ -336,6 +337,15 @@ export async function action({ request, params, context }: ActionFunctionArgs) {
       const cancelUrl = `${url.origin}/events/${eventId}?cancel_token=${encodeURIComponent(editTokenPlain)}`;
       const shiftPrefix = ((targetSlot as { shiftName?: string | null }).shiftName || "").trim();
       const taskLabel = shiftPrefix ? `${shiftPrefix} – ${targetSlot.title}` : targetSlot.title;
+      const googleCalendarUrl = buildGoogleCalendarUrl({
+        title: `${taskLabel} — ${event.title}`,
+        description: event.description,
+        location: event.location,
+        eventDate: event.eventDate,
+        startTime: targetSlot.startTime,
+        endTime: targetSlot.endTime,
+        url: `${url.origin}/events/${eventId}`,
+      });
       await sendEmail({
         apiKey: env.RESEND_API_KEY,
         to: participantEmail,
@@ -346,11 +356,15 @@ export async function action({ request, params, context }: ActionFunctionArgs) {
             <p>Hi ${escapeHtml(participantName)},</p>
             <p>You have secured your spot for <strong>${escapeHtml(taskLabel)}</strong> at <strong>${escapeHtml(event.title)}</strong>.</p>
             ${event.location ? `<p><strong>Location:</strong> ${escapeHtml(event.location)}</p>` : ""}
+            <p>
+              <a href="${escapeHtml(googleCalendarUrl)}" style="color: #2563eb;">Add to Google Calendar</a>
+              &nbsp;·&nbsp;
+              <a href="${escapeHtml(url.origin)}/events/${escapeHtml(eventId)}/ics" style="color: #2563eb;">Download .ics (Apple/Outlook)</a>
+            </p>
             <div style="background: #f8fafc; border: 1px solid #e2e8f0; padding: 16px; border-radius: 12px; margin: 24px 0;">
               <p style="margin: 0 0 10px 0; font-size: 13px;"><strong>Need to cancel?</strong></p>
               <a href="${escapeHtml(cancelUrl)}" style="color: #dc2626; font-size: 13px;">Cancel this sign-up</a>
             </div>
-            <p><a href="${escapeHtml(url.origin)}/events/${escapeHtml(eventId)}/ics" style="color: #2563eb;">Download Calendar Invite (.ics)</a></p>
             <p style="margin-top: 24px; font-weight: 600;">— ManyMano</p>
           </div>
         `,
@@ -744,6 +758,30 @@ export default function EventView() {
     return groups;
   }, [slots]);
 
+  // Calendar: winning slot first, else earliest timed slot. Times combine with
+  // event.eventDate inside the calendar utils. The Google link is a one-click
+  // template (no file download); the .ics download covers Apple/Outlook.
+  const calendarSlot = useMemo(
+    () => pickCalendarSlot(slots, event.winningSlotId),
+    [slots, event.winningSlotId]
+  );
+  const icsHref =
+    isAdmin && adminToken
+      ? `/events/${event.id}/ics?admin=${encodeURIComponent(adminToken)}`
+      : `/events/${event.id}/ics`;
+  const googleCalendarHref = useMemo(() => {
+    const origin = typeof window !== "undefined" ? window.location.origin : "";
+    return buildGoogleCalendarUrl({
+      title: event.title,
+      description: event.description,
+      location: event.location,
+      eventDate: event.eventDate,
+      startTime: calendarSlot?.startTime ?? null,
+      endTime: calendarSlot?.endTime ?? null,
+      url: origin ? `${origin}/events/${event.id}` : null,
+    });
+  }, [event.title, event.description, event.location, event.eventDate, event.id, calendarSlot]);
+
   return (
     <div className="space-y-10 py-2">
       {/* Event Created Banner with 1-Click Copy Links */}
@@ -933,12 +971,22 @@ export default function EventView() {
             </button>
 
             <a
-              href={isAdmin && adminToken ? `/events/${event.id}/ics?admin=${encodeURIComponent(adminToken)}` : `/events/${event.id}/ics`}
-              download
-              className="w-full px-5 py-3.5 text-sm font-semibold rounded-2xl border border-blue-200/80 bg-blue-50/50 hover:bg-blue-50 text-blue-700 transition-all shadow-sm flex items-center justify-center gap-2"
+              href={googleCalendarHref}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="w-full px-5 py-3.5 text-sm font-semibold rounded-2xl bg-blue-600 hover:bg-blue-700 text-white transition-all shadow-sm flex items-center justify-center gap-2"
             >
               <CalendarPlus className="w-4 h-4" />
-              <span>Add to Calendar (.ics)</span>
+              <span>Add to Google Calendar</span>
+            </a>
+
+            <a
+              href={icsHref}
+              download
+              className="w-full px-5 py-3 text-sm font-semibold rounded-2xl border border-blue-200/80 bg-blue-50/50 hover:bg-blue-50 text-blue-700 transition-all shadow-sm flex items-center justify-center gap-2"
+            >
+              <Download className="w-4 h-4" />
+              <span>Apple / Outlook (.ics)</span>
             </a>
 
             {isAdmin && (

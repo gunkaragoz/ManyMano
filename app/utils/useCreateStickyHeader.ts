@@ -14,10 +14,11 @@ export function emitCreateStickyHeader(detail: CreateStickyHeaderDetail) {
 }
 
 /**
- * Observes `sentinelRef` (placed around the Meeting/Event Title field).
- * Once the title scrolls out of view above the sticky nav, emits the
- * current title + date so the global navigation header can show them readonly.
- * Emits `visible: false` on unmount so the header clears on route change.
+ * Observes `sentinelRef` (a 1px marker placed immediately after the
+ * Meeting/Event Title + Date fields). Once that point scrolls under the
+ * sticky nav, emits the current title + date so the global navigation
+ * header can show them readonly. Emits `visible: false` on unmount so the
+ * header clears on route change.
  */
 export function useCreateStickyHeader(
   title: string,
@@ -28,18 +29,36 @@ export function useCreateStickyHeader(
 
   useEffect(() => {
     const el = sentinelRef.current;
-    if (!el || typeof IntersectionObserver === "undefined") return;
-    const observer = new IntersectionObserver(
-      ([entry]) => {
-        // Sentinel sits immediately after the Title + Date fields.
-        // Show the header pill as soon as that point scrolls under the
-        // sticky nav (rootMargin offsets for the ~72px header height).
-        setScrolledPast(!entry.isIntersecting && entry.boundingClientRect.top < 0);
-      },
-      { threshold: 0, rootMargin: "-72px 0px 0px 0px" }
-    );
-    observer.observe(el);
-    return () => observer.disconnect();
+    if (!el || typeof window === "undefined") return;
+
+    let raf = 0;
+    const check = () => {
+      cancelAnimationFrame(raf);
+      raf = requestAnimationFrame(() => {
+        // Sentinel above (or under) the ~72px sticky nav => title/date no longer visible.
+        setScrolledPast(el.getBoundingClientRect().top < 80);
+      });
+    };
+
+    // Initial check (covers restore-scroll / deep links landing mid-page).
+    check();
+
+    // IntersectionObserver gives us automatic updates; the scroll/resize
+    // listeners are a fallback so it also updates when IO is throttled
+    // or the sentinel moves without an intersection change.
+    const observer =
+      typeof IntersectionObserver !== "undefined"
+        ? new IntersectionObserver(check, { threshold: 0 })
+        : null;
+    observer?.observe(el);
+    window.addEventListener("scroll", check, { passive: true });
+    window.addEventListener("resize", check);
+    return () => {
+      observer?.disconnect();
+      window.removeEventListener("scroll", check);
+      window.removeEventListener("resize", check);
+      cancelAnimationFrame(raf);
+    };
     // Ref object identity is stable; observe once on mount.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
