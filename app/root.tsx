@@ -60,7 +60,7 @@ export default function App() {
             <nav className="flex items-center gap-4">
               <Link
                 to="/create"
-                className="inline-flex items-center gap-1.5 px-4 py-2 text-xs font-semibold rounded-full bg-slate-900 text-white hover:bg-slate-800 shadow-sm transition-all hover:scale-[1.02] active:scale-[0.98]"
+                className="inline-flex items-center gap-1.5 px-4 py-2 text-xs font-semibold rounded-2xl bg-slate-900 text-white hover:bg-slate-800 shadow-sm transition-all hover:scale-[1.02] active:scale-[0.98]"
               >
                 <span>+</span>
                 <span>Create Event</span>

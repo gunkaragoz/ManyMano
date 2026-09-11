@@ -387,7 +387,7 @@ export default function CreateMeetingPoll() {
             <button
               type="button"
               onClick={addTimeSlot}
-              className="px-3.5 py-1.5 text-xs font-semibold rounded-xl border border-slate-200 hover:border-blue-400 hover:text-blue-600 bg-white transition-all shadow-sm flex items-center gap-1 shrink-0"
+              className="px-3.5 py-1.5 text-xs font-semibold rounded-2xl border border-slate-200 hover:border-blue-400 hover:text-blue-600 bg-white transition-all shadow-sm flex items-center gap-1 shrink-0"
             >
               <span>+ Add Time Slot</span>
             </button>

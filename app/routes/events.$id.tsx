@@ -588,7 +588,7 @@ export default function EventView() {
                       "public"
                     )
                   }
-                  className="px-3.5 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold shrink-0 transition-colors shadow-sm inline-flex items-center gap-1.5"
+                  className="px-3.5 py-2 rounded-2xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold shrink-0 transition-colors shadow-sm inline-flex items-center gap-1.5"
                 >
                   {copiedLink === "public" ? (
                     <>
@@ -616,7 +616,7 @@ export default function EventView() {
                   onClick={() =>
                     copyToClipboard(typeof window !== "undefined" ? window.location.href : "", "admin")
                   }
-                  className="px-3.5 py-2 rounded-xl bg-slate-900 hover:bg-slate-800 text-white text-xs font-semibold shrink-0 transition-colors shadow-sm inline-flex items-center gap-1.5"
+                  className="px-3.5 py-2 rounded-2xl bg-slate-900 hover:bg-slate-800 text-white text-xs font-semibold shrink-0 transition-colors shadow-sm inline-flex items-center gap-1.5"
                 >
                   {copiedLink === "admin" ? (
                     <>
@@ -702,7 +702,7 @@ export default function EventView() {
           </div>
 
           {/* Quick Action Buttons */}
-          <div className="flex flex-wrap md:flex-col gap-2.5 shrink-0 pt-1">
+          <div className="flex flex-wrap md:flex-col gap-2.5 shrink-0 pt-1 w-full md:w-64">
             <button
               type="button"
               onClick={() =>
@@ -711,13 +711,13 @@ export default function EventView() {
                   "share"
                 )
               }
-              className="px-4 py-2.5 text-xs font-semibold rounded-xl border border-slate-200 hover:border-slate-300 bg-white text-slate-700 transition-all shadow-sm flex items-center justify-center gap-2 hover:bg-slate-50"
+              className="w-full px-5 py-3.5 text-sm font-semibold rounded-2xl border border-slate-200 hover:border-slate-300 bg-white text-slate-700 transition-all shadow-sm flex items-center justify-center gap-2 hover:bg-slate-50"
             >
-              <Link2 className="w-3.5 h-3.5" />
+              <Link2 className="w-4 h-4" />
               <span className="inline-flex items-center gap-1">
                 {copiedLink === "share" ? (
                   <>
-                    Link Copied! <Check className="w-3.5 h-3.5" />
+                    Link Copied! <Check className="w-4 h-4" />
                   </>
                 ) : (
                   "Share Link"
@@ -728,9 +728,9 @@ export default function EventView() {
             <a
               href={`/events/${event.id}/ics`}
               download
-              className="px-4 py-2.5 text-xs font-semibold rounded-xl border border-blue-200/80 bg-blue-50/50 hover:bg-blue-50 text-blue-700 transition-all shadow-sm flex items-center justify-center gap-2"
+              className="w-full px-5 py-3.5 text-sm font-semibold rounded-2xl border border-blue-200/80 bg-blue-50/50 hover:bg-blue-50 text-blue-700 transition-all shadow-sm flex items-center justify-center gap-2"
             >
-              <CalendarPlus className="w-3.5 h-3.5" />
+              <CalendarPlus className="w-4 h-4" />
               <span>Add to Calendar (.ics)</span>
             </a>
 
@@ -738,9 +738,9 @@ export default function EventView() {
               <a
                 href={`/events/${event.id}/export`}
                 download
-                className="px-4 py-2.5 text-xs font-semibold rounded-xl border border-slate-200 hover:border-slate-300 bg-white hover:bg-slate-50 text-slate-700 transition-all shadow-sm flex items-center justify-center gap-2"
+                className="w-full px-5 py-3.5 text-sm font-semibold rounded-2xl border border-slate-200 hover:border-slate-300 bg-white hover:bg-slate-50 text-slate-700 transition-all shadow-sm flex items-center justify-center gap-2"
               >
-                <Download className="w-3.5 h-3.5" />
+                <Download className="w-4 h-4" />
                 <span>Export CSV Roster</span>
               </a>
             )}
@@ -749,9 +749,9 @@ export default function EventView() {
               <button
                 type="button"
                 onClick={() => setShowEdit((v) => !v)}
-                className="px-4 py-2.5 text-xs font-semibold rounded-xl bg-slate-900 hover:bg-slate-800 text-white transition-all shadow-sm flex items-center justify-center gap-2"
+                className="w-full px-5 py-3.5 text-sm font-semibold rounded-2xl bg-slate-900 hover:bg-slate-800 text-white transition-all shadow-sm flex items-center justify-center gap-2"
               >
-                <Pencil className="w-3.5 h-3.5" />
+                <Pencil className="w-4 h-4" />
                 <span>{showEdit ? "Close Editor" : "Edit Event"}</span>
               </button>
             )}
@@ -782,7 +782,7 @@ export default function EventView() {
             <button
               type="button"
               onClick={() => setShowEdit(false)}
-              className="px-3.5 py-1.5 text-xs font-semibold rounded-xl border border-slate-200 hover:border-slate-300 hover:bg-slate-50 bg-white text-slate-600 transition-all shadow-sm inline-flex items-center gap-1"
+              className="px-3.5 py-1.5 text-xs font-semibold rounded-2xl border border-slate-200 hover:border-slate-300 hover:bg-slate-50 bg-white text-slate-600 transition-all shadow-sm inline-flex items-center gap-1"
             >
               Close <X className="w-3 h-3" />
             </button>
@@ -926,7 +926,7 @@ export default function EventView() {
                     <button
                       type="submit"
                       disabled={isSubmitting}
-                      className="px-4 py-2 rounded-xl bg-white border border-slate-200 hover:border-slate-300 text-slate-700 text-xs font-semibold shadow-sm transition-all disabled:opacity-50"
+                      className="px-4 py-2 rounded-2xl bg-white border border-slate-200 hover:border-slate-300 text-slate-700 text-xs font-semibold shadow-sm transition-all disabled:opacity-50"
                     >
                       Save
                     </button>
@@ -940,7 +940,7 @@ export default function EventView() {
                           e.preventDefault();
                         }
                       }}
-                      className="px-4 py-2 rounded-xl bg-white border border-rose-200 hover:border-rose-300 text-rose-600 hover:bg-rose-50 text-xs font-semibold shadow-sm transition-all"
+                      className="px-4 py-2 rounded-2xl bg-white border border-rose-200 hover:border-rose-300 text-rose-600 hover:bg-rose-50 text-xs font-semibold shadow-sm transition-all"
                     >
                       Delete
                     </button>
@@ -1509,13 +1509,13 @@ export default function EventView() {
                 <button
                   type="button"
                   onClick={() => setSelectedSlotForSignup(null)}
-                  className="px-5 py-2.5 rounded-xl border border-slate-200 text-slate-600 hover:bg-slate-50 font-semibold"
+                  className="px-5 py-2.5 rounded-2xl border border-slate-200 text-slate-600 hover:bg-slate-50 font-semibold"
                 >
                   Cancel
                 </button>
                 <button
                   type="submit"
-                  className="px-6 py-2.5 rounded-xl bg-blue-600 text-white font-bold hover:bg-blue-700 shadow-sm transition-colors"
+                  className="px-6 py-2.5 rounded-2xl bg-blue-600 text-white font-bold hover:bg-blue-700 shadow-sm transition-colors"
                 >
                   Confirm Spot
                 </button>
