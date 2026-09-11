@@ -1,4 +1,4 @@
-import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/cloudflare";
+import type { ActionFunctionArgs, LoaderFunctionArgs, MetaFunction } from "@remix-run/cloudflare";
 import { json, redirect } from "@remix-run/cloudflare";
 import { useLoaderData, useActionData, useNavigation, useSearchParams, Form } from "@remix-run/react";
 import { eq, and, inArray } from "drizzle-orm";
@@ -38,6 +38,48 @@ import {
 } from "~/utils/auth";
 import { expiryDateFor, isExpired, pruneExpiredEvents, RETENTION_DAYS } from "~/utils/retention";
 import { buildGoogleCalendarUrl, pickCalendarSlot } from "~/utils/calendar";
+import {
+  SITE_NAME,
+  mergeParentMeta,
+  pageMetaOverrides,
+  truncate,
+} from "~/utils/seo";
+
+// Events are unlisted (robots.txt disallows /events/). Keep them out of
+// search indexes and give each event a real title/description. Remix renders
+// only the deepest `meta` export, so merge parent descriptors (OG image,
+// twitter card, etc.) and override title/description/canonical/robots.
+export const meta: MetaFunction<typeof loader> = ({ data, matches }) => {
+  const fallbackTitle = `Event | ${SITE_NAME}`;
+  const fallbackDescription =
+    "View event details and respond. No account needed.";
+  if (!data?.event) {
+    return mergeParentMeta(matches, [
+      ...pageMetaOverrides({
+        title: fallbackTitle,
+        description: fallbackDescription,
+        path: "/",
+        robots: "noindex, nofollow",
+      }),
+    ]);
+  }
+  const rawTitle = (data.event.title || "Untitled event").trim() || "Untitled event";
+  const title = truncate(`${rawTitle} | ${SITE_NAME}`, 70);
+  const rawDesc =
+    (data.event.description || "").trim() ||
+    (data.event.type === "SIGNUP_SHEET"
+      ? `Sign up for ${rawTitle}. No account needed — claim your spot in seconds.`
+      : `Vote on the best time for ${rawTitle}. No account needed.`);
+  const description = truncate(rawDesc, 155);
+  return mergeParentMeta(matches, [
+    ...pageMetaOverrides({
+      title,
+      description,
+      path: `/events/${data.event.id}`,
+      robots: "noindex, nofollow",
+    }),
+  ]);
+};
 
 function publicEventShape(e: typeof events.$inferSelect) {
   return {
@@ -66,7 +108,7 @@ function adminEventShape(e: typeof events.$inferSelect) {
 }
 
 export async function loader({ params, request, context }: LoaderFunctionArgs) {
-  const env = context.cloudflare.env as { DB: D1Database; RESEND_API_KEY?: string };
+  const env = context.cloudflare.env as { DB: D1Database; RESEND_API_KEY?: string; FROM_EMAIL?: string };
   const db = getDb(env.DB);
   const eventId = params.id;
 
@@ -243,7 +285,7 @@ export async function loader({ params, request, context }: LoaderFunctionArgs) {
 }
 
 export async function action({ request, params, context }: ActionFunctionArgs) {
-  const env = context.cloudflare.env as { DB: D1Database; RESEND_API_KEY?: string };
+  const env = context.cloudflare.env as { DB: D1Database; RESEND_API_KEY?: string; FROM_EMAIL?: string };
   const db = getDb(env.DB);
   const eventId = params.id;
 
@@ -368,6 +410,7 @@ export async function action({ request, params, context }: ActionFunctionArgs) {
       });
       await sendEmail({
         apiKey: env.RESEND_API_KEY,
+        from: env.FROM_EMAIL,
         to: participantEmail,
         subject: `Confirmed: "${taskLabel}" for ${event.title}`,
         html: `
@@ -454,6 +497,7 @@ export async function action({ request, params, context }: ActionFunctionArgs) {
       const manageUrl = `${url.origin}/events/${eventId}?cancel_token=${encodeURIComponent(editTokenPlain)}`;
       await sendEmail({
         apiKey: env.RESEND_API_KEY,
+        from: env.FROM_EMAIL,
         to: participantEmail,
         subject: `Your vote for "${event.title}" is recorded`,
         html: `

@@ -6,5 +6,5 @@ pages_build_output_dir = "./build/client"
 [[d1_databases]]
 binding = "DB"
 database_name = "manymano-db"
-database_id = "local-manymano-id"
+database_id = "ab5abbfd-0d23-43ec-856a-e4fd4707e0e2"
 migrations_dir = "./drizzle/migrations"

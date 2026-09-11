@@ -1,4 +1,4 @@
-import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/cloudflare";
+import type { ActionFunctionArgs, LoaderFunctionArgs, MetaFunction } from "@remix-run/cloudflare";
 import { json, redirect } from "@remix-run/cloudflare";
 import { Form, useActionData, useNavigation, Link } from "@remix-run/react";
 import { useEffect, useRef } from "react";
@@ -16,13 +16,32 @@ import { sendEmail } from "~/utils/email";
 import { escapeHtml } from "~/utils/sanitize";
 import { buildAdminCookie, hashSecretForStorage } from "~/utils/auth";
 import { pruneExpiredEvents } from "~/utils/retention";
+import {
+  PAGE_META,
+  breadcrumbJsonLd,
+  mergeParentMeta,
+  pageMetaOverrides,
+} from "~/utils/seo";
+
+export const meta: MetaFunction = ({ matches }) => {
+  return mergeParentMeta(matches, [
+    ...pageMetaOverrides(PAGE_META.createSignup),
+    {
+      "script:ld+json": breadcrumbJsonLd([
+        { name: "Home", path: "/" },
+        { name: "Create", path: "/create" },
+        { name: "Sign-Up Sheet", path: "/create/signup" },
+      ]),
+    },
+  ]);
+};
 
 export async function loader({ request }: LoaderFunctionArgs) {
   return json({});
 }
 
 export async function action({ request, context }: ActionFunctionArgs) {
-  const env = context.cloudflare.env as { DB: D1Database; RESEND_API_KEY?: string };
+  const env = context.cloudflare.env as { DB: D1Database; RESEND_API_KEY?: string; FROM_EMAIL?: string };
   const db = getDb(env.DB);
   try {
     await pruneExpiredEvents(db);
@@ -130,6 +149,7 @@ export async function action({ request, context }: ActionFunctionArgs) {
 
   await sendEmail({
     apiKey: env.RESEND_API_KEY,
+    from: env.FROM_EMAIL,
     to: organizerEmail,
     subject: `Your sign-up sheet: "${title}" is ready!`,
     html: `

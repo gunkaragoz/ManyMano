@@ -1,5 +1,24 @@
+import type { MetaFunction } from "@remix-run/cloudflare";
 import { Link } from "@remix-run/react";
 import { ArrowRight, CalendarDays, ClipboardList } from "lucide-react";
+import {
+  PAGE_META,
+  breadcrumbJsonLd,
+  mergeParentMeta,
+  pageMetaOverrides,
+} from "~/utils/seo";
+
+export const meta: MetaFunction = ({ matches }) => {
+  return mergeParentMeta(matches, [
+    ...pageMetaOverrides(PAGE_META.createChooser),
+    {
+      "script:ld+json": breadcrumbJsonLd([
+        { name: "Home", path: "/" },
+        { name: "Create", path: "/create" },
+      ]),
+    },
+  ]);
+};
 
 export default function CreateChooser() {
   return (

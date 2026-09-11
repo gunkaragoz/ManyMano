@@ -1,11 +1,16 @@
 import type { MetaFunction } from "@remix-run/cloudflare";
 import { Link } from "@remix-run/react";
 import { ArrowRight, CalendarDays, Check, ClipboardList } from "lucide-react";
-import { HOME_FAQ, faqPageJsonLd } from "~/utils/seo";
+import { HOME_FAQ, faqPageJsonLd, mergeParentMeta } from "~/utils/seo";
 
-export const meta: MetaFunction = () => [
-  { "script:ld+json": faqPageJsonLd(HOME_FAQ) },
-];
+// Remix renders only the deepest `meta` export, so merge parent (root)
+// descriptors and just append the home-only FAQ JSON-LD. Without this the
+// homepage would lose its <title>, description, OG tags and canonical.
+export const meta: MetaFunction = ({ matches }) => {
+  return mergeParentMeta(matches, [
+    { "script:ld+json": faqPageJsonLd(HOME_FAQ) },
+  ]);
+};
 
 export default function Index() {
   return (

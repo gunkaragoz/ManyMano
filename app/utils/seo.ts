@@ -146,3 +146,115 @@ export function breadcrumbJsonLd(
     })),
   };
 }
+
+// ---------------------------------------------------------------------------
+// Per-page meta helpers (Remix v2 `meta` merging).
+//
+// Remix renders ONLY the deepest route's `meta` export — it does NOT merge
+// parent + child automatically. So every child route that exports `meta`
+// must explicitly re-include the parent descriptors it wants to keep.
+// These helpers make that override-and-keep-rest pattern trivial and keep
+// title / description / canonical / og:url in sync across routes.
+// ---------------------------------------------------------------------------
+
+export type GenericMetaDescriptor = Record<string, unknown>;
+
+function descriptorKey(d: GenericMetaDescriptor): string {
+  if ("title" in d) return "title";
+  if ("charSet" in d || "charset" in d) return "charset";
+  if (d.tagName === "link" && typeof d.rel === "string") return `link:${d.rel}`;
+  if (typeof d.name === "string") return `name:${d.name}`;
+  if (typeof d.property === "string") return `property:${d.property}`;
+  if ("script:ld+json" in d) {
+    // Each distinct JSON-LD block gets its own key so parent blocks
+    // (Organization, WebSite, ...) are kept while the child adds its own.
+    try {
+      return `script:${JSON.stringify(d["script:ld+json"])}`;
+    } catch {
+      return `script:${Math.random()}`;
+    }
+  }
+  try {
+    return JSON.stringify(d);
+  } catch {
+    return String(Math.random());
+  }
+}
+
+/**
+ * Keep everything from parent routes except descriptors the child overrides
+ * (same title / same meta name / same og property / same link rel).
+ */
+export function mergeParentMeta(
+  matches: Array<{ meta?: GenericMetaDescriptor[] }>,
+  overrides: GenericMetaDescriptor[]
+): GenericMetaDescriptor[] {
+  const overrideKeys = new Set(overrides.map(descriptorKey));
+  const parentMeta = matches.flatMap((m) => m.meta ?? []).filter(
+    (d) => !overrideKeys.has(descriptorKey(d))
+  );
+  return [...parentMeta, ...overrides];
+}
+
+export type PageMetaOptions = {
+  title: string;
+  description: string;
+  path: string;
+  robots?: string;
+  siteUrl?: string;
+};
+
+/** Build the title/description/canonical/OG/Twitter overrides for a page. */
+export function pageMetaOverrides({
+  title,
+  description,
+  path,
+  robots,
+  siteUrl = DEFAULT_SITE_URL,
+}: PageMetaOptions): GenericMetaDescriptor[] {
+  const canonical = absoluteUrl(path, siteUrl);
+  const descriptors: GenericMetaDescriptor[] = [
+    { title },
+    { name: "description", content: description },
+    { tagName: "link", rel: "canonical", href: canonical },
+    { property: "og:title", content: title },
+    { property: "og:description", content: description },
+    { property: "og:url", content: canonical },
+    { name: "twitter:title", content: title },
+    { name: "twitter:description", content: description },
+  ];
+  if (robots) {
+    descriptors.push({ name: "robots", content: robots });
+  }
+  return descriptors;
+}
+
+/** Truncate to `max` chars on a word boundary, with ellipsis. */
+export function truncate(str: string, max: number): string {
+  const s = (str || "").replace(/\s+/g, " ").trim();
+  if (s.length <= max) return s;
+  const sliced = s.slice(0, max - 1);
+  const lastSpace = sliced.lastIndexOf(" ");
+  return `${(lastSpace > max * 0.5 ? sliced.slice(0, lastSpace) : sliced).trim()}…`;
+}
+
+export const PAGE_META = {
+  createChooser: {
+    title: "Create Event — Sign-Up Sheet or Meeting Poll | ManyMano",
+    description:
+      "Create a free sign-up sheet or meeting poll in seconds. No accounts, no ads — just share the link.",
+    path: "/create",
+  },
+  createSignup: {
+    title: "Create a Free Sign-Up Sheet — No Account Needed | ManyMano",
+    description:
+      "Free sign-up sheets with shifts, slot limits and CSV export. No accounts, no ads — create and share in seconds.",
+    path: "/create/signup",
+  },
+  createPoll: {
+    title: "Create a Free Meeting Poll — Find a Time Fast | ManyMano",
+    description:
+      "Free meeting polls with Yes / If need be / No voting and calendar sync. No accounts, no ads — create and share in seconds.",
+    path: "/create/poll",
+  },
+} as const;

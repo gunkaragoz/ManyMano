@@ -9,6 +9,7 @@ declare module "@remix-run/cloudflare" {
       env: {
         DB: D1Database;
         RESEND_API_KEY?: string;
+        FROM_EMAIL?: string;
       };
       cf: CfProperties;
       ctx: ExecutionContext;

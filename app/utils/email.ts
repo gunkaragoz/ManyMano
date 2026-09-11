@@ -6,9 +6,11 @@ export interface SendEmailParams {
   html: string;
 }
 
+export const DEFAULT_FROM = "ManyMano <no-reply@mail.manymano.com>";
+
 export async function sendEmail({
   apiKey,
-  from = "ManyMano <notifications@resend.dev>",
+  from = DEFAULT_FROM,
   to,
   subject,
   html,
