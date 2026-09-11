@@ -1,7 +1,7 @@
 import { lt, inArray } from "drizzle-orm";
 import { events, eventSlots, signups, pollVotes, pollVoteEntries } from "~/db";
 
-/** Throwaway retention: events auto-expire this many days after creation. */
+/** Data retention: events expire this many days after creation. */
 export const RETENTION_DAYS = 90;
 
 export function expiryDateFor(createdAtIso: string): string {

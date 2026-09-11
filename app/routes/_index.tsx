@@ -7,11 +7,11 @@ export default function Index() {
       {/* Hero Section */}
       <div className="text-center space-y-5 max-w-2xl mx-auto">
         <div className="inline-flex items-center gap-2 px-3.5 py-1 rounded-full bg-slate-100/80 border border-slate-200/80 text-slate-600 text-xs font-medium tracking-wide">
-          <span>Zero accounts needed</span>
+          <span>No sign-up needed</span>
           <span className="text-slate-300">•</span>
           <span>No ads or tracking</span>
           <span className="text-slate-300">•</span>
-          <span>Auto-deletes after 90 days</span>
+          <span>Free forever</span>
         </div>
 
         <h1 className="text-4xl sm:text-5xl font-extrabold tracking-tight text-slate-900 leading-[1.15]">
@@ -20,8 +20,8 @@ export default function Index() {
         </h1>
 
         <p className="text-base sm:text-lg text-slate-600 leading-relaxed max-w-xl mx-auto font-normal">
-          The clean, open-source way to organize volunteers and find meeting times.
-          Collect volunteers or find the best meeting time in seconds.
+          Sign-up sheets and meeting polls in seconds.
+          No accounts, no ads, no hassle.
         </p>
       </div>
 
@@ -112,12 +112,12 @@ export default function Index() {
             <p className="text-xs text-slate-500">Every event gets a public link to share and a secret link to manage.</p>
           </div>
           <div className="space-y-1.5 p-4">
-            <div className="text-sm font-bold text-slate-900">2. Easy & Throwaway</div>
-            <p className="text-xs text-slate-500">No passwords or accounts. Create, share, forget — events auto-delete after 90 days.</p>
+            <div className="text-sm font-bold text-slate-900">2. No accounts needed</div>
+            <p className="text-xs text-slate-500">No passwords or sign-ups. Just create, share, you're done.</p>
           </div>
           <div className="space-y-1.5 p-4">
-            <div className="text-sm font-bold text-slate-900">3. Free & Open Source</div>
-            <p className="text-xs text-slate-500">Free for communities, with no paywalls or feature limits.</p>
+            <div className="text-sm font-bold text-slate-900">3. Free forever</div>
+            <p className="text-xs text-slate-500">No paywalls or feature limits. Open source on GitHub.</p>
           </div>
         </div>
       </div>

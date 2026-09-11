@@ -27,7 +27,7 @@ export default async function handleRequest(
   }
 
   responseHeaders.set("Content-Type", "text/html");
-  // Throwaway-event app hardening: no referrer leaks of ?admin=, no framing.
+  // App hardening: no referrer leaks of ?admin=, no framing.
   if (!responseHeaders.has("Referrer-Policy")) {
     responseHeaders.set("Referrer-Policy", "no-referrer");
   }

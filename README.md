@@ -1,6 +1,6 @@
 # ManyMano 🤝
 
-> An easy, ad-free, open-source tool for throwaway volunteer sign-ups and meeting time polls. No accounts — create, share, forget. Events auto-delete 90 days after creation. Built to run 100% free on **Cloudflare Pages & D1** with zero subscription costs.
+> An easy, ad-free tool for volunteer sign-ups and meeting time polls. No accounts — create and share in seconds. Free forever, open source. Built to run 100% free on **Cloudflare Pages & D1** with zero subscription costs.
 
 [![Deploy to Cloudflare](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/manymano/manymano)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
@@ -17,7 +17,7 @@
 - **Zero Login Barrier**: Participants sign up in 5 seconds with name & optional email.
 - **Private Edit Links**: Volunteers who share an email get a cancel link; organizers can remove anyone.
 - **Organizer Admin Mode**: Attendance rosters, CSV export (organizer-only), and full event delete. Admin link upgrades to an HttpOnly cookie and secrets are stored hashed.
-- **Throwaway by design**: Events auto-delete 90 days after creation; organizers can delete anytime.
+- **No accounts needed**: Participants sign up in seconds with name & optional email; organizers can delete anytime.
 
 ### 📅 2. Meeting Time Finder
 - **Consensus Matrix Grid**: Multi-candidate date and time options displayed in a responsive grid.

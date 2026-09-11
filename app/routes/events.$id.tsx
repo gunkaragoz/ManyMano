@@ -73,7 +73,7 @@ export async function loader({ params, request, context }: LoaderFunctionArgs) {
     throw new Response("Event not found", { status: 404 });
   }
 
-  // Best-effort auto-prune of long-expired throwaway events.
+  // Best-effort auto-prune of long-expired events.
   try {
     await pruneExpiredEvents(db);
   } catch {
@@ -351,7 +351,6 @@ export async function action({ request, params, context }: ActionFunctionArgs) {
               <a href="${escapeHtml(cancelUrl)}" style="color: #dc2626; font-size: 13px;">Cancel this sign-up</a>
             </div>
             <p><a href="${escapeHtml(url.origin)}/events/${escapeHtml(eventId)}/ics" style="color: #2563eb;">Download Calendar Invite (.ics)</a></p>
-            <p style="font-size: 12px; color: #64748b;">This is a throwaway event link. It auto-deletes ${RETENTION_DAYS} days after creation.</p>
             <p style="margin-top: 24px; font-weight: 600;">— ManyMano</p>
           </div>
         `,
@@ -428,7 +427,6 @@ export async function action({ request, params, context }: ActionFunctionArgs) {
             <p>Hi ${escapeHtml(participantName)},</p>
             <p>Your availability for <strong>${escapeHtml(event.title)}</strong> is recorded.</p>
             <p><a href="${escapeHtml(manageUrl)}" style="color: #dc2626;">Remove my vote</a></p>
-            <p style="font-size: 12px; color: #64748b;">Throwaway poll — auto-deletes ${RETENTION_DAYS} days after creation.</p>
           </div>
         `,
       });
@@ -597,7 +595,7 @@ export async function action({ request, params, context }: ActionFunctionArgs) {
     return json({ success: true, message: "Option deleted." });
   }
 
-  // 9. Delete entire event (admin only) — throwaway cleanup.
+  // 9. Delete entire event (admin only).
   if (intent === "delete_event") {
     if (!(await requireAdmin())) {
       return json({ error: "Unauthorized." }, { status: 403 });
@@ -906,11 +904,7 @@ export default function EventView() {
               </div>
             </div>
             <p className="text-[11px] text-slate-500 pt-1">
-              Throwaway event — auto-deletes 90 days after creation
-              {"expiresAt" in event && event.expiresAt
-                ? ` (around ${new Date(event.expiresAt as string).toLocaleDateString()})`
-                : ""}
-              . Anyone with the link can see names/notes. Organizer can delete anytime below.
+              Anyone with the link can see names/notes. Organizer can delete anytime below.
             </p>
           </div>
 
@@ -1234,7 +1228,7 @@ export default function EventView() {
             </p>
             <div className="pt-6 border-t border-rose-100 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
               <div className="text-xs text-slate-500">
-                <span className="font-bold text-slate-700 block">Delete this throwaway event</span>
+                <span className="font-bold text-slate-700 block">Delete this event</span>
                 <span>Removes the event, signups/votes and roster immediately. Cannot be undone.</span>
               </div>
               <Form

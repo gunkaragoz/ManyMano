@@ -4,6 +4,7 @@ import { Form, useActionData, useNavigation, Link } from "@remix-run/react";
 import { useEffect, useRef } from "react";
 import { ArrowLeft, ArrowRight, ClipboardList, TriangleAlert, X } from "lucide-react";
 import { usePersistentState } from "~/utils/usePersistentState";
+import { useCreateStickyHeader } from "~/utils/useCreateStickyHeader";
 import { getDb, events, eventSlots } from "~/db";
 import { eq } from "drizzle-orm";
 import {
@@ -141,7 +142,7 @@ export async function action({ request, context }: ActionFunctionArgs) {
           <p style="margin: 0;"><strong>Secret Management Link (Keep Private!):</strong><br><a href="${escapeHtml(adminUrl)}" style="color: #2563eb;">${escapeHtml(adminUrl)}</a></p>
         </div>
         ${eventDate ? `<p><strong>Date:</strong> ${escapeHtml(eventDate)}</p>` : ""}
-        <p style="font-size: 13px; color: #64748b;">Use the secret management link to view RSVPs, download CSV spreadsheets, and manage volunteers. Throwaway event: auto-deletes 90 days after creation — delete it anytime from Organizer Admin Mode.</p>
+        <p style="font-size: 13px; color: #64748b;">Use the secret management link to view RSVPs, download CSV spreadsheets, and manage volunteers. You can delete it anytime from Organizer Admin Mode.</p>
         <p style="margin-top: 24px; font-weight: 600;">— ManyMano</p>
       </div>
     `,
@@ -215,6 +216,8 @@ export default function CreateSignupSheet() {
   );
 
   const wasSubmitting = useRef(false);
+  const titleSentinelRef = useRef<HTMLDivElement>(null);
+  useCreateStickyHeader(details.title, details.eventDate, titleSentinelRef);
   useEffect(() => {
     if (navigation.state === "submitting") {
       wasSubmitting.current = true;
@@ -382,6 +385,9 @@ export default function CreateSignupSheet() {
                 />
               </div>
             </div>
+
+            {/* Sentinel: show title+date in nav header once Title/Date scrolled out of view */}
+            <div ref={titleSentinelRef} aria-hidden="true" className="h-px w-full" />
 
             <div>
               <label className="block text-xs font-semibold text-slate-700 mb-1.5">

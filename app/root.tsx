@@ -6,9 +6,16 @@ import {
   Scripts,
   ScrollRestoration,
   Link,
+  useLocation,
   useNavigation,
 } from "@remix-run/react";
+import { useEffect, useState } from "react";
 import stylesheet from "~/tailwind.css?url";
+import {
+  CREATE_STICKY_HEADER_EVENT,
+  formatStickyDate,
+  type CreateStickyHeaderDetail,
+} from "~/utils/useCreateStickyHeader";
 
 export const links: LinksFunction = () => [
   { rel: "stylesheet", href: stylesheet },
@@ -17,17 +24,42 @@ export const links: LinksFunction = () => [
 export const meta: MetaFunction = () => [
   { charset: "utf-8" },
   { name: "viewport", content: "width=device-width, initial-scale=1" },
-  { title: "ManyMano — Simple, Fast Sign-Ups & Meeting Polls" },
+  { title: "ManyMano — Volunteer Sign-Ups & Meeting Polls, No Sign-Up Needed" },
   {
     name: "description",
     content:
-      "A free, easy-to-use open-source tool for throwaway volunteer sign-ups and meeting polls. No accounts, auto-deletes after 90 days.",
+      "Free volunteer sign-up sheets and meeting polls. No accounts, no ads — create and share in seconds.",
   },
 ];
 
 export default function App() {
   const navigation = useNavigation();
+  const location = useLocation();
   const isLoading = navigation.state !== "idle";
+
+  // Readonly Meeting/Event Title + Date shown in the nav header once the
+  // create-form title field has been scrolled out of view. Child create
+  // routes broadcast via `manymano:create-sticky-header` CustomEvent.
+  const [stickyHeader, setStickyHeader] = useState<{ title: string; date: string } | null>(null);
+
+  useEffect(() => {
+    const onSticky = (e: Event) => {
+      const detail = (e as CustomEvent<CreateStickyHeaderDetail>).detail;
+      if (!detail) return;
+      if (detail.visible && (detail.title.trim() || detail.date.trim())) {
+        setStickyHeader({ title: detail.title, date: detail.date });
+      } else {
+        setStickyHeader(null);
+      }
+    };
+    window.addEventListener(CREATE_STICKY_HEADER_EVENT, onSticky);
+    return () => window.removeEventListener(CREATE_STICKY_HEADER_EVENT, onSticky);
+  }, []);
+
+  // Clear when navigating away (the emitting page also clears on unmount).
+  useEffect(() => {
+    setStickyHeader(null);
+  }, [location.pathname]);
 
   return (
     <html lang="en" className="h-full">
@@ -42,8 +74,8 @@ export default function App() {
 
         {/* Global Minimal Navigation */}
         <header className="sticky top-0 z-40 bg-[#fafafc]/80 backdrop-blur-md border-b border-slate-200/80 transition-all">
-          <div className="max-w-5xl mx-auto px-6 sm:px-8 h-18 py-4 flex items-center justify-between">
-            <Link to="/" className="flex items-center gap-3 group">
+          <div className="max-w-5xl mx-auto px-6 sm:px-8 h-18 py-4 flex items-center justify-between gap-3">
+            <Link to="/" className="flex items-center gap-3 group shrink-0">
               <div className="w-8 h-8 rounded-lg bg-blue-600 flex items-center justify-center text-white font-bold text-sm shadow-sm group-hover:bg-blue-700 transition-colors">
                 M
               </div>
@@ -52,12 +84,44 @@ export default function App() {
                   ManyMano
                 </span>
                 <span className="text-[10px] font-semibold tracking-wide px-2 py-0.5 rounded-full bg-slate-100 text-slate-600 border border-slate-200/60">
-                  free & open source
+                  Free forever
                 </span>
               </div>
             </Link>
 
-            <nav className="flex items-center gap-4">
+            <div
+              aria-hidden={!stickyHeader}
+              data-testid="create-sticky-header"
+              aria-readonly="true"
+              title={
+                stickyHeader
+                  ? `${stickyHeader.title}${stickyHeader.date ? ` • ${formatStickyDate(stickyHeader.date)}` : ""}`
+                  : undefined
+              }
+              className={`min-w-0 flex-1 hidden sm:flex justify-center transition-all duration-200 ${
+                stickyHeader ? "opacity-100 translate-y-0" : "opacity-0 -translate-y-1 pointer-events-none"
+              }`}
+            >
+              {stickyHeader && (
+                <div className="min-w-0 max-w-md flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-white border border-slate-200/80 shadow-sm text-xs">
+                  <span className="min-w-0 truncate font-semibold text-slate-800">
+                    {stickyHeader.title.trim() || "Untitled"}
+                  </span>
+                  {stickyHeader.date.trim() && (
+                    <>
+                      <span aria-hidden="true" className="shrink-0 text-slate-300">
+                        •
+                      </span>
+                      <span className="shrink-0 tabular-nums text-slate-500">
+                        {formatStickyDate(stickyHeader.date)}
+                      </span>
+                    </>
+                  )}
+                </div>
+              )}
+            </div>
+
+            <nav className="flex items-center gap-4 shrink-0">
               <Link
                 to="/create"
                 className="inline-flex items-center gap-1.5 px-4 py-2 text-xs font-semibold rounded-full bg-slate-900 text-white hover:bg-slate-800 shadow-sm transition-all hover:scale-[1.02] active:scale-[0.98]"
@@ -80,7 +144,7 @@ export default function App() {
             <div className="flex items-center gap-2">
               <span className="font-semibold text-slate-700">ManyMano</span>
               <span>—</span>
-              <span>Free, easy throwaway coordination. No accounts, auto-deletes after 90 days.</span>
+              <span>Free volunteer sign-ups & meeting polls. No accounts, no ads.</span>
             </div>
             <div className="flex items-center gap-5 text-slate-400">
               <a
