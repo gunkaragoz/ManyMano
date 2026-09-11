@@ -24,6 +24,7 @@ export const eventSlots = sqliteTable("event_slots", {
     .notNull()
     .references(() => events.id, { onDelete: "cascade" }),
   title: text("title").notNull(),
+  shiftName: text("shift_name"),
   startTime: text("start_time"),
   endTime: text("end_time"),
   capacity: integer("capacity").notNull().default(1), // -1 for unlimited

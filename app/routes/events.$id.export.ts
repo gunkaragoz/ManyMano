@@ -22,12 +22,12 @@ export async function loader({ params, request, context }: LoaderFunctionArgs) {
     .where(eq(eventSlots.eventId, eventId))
     .orderBy(eventSlots.displayOrder);
 
-  const slotMap = new Map(slots.map((s) => [s.id, s.title]));
+  const slotMap = new Map(slots.map((s) => [s.id, s]));
 
   let csvRows: string[][] = [];
 
   if (event.type === "SIGNUP_SHEET") {
-    csvRows.push(["Slot / Role", "Volunteer Name", "Email", "Notes/Comments", "Status", "Date Signed Up"]);
+    csvRows.push(["Shift", "Task", "Volunteer Name", "Email", "Notes/Comments", "Status", "Date Signed Up"]);
     const eventSignups = await db
       .select()
       .from(signups)
@@ -40,8 +40,14 @@ export async function loader({ params, request, context }: LoaderFunctionArgs) {
         comment = parsed.comment || "";
       } catch (_) {}
 
+      const slot = slotMap.get(s.slotId);
+      const shiftName = ((slot as { shiftName?: string | null } | undefined)?.shiftName || "").trim();
+      const time = slot ? [slot.startTime, slot.endTime].filter(Boolean).join(" – ") : "";
+      const shift = [shiftName, time].filter(Boolean).join(" | ");
+
       csvRows.push([
-        slotMap.get(s.slotId) || "Unknown",
+        shift,
+        slot?.title || "Unknown",
         s.participantName,
         s.participantEmail || "",
         comment,

@@ -1,6 +1,6 @@
 # ManyMano 🤝
 
-> A privacy-first, ad-free, open-source alternative to **SignUpGenius** and **classic Doodle**. Built to run 100% free on **Cloudflare Pages & D1** with zero subscription costs.
+> A privacy-first, ad-free, open-source tool for volunteer sign-ups and meeting time polls. Built to run 100% free on **Cloudflare Pages & D1** with zero subscription costs.
 
 [![Deploy to Cloudflare](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/manymano/manymano)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
@@ -9,7 +9,7 @@
 
 ## ✨ Features
 
-### 📋 1. Volunteer & Slot Sign-Ups (SignUpGenius Style)
+### 📋 1. Volunteer & Slot Sign-Ups
 - **Slot Limits & Capacity Tracking**: Define slots with exact headcount limits (e.g. 2 volunteers) or unlimited capacity.
 - **Race-Condition Protected**: Atomic D1 transactions prevent overbooking.
 - **Custom Attendee Notes**: Collect volunteer comments, t-shirt sizes, dietary restrictions, or equipment notes.
@@ -18,7 +18,7 @@
 - **Private Edit Links**: Volunteers can cancel or adjust their own entries using secure tokens.
 - **Organizer Admin Mode**: Access attendance rosters, export CSV spreadsheets, and manage volunteers using secret organizer tokens.
 
-### 📅 2. Meeting Time Finder (Classic Doodle Style)
+### 📅 2. Meeting Time Finder
 - **Consensus Matrix Grid**: Multi-candidate date and time options displayed in a responsive grid.
 - **Three-State Voting**: Available (`✔`), If need be (`(✔)`), or Unavailable (`–`).
 - **Real-Time Consensus Highlighting**: Automatically identifies and badges the top-voted meeting slot.

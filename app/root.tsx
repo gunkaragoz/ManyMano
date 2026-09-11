@@ -21,7 +21,7 @@ export const meta: MetaFunction = () => [
   {
     name: "description",
     content:
-      "A free, privacy-first open-source alternative to SignUpGenius and Doodle. No ads, no bloat, runs on Cloudflare.",
+      "A free, privacy-first open-source tool for volunteer sign-ups and meeting polls. No ads, no bloat.",
   },
 ];
 
@@ -83,8 +83,6 @@ export default function App() {
               <span>Free, privacy-first community coordination. No ads, no paywalls.</span>
             </div>
             <div className="flex items-center gap-5 text-slate-400">
-              <span className="text-slate-500">Cloudflare Pages & D1</span>
-              <span>•</span>
               <a
                 href="https://github.com"
                 target="_blank"

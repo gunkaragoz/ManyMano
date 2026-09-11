@@ -1,8 +1,16 @@
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/cloudflare";
 import { json, redirect } from "@remix-run/cloudflare";
 import { Form, useActionData, useNavigation, Link } from "@remix-run/react";
-import { useState } from "react";
+import { useEffect, useRef } from "react";
+import { ArrowLeft, ArrowRight, ClipboardList, TriangleAlert, X } from "lucide-react";
+import { usePersistentState } from "~/utils/usePersistentState";
 import { getDb, events, eventSlots } from "~/db";
+import { eq } from "drizzle-orm";
+import {
+  generateInternalId,
+  generateSecretToken,
+  generateUniquePublicId,
+} from "~/utils/ids";
 import { sendEmail } from "~/utils/email";
 
 export async function loader({ request }: LoaderFunctionArgs) {
@@ -33,22 +41,27 @@ export async function action({ request, context }: ActionFunctionArgs) {
     return json({ error: "A valid email is required to receive your secret management link." }, { status: 400 });
   }
 
-  // Parse shifts / spots
+  // Parse shifts / tasks.
+  // Each task posts one entry of each array; shift-level fields are
+  // duplicated per task via hidden inputs so indices stay aligned.
   const slotTitles = formData.getAll("slotTitle") as string[];
   const slotCapacities = formData.getAll("slotCapacity") as string[];
   const slotStartTimes = formData.getAll("slotStartTime") as string[];
   const slotEndTimes = formData.getAll("slotEndTime") as string[];
+  const slotShiftNames = formData.getAll("slotShiftName") as string[];
 
   const validSlots = slotTitles
     .map((t, idx) => {
       const startTime = slotStartTimes[idx]?.trim() || null;
       const endTime = slotEndTimes[idx]?.trim() || null;
+      const shiftName = slotShiftNames[idx]?.trim() || null;
       let slotTitle = t.trim();
-      if (!slotTitle && startTime) {
-        slotTitle = endTime ? `${startTime} – ${endTime}` : startTime;
+      if (!slotTitle && (startTime || shiftName)) {
+        slotTitle = shiftName || (endTime ? `${startTime} – ${endTime}` : (startTime as string));
       }
       return {
         title: slotTitle,
+        shiftName,
         capacity: parseInt(slotCapacities[idx] || "1", 10) || 1,
         startTime,
         endTime,
@@ -58,11 +71,18 @@ export async function action({ request, context }: ActionFunctionArgs) {
     .filter((s) => s.title.length > 0);
 
   if (validSlots.length === 0) {
-    return json({ error: "Please add at least one shift or volunteer role." }, { status: 400 });
+    return json({ error: "Please add at least one task." }, { status: 400 });
   }
 
-  const eventId = crypto.randomUUID();
-  const adminToken = crypto.randomUUID();
+  const eventId = await generateUniquePublicId(async (candidate) => {
+    const existing = await db
+      .select({ id: events.id })
+      .from(events)
+      .where(eq(events.id, candidate))
+      .limit(1);
+    return existing.length > 0;
+  });
+  const adminToken = generateSecretToken();
   const now = new Date().toISOString();
 
   // Insert into D1
@@ -85,9 +105,10 @@ export async function action({ request, context }: ActionFunctionArgs) {
 
   for (const slot of validSlots) {
     await db.insert(eventSlots).values({
-      id: crypto.randomUUID(),
+      id: generateInternalId(),
       eventId,
       title: slot.title,
+      shiftName: slot.shiftName,
       capacity: slot.capacity,
       startTime: slot.startTime,
       endTime: slot.endTime,
@@ -105,7 +126,7 @@ export async function action({ request, context }: ActionFunctionArgs) {
     subject: `Your volunteer sheet: "${title}" is ready!`,
     html: `
       <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto; padding: 24px; color: #1e293b;">
-        <h2 style="font-size: 22px; font-weight: 700; color: #0f172a; margin-top: 0;">Your sign-up sheet "${title}" is ready! 🎉</h2>
+        <h2 style="font-size: 22px; font-weight: 700; color: #0f172a; margin-top: 0;">Your sign-up sheet "${title}" is ready!</h2>
         <p>Hi ${organizerName},</p>
         <p>Here are your links:</p>
         <div style="background: #f8fafc; border: 1px solid #e2e8f0; padding: 18px; border-radius: 12px; margin: 20px 0;">
@@ -122,6 +143,43 @@ export async function action({ request, context }: ActionFunctionArgs) {
   return redirect(`/events/${eventId}?admin=${adminToken}&created=1`);
 }
 
+type SignupDetails = {
+  title: string;
+  eventDate: string;
+  description: string;
+  location: string;
+  organizerName: string;
+  organizerEmail: string;
+};
+
+type Shift = {
+  id: number;
+  name: string;
+  startTime: string;
+  endTime: string;
+  tasks: Array<{ id: number; title: string; capacity: number }>;
+};
+
+const SIGNUP_DETAILS_KEY = "manymano:create-signup:details:v1";
+const SIGNUP_SHIFTS_KEY = "manymano:create-signup:shifts:v1";
+
+const defaultSignupShifts: Shift[] = [
+  {
+    id: 1,
+    name: "Morning",
+    startTime: "08:30",
+    endTime: "10:30",
+    tasks: [{ id: 11, title: "Setup & Check-in", capacity: 2 }],
+  },
+  {
+    id: 2,
+    name: "Midday",
+    startTime: "10:30",
+    endTime: "12:30",
+    tasks: [{ id: 21, title: "Refreshments & Snacks", capacity: 3 }],
+  },
+];
+
 export default function CreateSignupSheet() {
   const actionData = useActionData<{ error?: string }>();
   const navigation = useNavigation();
@@ -129,26 +187,58 @@ export default function CreateSignupSheet() {
 
   const todayStr = new Date().toISOString().split("T")[0];
 
-  const [shifts, setShifts] = useState<Array<{
-    id: number;
-    title: string;
-    startTime: string;
-    endTime: string;
-    capacity: number;
-  }>>([
-    { id: 1, title: "Morning Setup & Check-in", startTime: "08:30", endTime: "10:30", capacity: 2 },
-    { id: 2, title: "Refreshments & Snacks", startTime: "10:30", endTime: "12:30", capacity: 3 },
-  ]);
+  // Draft persists across refresh (same tab) via sessionStorage.
+  // Cleared on successful create so the next "Create Event" starts clean.
+  const [details, setDetails, clearDetails] = usePersistentState<SignupDetails>(
+    SIGNUP_DETAILS_KEY,
+    () => ({
+      title: "",
+      eventDate: new Date().toISOString().split("T")[0],
+      description: "",
+      location: "",
+      organizerName: "",
+      organizerEmail: "",
+    })
+  );
+  const [shifts, setShifts, clearShifts] = usePersistentState<Shift[]>(
+    SIGNUP_SHIFTS_KEY,
+    defaultSignupShifts
+  );
+
+  const wasSubmitting = useRef(false);
+  useEffect(() => {
+    if (navigation.state === "submitting") {
+      wasSubmitting.current = true;
+    } else if (navigation.state === "loading" && wasSubmitting.current) {
+      // Form POST succeeded and we're redirecting to the new event.
+      wasSubmitting.current = false;
+      clearDetails();
+      clearShifts();
+    } else if (navigation.state === "idle") {
+      // Validation error returns to idle without redirect -> keep draft.
+      wasSubmitting.current = false;
+    }
+  }, [navigation.state, clearDetails, clearShifts]);
+
+  const updateDetails = (patch: Partial<SignupDetails>) =>
+    setDetails((prev) => ({ ...prev, ...patch }));
+
+  const startOver = () => {
+    clearDetails();
+    clearShifts();
+    setDetails((prev) => ({ ...prev, eventDate: todayStr }));
+    setShifts(defaultSignupShifts);
+  };
 
   const addShift = () => {
     setShifts((prev) => [
       ...prev,
       {
         id: Date.now(),
-        title: "",
+        name: "",
         startTime: "",
         endTime: "",
-        capacity: 1,
+        tasks: [{ id: Date.now() + 1, title: "", capacity: 1 }],
       },
     ]);
   };
@@ -158,24 +248,62 @@ export default function CreateSignupSheet() {
     setShifts((prev) => prev.filter((s) => s.id !== id));
   };
 
+  const updateShift = (id: number, patch: Partial<{ name: string; startTime: string; endTime: string }>) => {
+    setShifts((prev) => prev.map((s) => (s.id === id ? { ...s, ...patch } : s)));
+  };
+
+  const addTask = (shiftId: number) => {
+    setShifts((prev) =>
+      prev.map((s) =>
+        s.id === shiftId
+          ? { ...s, tasks: [...s.tasks, { id: Date.now(), title: "", capacity: 1 }] }
+          : s
+      )
+    );
+  };
+
+  const removeTask = (shiftId: number, taskId: number) => {
+    setShifts((prev) =>
+      prev.map((s) =>
+        s.id === shiftId && s.tasks.length > 1
+          ? { ...s, tasks: s.tasks.filter((t) => t.id !== taskId) }
+          : s
+      )
+    );
+  };
+
+  const updateTask = (
+    shiftId: number,
+    taskId: number,
+    patch: Partial<{ title: string; capacity: number }>
+  ) => {
+    setShifts((prev) =>
+      prev.map((s) =>
+        s.id === shiftId
+          ? { ...s, tasks: s.tasks.map((t) => (t.id === taskId ? { ...t, ...patch } : t)) }
+          : s
+      )
+    );
+  };
+
   return (
     <div className="max-w-2xl mx-auto space-y-8 py-4">
       {/* Header & Back Link */}
       <div className="space-y-2">
         <Link to="/" className="text-xs font-semibold text-slate-500 hover:text-slate-800 flex items-center gap-1.5 transition-colors">
-          <span>←</span>
+          <ArrowLeft className="w-3.5 h-3.5" />
           <span>Back to Home</span>
         </Link>
         <div className="flex items-center gap-3 pt-1">
-          <div className="w-10 h-10 rounded-2xl bg-blue-50 text-blue-600 flex items-center justify-center text-xl font-bold border border-blue-100">
-            📋
+          <div className="w-10 h-10 rounded-2xl bg-blue-50 text-blue-600 flex items-center justify-center border border-blue-100">
+            <ClipboardList className="w-5 h-5" />
           </div>
           <div>
             <h1 className="text-2xl sm:text-3xl font-extrabold text-slate-900 tracking-tight">
               Create Volunteer Sign-Up Sheet
             </h1>
             <p className="text-xs text-slate-500 mt-0.5">
-              Set up shifts and spots for your event. No registration or password required.
+              Set up shifts with tasks and spots for your event. No registration or password required.
             </p>
           </div>
         </div>
@@ -183,7 +311,7 @@ export default function CreateSignupSheet() {
 
       {actionData?.error && (
         <div className="p-4 rounded-2xl bg-rose-50 border border-rose-200/80 text-rose-800 text-sm font-medium flex items-center gap-2">
-          <span>⚠️</span>
+          <TriangleAlert className="w-4 h-4 shrink-0" />
           <span>{actionData.error}</span>
         </div>
       )}
@@ -191,9 +319,14 @@ export default function CreateSignupSheet() {
       <Form method="post" className="bg-white border border-slate-200/80 rounded-3xl p-8 sm:p-10 shadow-[0_2px_12px_rgba(0,0,0,0.03)] space-y-10">
         {/* Step 1: Event Details */}
         <div className="space-y-5">
-          <label className="block text-xs font-bold uppercase tracking-wider text-slate-500">
-            Step 1 • Event Details
-          </label>
+          <div className="flex items-center justify-between gap-3">
+            <label className="block text-xs font-bold uppercase tracking-wider text-slate-500">
+              Step 1 • Event Details
+            </label>
+            <span className="text-[11px] text-slate-400" title="Your draft is saved in this tab and survives refresh. It clears after successful creation.">
+              Draft auto-saved in this tab
+            </span>
+          </div>
 
           <div className="space-y-4">
             <div>
@@ -204,6 +337,8 @@ export default function CreateSignupSheet() {
                 type="text"
                 name="title"
                 required
+                value={details.title}
+                onChange={(e) => updateDetails({ title: e.target.value })}
                 placeholder="e.g., Saturday Community Garden Clean Up"
                 className="w-full px-4 py-3 rounded-xl border border-slate-200/90 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all placeholder:text-slate-400"
               />
@@ -218,7 +353,8 @@ export default function CreateSignupSheet() {
                   type="date"
                   name="eventDate"
                   required
-                  defaultValue={todayStr}
+                  value={details.eventDate || todayStr}
+                  onChange={(e) => updateDetails({ eventDate: e.target.value })}
                   className="w-full px-4 py-3 rounded-xl border border-slate-200/90 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all text-slate-800"
                 />
               </div>
@@ -230,6 +366,8 @@ export default function CreateSignupSheet() {
                 <input
                   type="text"
                   name="location"
+                  value={details.location}
+                  onChange={(e) => updateDetails({ location: e.target.value })}
                   placeholder="e.g., Meadow Creek Park (North Gate)"
                   className="w-full px-4 py-3 rounded-xl border border-slate-200/90 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all placeholder:text-slate-400"
                 />
@@ -243,6 +381,8 @@ export default function CreateSignupSheet() {
               <textarea
                 name="description"
                 rows={3}
+                value={details.description}
+                onChange={(e) => updateDetails({ description: e.target.value })}
                 placeholder="Details for volunteers, what to bring, parking notes, or instructions..."
                 className="w-full px-4 py-3 rounded-xl border border-slate-200/90 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all placeholder:text-slate-400 leading-relaxed"
               />
@@ -257,6 +397,8 @@ export default function CreateSignupSheet() {
                   type="text"
                   name="organizerName"
                   required
+                  value={details.organizerName}
+                  onChange={(e) => updateDetails({ organizerName: e.target.value })}
                   placeholder="e.g., Sarah Chen"
                   className="w-full px-4 py-3 rounded-xl border border-slate-200/90 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all placeholder:text-slate-400"
                 />
@@ -270,6 +412,8 @@ export default function CreateSignupSheet() {
                   type="email"
                   name="organizerEmail"
                   required
+                  value={details.organizerEmail}
+                  onChange={(e) => updateDetails({ organizerEmail: e.target.value })}
                   placeholder="sarah@example.com"
                   className="w-full px-4 py-3 rounded-xl border border-slate-200/90 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all placeholder:text-slate-400"
                 />
@@ -281,15 +425,15 @@ export default function CreateSignupSheet() {
           </div>
         </div>
 
-        {/* Step 2: Shifts & Spots */}
+        {/* Step 2: Shifts & Tasks */}
         <div className="space-y-4 pt-2 border-t border-slate-100">
           <div className="flex items-center justify-between">
             <div>
               <label className="block text-xs font-bold uppercase tracking-wider text-slate-500">
-                Step 2 • Shifts & Volunteer Spots
+                Step 2 • Shifts & Tasks
               </label>
               <p className="text-xs text-slate-500 mt-0.5">
-                Define the time windows, roles, and number of spots needed for each.
+                Name each shift (optional), set its time, then add one or more tasks sharing that time.
               </p>
             </div>
 
@@ -316,21 +460,34 @@ export default function CreateSignupSheet() {
                     type="button"
                     onClick={() => removeShift(shift.id)}
                     disabled={shifts.length <= 1}
-                    className="text-slate-400 hover:text-rose-500 font-bold text-xs disabled:opacity-20 transition-colors"
+                    className="text-slate-400 hover:text-rose-500 font-bold text-xs disabled:opacity-20 transition-colors inline-flex items-center gap-1"
                   >
-                    Remove ✕
+                    Remove <X className="w-3 h-3" />
                   </button>
                 </div>
 
                 <div className="grid grid-cols-1 sm:grid-cols-12 gap-3 items-center">
+                  <div className="sm:col-span-6">
+                    <label className="block text-[10px] uppercase font-bold text-slate-400 mb-1">
+                      Shift Name (Optional)
+                    </label>
+                    <input
+                      type="text"
+                      value={shift.name}
+                      onChange={(e) => updateShift(shift.id, { name: e.target.value })}
+                      placeholder="e.g., Morning"
+                      className="w-full px-3 py-2 text-xs rounded-xl border border-slate-200 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 placeholder:text-slate-400"
+                    />
+                  </div>
+
                   <div className="sm:col-span-3">
                     <label className="block text-[10px] uppercase font-bold text-slate-400 mb-1">
                       Start Time
                     </label>
                     <input
                       type="time"
-                      name="slotStartTime"
-                      defaultValue={shift.startTime}
+                      value={shift.startTime}
+                      onChange={(e) => updateShift(shift.id, { startTime: e.target.value })}
                       className="w-full px-3 py-2 text-xs rounded-xl border border-slate-200 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500"
                     />
                   </div>
@@ -341,39 +498,79 @@ export default function CreateSignupSheet() {
                     </label>
                     <input
                       type="time"
-                      name="slotEndTime"
-                      defaultValue={shift.endTime}
+                      value={shift.endTime}
+                      onChange={(e) => updateShift(shift.id, { endTime: e.target.value })}
                       className="w-full px-3 py-2 text-xs rounded-xl border border-slate-200 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500"
                     />
                   </div>
+                </div>
 
-                  <div className="sm:col-span-4">
-                    <label className="block text-[10px] uppercase font-bold text-slate-400 mb-1">
-                      Role or Item Name *
-                    </label>
-                    <input
-                      type="text"
-                      name="slotTitle"
-                      required
-                      placeholder="e.g., Morning Setup Crew"
-                      defaultValue={shift.title}
-                      className="w-full px-3 py-2 text-xs rounded-xl border border-slate-200 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500"
-                    />
-                  </div>
+                <div className="space-y-2.5 pt-1">
+                  {shift.tasks.map((task) => (
+                    <div
+                      key={task.id}
+                      className="grid grid-cols-1 sm:grid-cols-12 gap-3 items-end bg-white rounded-xl border border-slate-200/80 p-3"
+                    >
+                      {/* Duplicated per task so server arrays stay aligned */}
+                      <input type="hidden" name="slotShiftName" value={shift.name} />
+                      <input type="hidden" name="slotStartTime" value={shift.startTime} />
+                      <input type="hidden" name="slotEndTime" value={shift.endTime} />
 
-                  <div className="sm:col-span-2">
-                    <label className="block text-[10px] uppercase font-bold text-slate-400 mb-1">
-                      Spots Needed
-                    </label>
-                    <input
-                      type="number"
-                      name="slotCapacity"
-                      min="1"
-                      max="999"
-                      defaultValue={shift.capacity}
-                      className="w-full px-3 py-2 text-xs rounded-xl border border-slate-200 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500"
-                    />
-                  </div>
+                      <div className="sm:col-span-8">
+                        <label className="block text-[10px] uppercase font-bold text-slate-400 mb-1">
+                          Task *
+                        </label>
+                        <input
+                          type="text"
+                          name="slotTitle"
+                          required
+                          placeholder="e.g., Setup Crew"
+                          value={task.title}
+                          onChange={(e) => updateTask(shift.id, task.id, { title: e.target.value })}
+                          className="w-full px-3 py-2 text-xs rounded-xl border border-slate-200 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 placeholder:text-slate-400"
+                        />
+                      </div>
+
+                      <div className="sm:col-span-3">
+                        <label className="block text-[10px] uppercase font-bold text-slate-400 mb-1">
+                          Spots Needed
+                        </label>
+                        <input
+                          type="number"
+                          name="slotCapacity"
+                          min="1"
+                          max="999"
+                          value={task.capacity}
+                          onChange={(e) =>
+                            updateTask(shift.id, task.id, {
+                              capacity: parseInt(e.target.value, 10) || 1,
+                            })
+                          }
+                          className="w-full px-3 py-2 text-xs rounded-xl border border-slate-200 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500"
+                        />
+                      </div>
+
+                      <div className="sm:col-span-1 flex sm:justify-end">
+                        <button
+                          type="button"
+                          onClick={() => removeTask(shift.id, task.id)}
+                          disabled={shift.tasks.length <= 1}
+                          title="Remove task"
+                          className="text-slate-400 hover:text-rose-500 font-bold text-xs disabled:opacity-20 transition-colors inline-flex items-center gap-1 p-2"
+                        >
+                          <X className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+
+                  <button
+                    type="button"
+                    onClick={() => addTask(shift.id)}
+                    className="px-3 py-1.5 text-xs font-semibold rounded-xl border border-dashed border-slate-300 hover:border-blue-400 hover:text-blue-600 bg-white transition-all flex items-center gap-1"
+                  >
+                    <span>+ Add Task to this shift</span>
+                  </button>
                 </div>
               </div>
             ))}
@@ -381,7 +578,14 @@ export default function CreateSignupSheet() {
         </div>
 
         {/* Submit */}
-        <div className="pt-4 border-t border-slate-100 flex items-center justify-end">
+        <div className="pt-4 border-t border-slate-100 flex flex-col sm:flex-row items-stretch sm:items-center justify-end gap-3">
+          <button
+            type="button"
+            onClick={startOver}
+            className="px-5 py-3 rounded-2xl text-xs font-semibold text-slate-500 hover:text-slate-800 border border-slate-200 hover:border-slate-300 bg-white transition-all"
+          >
+            Start over (clear draft)
+          </button>
           <button
             type="submit"
             disabled={isSubmitting}
@@ -393,7 +597,7 @@ export default function CreateSignupSheet() {
                 <span>Creating Sheet...</span>
               </>
             ) : (
-              <span>Create Sign-Up Sheet & Get Links →</span>
+              <span className="inline-flex items-center gap-2">Create Sign-Up Sheet & Get Links <ArrowRight className="w-4 h-4" /></span>
             )}
           </button>
         </div>

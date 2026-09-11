@@ -3,7 +3,29 @@ import { json } from "@remix-run/cloudflare";
 import { useLoaderData, useActionData, useNavigation, useSearchParams, Form } from "@remix-run/react";
 import { eq, and } from "drizzle-orm";
 import { useState, useMemo } from "react";
+import {
+  ArrowRight,
+  CalendarDays,
+  CalendarPlus,
+  Check,
+  CircleCheck,
+  Clock,
+  Download,
+  Link2,
+  Lock,
+  MapPin,
+  Minus,
+  PartyPopper,
+  Pencil,
+  Star,
+  Target,
+  TriangleAlert,
+  Trophy,
+  User,
+  X,
+} from "lucide-react";
 import { getDb, events, eventSlots, signups, pollVotes, pollVoteEntries } from "~/db";
+import { generateInternalId, generateSecretToken } from "~/utils/ids";
 import { sendEmail } from "~/utils/email";
 
 export async function loader({ params, request, context }: LoaderFunctionArgs) {
@@ -150,8 +172,8 @@ export async function action({ request, params, context }: ActionFunctionArgs) {
       return json({ error: "Sorry, this slot just filled up!" }, { status: 400 });
     }
 
-    const signupId = crypto.randomUUID();
-    const editToken = crypto.randomUUID();
+    const signupId = generateInternalId();
+    const editToken = generateSecretToken();
 
     await db.insert(signups).values({
       id: signupId,
@@ -168,21 +190,23 @@ export async function action({ request, params, context }: ActionFunctionArgs) {
     // Send confirmation email to volunteer if email provided
     if (participantEmail) {
       const cancelUrl = `${url.origin}/events/${eventId}?cancel_token=${editToken}`;
+      const shiftPrefix = ((targetSlot as { shiftName?: string | null }).shiftName || "").trim();
+      const taskLabel = shiftPrefix ? `${shiftPrefix} – ${targetSlot.title}` : targetSlot.title;
       await sendEmail({
         apiKey: env.RESEND_API_KEY,
         to: participantEmail,
-        subject: `Confirmed: "${targetSlot.title}" for ${event.title}`,
+        subject: `Confirmed: "${taskLabel}" for ${event.title}`,
         html: `
           <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto; padding: 24px; color: #1e293b;">
-            <h2 style="color: #0f172a; margin-top: 0;">You're signed up! 🎉</h2>
+            <h2 style="color: #0f172a; margin-top: 0;">You're signed up!</h2>
             <p>Hi ${participantName},</p>
-            <p>You have secured your spot for <strong>${targetSlot.title}</strong> at <strong>${event.title}</strong>.</p>
+            <p>You have secured your spot for <strong>${taskLabel}</strong> at <strong>${event.title}</strong>.</p>
             ${event.location ? `<p><strong>Location:</strong> ${event.location}</p>` : ""}
             <div style="background: #f8fafc; border: 1px solid #e2e8f0; padding: 16px; border-radius: 12px; margin: 24px 0;">
               <p style="margin: 0 0 10px 0; font-size: 13px;"><strong>Need to cancel?</strong></p>
               <a href="${cancelUrl}" style="color: #dc2626; font-size: 13px;">Cancel this sign-up</a>
             </div>
-            <p><a href="${url.origin}/events/${eventId}/ics" style="color: #2563eb;">📥 Download Calendar Invite (.ics)</a></p>
+            <p><a href="${url.origin}/events/${eventId}/ics" style="color: #2563eb;">Download Calendar Invite (.ics)</a></p>
             <p style="margin-top: 24px; font-weight: 600;">— ManyMano</p>
           </div>
         `,
@@ -224,8 +248,8 @@ export async function action({ request, params, context }: ActionFunctionArgs) {
       return json({ error: "Your name is required to vote." }, { status: 400 });
     }
 
-    const voteId = crypto.randomUUID();
-    const editToken = crypto.randomUUID();
+    const voteId = generateInternalId();
+    const editToken = generateSecretToken();
 
     await db.insert(pollVotes).values({
       id: voteId,
@@ -242,7 +266,7 @@ export async function action({ request, params, context }: ActionFunctionArgs) {
       const resp = (formData.get(`slot_${s.id}`) as string) || "NO";
       if (resp === "YES" || resp === "MAYBE") {
         await db.insert(pollVoteEntries).values({
-          id: crypto.randomUUID(),
+          id: generateInternalId(),
           pollVoteId: voteId,
           slotId: s.id,
           response: resp,
@@ -314,10 +338,11 @@ export async function action({ request, params, context }: ActionFunctionArgs) {
     }
 
     const title = (formData.get("slotTitle") as string)?.trim();
+    const shiftName = (formData.get("slotShiftName") as string)?.trim() || null;
     const startTime = (formData.get("slotStartTime") as string)?.trim() || null;
     const endTime = (formData.get("slotEndTime") as string)?.trim() || null;
     const capacityRaw = (formData.get("slotCapacity") as string)?.trim() || "1";
-    if (!title && !startTime) {
+    if (!title && !startTime && !shiftName) {
       return json({ error: "Give the new option a title or time." }, { status: 400 });
     }
 
@@ -325,9 +350,10 @@ export async function action({ request, params, context }: ActionFunctionArgs) {
     const maxOrder = existingSlots.reduce((m, s) => Math.max(m, s.displayOrder ?? 0), -1);
 
     await db.insert(eventSlots).values({
-      id: crypto.randomUUID(),
+      id: generateInternalId(),
       eventId,
-      title: title || (endTime ? `${startTime} – ${endTime}` : (startTime as string)),
+      title: title || shiftName || (endTime ? `${startTime} – ${endTime}` : (startTime as string)),
+      shiftName,
       capacity: event.type === "SIGNUP_SHEET" ? parseInt(capacityRaw, 10) || 1 : 999,
       startTime,
       endTime,
@@ -346,6 +372,7 @@ export async function action({ request, params, context }: ActionFunctionArgs) {
 
     const slotId = formData.get("slotId") as string;
     const title = (formData.get("slotTitle") as string)?.trim();
+    const shiftName = (formData.get("slotShiftName") as string)?.trim() || null;
     const startTime = (formData.get("slotStartTime") as string)?.trim() || null;
     const endTime = (formData.get("slotEndTime") as string)?.trim() || null;
     const capacityRaw = (formData.get("slotCapacity") as string)?.trim();
@@ -362,6 +389,7 @@ export async function action({ request, params, context }: ActionFunctionArgs) {
       .update(eventSlots)
       .set({
         title,
+        shiftName,
         startTime,
         endTime,
         ...(event.type === "SIGNUP_SHEET" && capacityRaw
@@ -492,14 +520,46 @@ export default function EventView() {
     return { slot: bestSlot, tally: bestTally };
   }, [pollData, slots]);
 
+  // Group signup slots into shifts sharing name + time window.
+  // Each slot is one task; a shift card lists its tasks.
+  type SlotRow = (typeof slots)[number];
+  const shiftGroups = useMemo(() => {
+    const groups: Array<{
+      key: string;
+      shiftName: string | null;
+      startTime: string | null;
+      endTime: string | null;
+      tasks: SlotRow[];
+    }> = [];
+    const indexByKey = new Map<string, number>();
+    slots.forEach((s) => {
+      const shiftName = ((s as { shiftName?: string | null }).shiftName || "").trim();
+      const key = `${shiftName}||${s.startTime || ""}||${s.endTime || ""}`;
+      const existing = indexByKey.get(key);
+      if (existing !== undefined) {
+        groups[existing].tasks.push(s);
+      } else {
+        indexByKey.set(key, groups.length);
+        groups.push({
+          key,
+          shiftName: shiftName || null,
+          startTime: s.startTime,
+          endTime: s.endTime,
+          tasks: [s],
+        });
+      }
+    });
+    return groups;
+  }, [slots]);
+
   return (
     <div className="space-y-10 py-2">
       {/* Event Created Banner with 1-Click Copy Links */}
       {justCreated && isAdmin && (
         <div className="bg-white border-2 border-emerald-500/80 rounded-3xl p-6 sm:p-8 shadow-sm space-y-5 animate-fade-in">
           <div className="flex items-center gap-3">
-            <span className="w-9 h-9 rounded-full bg-emerald-100 text-emerald-700 flex items-center justify-center text-lg font-bold">
-              🎉
+            <span className="w-9 h-9 rounded-full bg-emerald-100 text-emerald-700 flex items-center justify-center">
+              <PartyPopper className="w-5 h-5" />
             </span>
             <div>
               <h2 className="text-lg font-bold text-slate-900">Your event is live!</h2>
@@ -528,9 +588,15 @@ export default function EventView() {
                       "public"
                     )
                   }
-                  className="px-3.5 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold shrink-0 transition-colors shadow-sm"
+                  className="px-3.5 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold shrink-0 transition-colors shadow-sm inline-flex items-center gap-1.5"
                 >
-                  {copiedLink === "public" ? "Copied! ✓" : "Copy"}
+                  {copiedLink === "public" ? (
+                    <>
+                      Copied! <Check className="w-3.5 h-3.5" />
+                    </>
+                  ) : (
+                    "Copy"
+                  )}
                 </button>
               </div>
             </div>
@@ -550,9 +616,15 @@ export default function EventView() {
                   onClick={() =>
                     copyToClipboard(typeof window !== "undefined" ? window.location.href : "", "admin")
                   }
-                  className="px-3.5 py-2 rounded-xl bg-slate-900 hover:bg-slate-800 text-white text-xs font-semibold shrink-0 transition-colors shadow-sm"
+                  className="px-3.5 py-2 rounded-xl bg-slate-900 hover:bg-slate-800 text-white text-xs font-semibold shrink-0 transition-colors shadow-sm inline-flex items-center gap-1.5"
                 >
-                  {copiedLink === "admin" ? "Copied! ✓" : "Copy"}
+                  {copiedLink === "admin" ? (
+                    <>
+                      Copied! <Check className="w-3.5 h-3.5" />
+                    </>
+                  ) : (
+                    "Copy"
+                  )}
                 </button>
               </div>
             </div>
@@ -563,13 +635,13 @@ export default function EventView() {
       {/* Action Notification */}
       {actionData?.message && (
         <div className="p-4 rounded-2xl bg-emerald-50 border border-emerald-200/80 text-emerald-800 text-sm font-semibold flex items-center gap-2.5 animate-fade-in">
-          <span>✓</span>
+          <CircleCheck className="w-4 h-4 shrink-0" />
           <span>{actionData.message}</span>
         </div>
       )}
       {actionData?.error && (
         <div className="p-4 rounded-2xl bg-rose-50 border border-rose-200/80 text-rose-800 text-sm font-semibold flex items-center gap-2.5 animate-fade-in">
-          <span>⚠️</span>
+          <TriangleAlert className="w-4 h-4 shrink-0" />
           <span>{actionData.error}</span>
         </div>
       )}
@@ -583,13 +655,19 @@ export default function EventView() {
                 {event.type === "SIGNUP_SHEET" ? "Volunteer Sign-Up Sheet" : "Meeting Availability Poll"}
               </span>
               <span
-                className={`text-xs px-3 py-1 rounded-full font-semibold border ${
+                className={`text-xs px-3 py-1 rounded-full font-semibold border inline-flex items-center gap-1.5 ${
                   event.status === "FINALIZED"
                     ? "bg-purple-50 text-purple-700 border-purple-200"
                     : "bg-emerald-50 text-emerald-700 border-emerald-200"
                 }`}
               >
-                {event.status === "FINALIZED" ? "Meeting Finalized 🎯" : "Open for Responses"}
+                {event.status === "FINALIZED" ? (
+                  <>
+                    Meeting Finalized <Target className="w-3.5 h-3.5" />
+                  </>
+                ) : (
+                  "Open for Responses"
+                )}
               </span>
             </div>
 
@@ -606,18 +684,18 @@ export default function EventView() {
             <div className="flex flex-wrap items-center gap-4 pt-1 text-xs text-slate-500">
               {event.eventDate && (
                 <div className="flex items-center gap-1.5 font-semibold text-slate-800 bg-slate-100/90 px-3 py-1 rounded-full border border-slate-200/80">
-                  <span>📅</span>
+                  <CalendarDays className="w-3.5 h-3.5" />
                   <span>{new Date(event.eventDate + "T00:00:00").toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric", year: "numeric" })}</span>
                 </div>
               )}
               {event.location && (
                 <div className="flex items-center gap-1.5">
-                  <span>📍</span>
+                  <MapPin className="w-3.5 h-3.5" />
                   <span className="font-semibold text-slate-700">{event.location}</span>
                 </div>
               )}
               <div className="flex items-center gap-1.5">
-                <span>👤</span>
+                <User className="w-3.5 h-3.5" />
                 <span>Organized by: <strong className="text-slate-800">{event.organizerName}</strong></span>
               </div>
             </div>
@@ -635,8 +713,16 @@ export default function EventView() {
               }
               className="px-4 py-2.5 text-xs font-semibold rounded-xl border border-slate-200 hover:border-slate-300 bg-white text-slate-700 transition-all shadow-sm flex items-center justify-center gap-2 hover:bg-slate-50"
             >
-              <span>🔗</span>
-              <span>{copiedLink === "share" ? "Link Copied! ✓" : "Share Link"}</span>
+              <Link2 className="w-3.5 h-3.5" />
+              <span className="inline-flex items-center gap-1">
+                {copiedLink === "share" ? (
+                  <>
+                    Link Copied! <Check className="w-3.5 h-3.5" />
+                  </>
+                ) : (
+                  "Share Link"
+                )}
+              </span>
             </button>
 
             <a
@@ -644,7 +730,7 @@ export default function EventView() {
               download
               className="px-4 py-2.5 text-xs font-semibold rounded-xl border border-blue-200/80 bg-blue-50/50 hover:bg-blue-50 text-blue-700 transition-all shadow-sm flex items-center justify-center gap-2"
             >
-              <span>📅</span>
+              <CalendarPlus className="w-3.5 h-3.5" />
               <span>Add to Calendar (.ics)</span>
             </a>
 
@@ -654,7 +740,7 @@ export default function EventView() {
                 download
                 className="px-4 py-2.5 text-xs font-semibold rounded-xl border border-slate-200 hover:border-slate-300 bg-white hover:bg-slate-50 text-slate-700 transition-all shadow-sm flex items-center justify-center gap-2"
               >
-                <span>📥</span>
+                <Download className="w-3.5 h-3.5" />
                 <span>Export CSV Roster</span>
               </a>
             )}
@@ -665,7 +751,7 @@ export default function EventView() {
                 onClick={() => setShowEdit((v) => !v)}
                 className="px-4 py-2.5 text-xs font-semibold rounded-xl bg-slate-900 hover:bg-slate-800 text-white transition-all shadow-sm flex items-center justify-center gap-2"
               >
-                <span>✏️</span>
+                <Pencil className="w-3.5 h-3.5" />
                 <span>{showEdit ? "Close Editor" : "Edit Event"}</span>
               </button>
             )}
@@ -692,13 +778,13 @@ export default function EventView() {
       {isAdmin && showEdit && (
         <div className="bg-white border border-slate-200/80 rounded-3xl p-6 sm:p-8 shadow-[0_2px_12px_rgba(0,0,0,0.03)] space-y-8 animate-fade-in">
           <div className="flex items-center justify-between">
-            <h2 className="text-lg font-bold text-slate-900 tracking-tight">✏️ Edit Event</h2>
+            <h2 className="text-lg font-bold text-slate-900 tracking-tight inline-flex items-center gap-2"><Pencil className="w-4 h-4" /> Edit Event</h2>
             <button
               type="button"
               onClick={() => setShowEdit(false)}
-              className="px-3.5 py-1.5 text-xs font-semibold rounded-xl border border-slate-200 hover:border-slate-300 hover:bg-slate-50 bg-white text-slate-600 transition-all shadow-sm"
+              className="px-3.5 py-1.5 text-xs font-semibold rounded-xl border border-slate-200 hover:border-slate-300 hover:bg-slate-50 bg-white text-slate-600 transition-all shadow-sm inline-flex items-center gap-1"
             >
-              Close ✕
+              Close <X className="w-3 h-3" />
             </button>
           </div>
 
@@ -768,7 +854,7 @@ export default function EventView() {
           {/* Manage options / slots */}
           <div className="space-y-4 pt-6 border-t border-slate-100">
             <h3 className="text-sm font-bold text-slate-900 tracking-tight">
-              {event.type === "SIGNUP_SHEET" ? "Manage Shifts / Roles" : "Manage Time Options"}
+              {event.type === "SIGNUP_SHEET" ? "Manage Shifts / Tasks" : "Manage Time Options"}
             </h3>
             <div className="space-y-3.5">
               {slots.map((s) => (
@@ -780,9 +866,21 @@ export default function EventView() {
                   <input type="hidden" name="intent" value="update_slot" />
                   <input type="hidden" name="adminToken" value={adminToken || ""} />
                   <input type="hidden" name="slotId" value={s.id} />
-                  <div className="flex-1 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2.5">
-                    <div className="sm:col-span-2 lg:col-span-2">
-                      <label className="block text-[10px] uppercase font-bold text-slate-400 mb-1">Title *</label>
+                  <div className="flex-1 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-12 gap-2.5">
+                    {event.type === "SIGNUP_SHEET" && (
+                      <div className="sm:col-span-2 lg:col-span-3">
+                        <label className="block text-[10px] uppercase font-bold text-slate-400 mb-1">Shift (opt.)</label>
+                        <input
+                          type="text"
+                          name="slotShiftName"
+                          defaultValue={(s as { shiftName?: string | null }).shiftName || ""}
+                          placeholder="e.g. Morning"
+                          className="w-full px-3 py-2 rounded-xl border border-slate-200 text-xs bg-white focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all placeholder:text-slate-400"
+                        />
+                      </div>
+                    )}
+                    <div className="sm:col-span-2 lg:col-span-3">
+                      <label className="block text-[10px] uppercase font-bold text-slate-400 mb-1">{event.type === "SIGNUP_SHEET" ? "Task *" : "Title *"}</label>
                       <input
                         type="text"
                         name="slotTitle"
@@ -791,7 +889,7 @@ export default function EventView() {
                         className="w-full px-3 py-2 rounded-xl border border-slate-200 text-xs bg-white focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all"
                       />
                     </div>
-                    <div>
+                    <div className="lg:col-span-2">
                       <label className="block text-[10px] uppercase font-bold text-slate-400 mb-1">Start</label>
                       <input
                         type="text"
@@ -801,7 +899,7 @@ export default function EventView() {
                         className="w-full px-3 py-2 rounded-xl border border-slate-200 text-xs bg-white focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all placeholder:text-slate-400"
                       />
                     </div>
-                    <div>
+                    <div className="lg:col-span-2">
                       <label className="block text-[10px] uppercase font-bold text-slate-400 mb-1">End</label>
                       <input
                         type="text"
@@ -812,7 +910,7 @@ export default function EventView() {
                       />
                     </div>
                     {event.type === "SIGNUP_SHEET" && (
-                      <div>
+                      <div className="lg:col-span-2">
                         <label className="block text-[10px] uppercase font-bold text-slate-400 mb-1">Capacity</label>
                         <input
                           type="number"
@@ -858,9 +956,20 @@ export default function EventView() {
             >
               <input type="hidden" name="intent" value="add_slot" />
               <input type="hidden" name="adminToken" value={adminToken || ""} />
-              <div className="flex-1 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2.5">
-                <div className="sm:col-span-2 lg:col-span-2">
-                  <label className="block text-[10px] uppercase font-bold text-slate-400 mb-1">New option title</label>
+              <div className="flex-1 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-12 gap-2.5">
+                {event.type === "SIGNUP_SHEET" && (
+                  <div className="sm:col-span-2 lg:col-span-3">
+                    <label className="block text-[10px] uppercase font-bold text-slate-400 mb-1">Shift (opt.)</label>
+                    <input
+                      type="text"
+                      name="slotShiftName"
+                      placeholder="e.g. Morning"
+                      className="w-full px-3 py-2 rounded-xl border border-slate-200 text-xs bg-white focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all placeholder:text-slate-400"
+                    />
+                  </div>
+                )}
+                <div className="sm:col-span-2 lg:col-span-3">
+                  <label className="block text-[10px] uppercase font-bold text-slate-400 mb-1">{event.type === "SIGNUP_SHEET" ? "New task" : "New option title"}</label>
                   <input
                     type="text"
                     name="slotTitle"
@@ -868,7 +977,7 @@ export default function EventView() {
                     className="w-full px-3 py-2 rounded-xl border border-slate-200 text-xs bg-white focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all placeholder:text-slate-400"
                   />
                 </div>
-                <div>
+                <div className="lg:col-span-2">
                   <label className="block text-[10px] uppercase font-bold text-slate-400 mb-1">Start (opt.)</label>
                   <input
                     type="text"
@@ -877,7 +986,7 @@ export default function EventView() {
                     className="w-full px-3 py-2 rounded-xl border border-slate-200 text-xs bg-white focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all placeholder:text-slate-400"
                   />
                 </div>
-                <div>
+                <div className="lg:col-span-2">
                   <label className="block text-[10px] uppercase font-bold text-slate-400 mb-1">End (opt.)</label>
                   <input
                     type="text"
@@ -887,7 +996,7 @@ export default function EventView() {
                   />
                 </div>
                 {event.type === "SIGNUP_SHEET" && (
-                  <div>
+                  <div className="lg:col-span-2">
                     <label className="block text-[10px] uppercase font-bold text-slate-400 mb-1">Capacity</label>
                     <input
                       type="number"
@@ -908,7 +1017,7 @@ export default function EventView() {
               </button>
             </Form>
             <p className="text-[11px] text-slate-500">
-              Deleting an option also removes its signups / votes. If it was the finalized winning time, the event reopens.
+              Deleting a task also removes its signups / votes. If it was the finalized winning time, the event reopens.
             </p>
           </div>
         </div>
@@ -920,137 +1029,167 @@ export default function EventView() {
       {event.type === "SIGNUP_SHEET" && (
         <div className="space-y-6">
           <div className="flex items-center justify-between px-1">
-            <h2 className="text-xl font-bold text-slate-900 tracking-tight">Available Slots & Roles</h2>
+            <h2 className="text-xl font-bold text-slate-900 tracking-tight">Available Shifts & Tasks</h2>
             <span className="text-xs font-medium text-slate-500">
               {initialSignups.length} confirmed {initialSignups.length === 1 ? "signup" : "signups"}
             </span>
           </div>
 
           <div className="space-y-5">
-            {slots.map((slot) => {
-              const slotSignups = initialSignups.filter((s) => Boolean(s && s.slotId === slot.id));
-              const isFull = slot.capacity > 0 && slotSignups.length >= slot.capacity;
-              const spotsLeft = slot.capacity > 0 ? slot.capacity - slotSignups.length : 999;
-              const fillPercent =
-                slot.capacity > 0 ? Math.min(100, Math.round((slotSignups.length / slot.capacity) * 100)) : 0;
+            {shiftGroups.map((group) => {
+              const renderTask = (slot: SlotRow) => {
+                const slotSignups = initialSignups.filter((s) => Boolean(s && s.slotId === slot.id));
+                const isFull = slot.capacity > 0 && slotSignups.length >= slot.capacity;
+                const spotsLeft = slot.capacity > 0 ? slot.capacity - slotSignups.length : 999;
+                const fillPercent =
+                  slot.capacity > 0 ? Math.min(100, Math.round((slotSignups.length / slot.capacity) * 100)) : 0;
+                const signupLabel = group.shiftName ? `${group.shiftName} – ${slot.title}` : slot.title;
 
-              return (
-                <div
-                  key={slot.id}
-                  className="bg-white border border-slate-200/80 rounded-3xl p-6 sm:p-8 shadow-[0_2px_12px_rgba(0,0,0,0.03)] hover:shadow-[0_6px_20px_rgba(0,0,0,0.05)] transition-all space-y-6"
-                >
-                  <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-4">
-                    <div className="space-y-2 max-w-xl">
-                      <div className="flex items-center gap-3 flex-wrap">
-                        <h3 className="font-bold text-lg text-slate-900">{slot.title}</h3>
-                        {slot.capacity > 0 ? (
-                          <span
-                            className={`text-xs px-3 py-1 rounded-full font-semibold border ${
-                              isFull
-                                ? "bg-slate-100 text-slate-500 border-slate-200"
-                                : spotsLeft <= 1
-                                ? "bg-amber-50 text-amber-700 border-amber-200"
-                                : "bg-emerald-50 text-emerald-700 border-emerald-200"
-                            }`}
-                          >
-                            {isFull ? "Filled" : `${spotsLeft} spot${spotsLeft === 1 ? "" : "s"} left`}
-                          </span>
-                        ) : (
-                          <span className="text-xs px-3 py-1 rounded-full bg-blue-50 text-blue-700 border border-blue-200 font-semibold">
-                            Unlimited
-                          </span>
+                return (
+                  <div
+                    key={slot.id}
+                    className="bg-[#fafafc] rounded-2xl p-4 sm:p-5 border border-slate-100 space-y-4"
+                  >
+                    <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-4">
+                      <div className="space-y-2 max-w-xl">
+                        <div className="flex items-center gap-3 flex-wrap">
+                          <h4 className="font-bold text-base text-slate-900">{slot.title}</h4>
+                          {slot.capacity > 0 ? (
+                            <span
+                              className={`text-xs px-3 py-1 rounded-full font-semibold border ${
+                                isFull
+                                  ? "bg-slate-100 text-slate-500 border-slate-200"
+                                  : spotsLeft <= 1
+                                  ? "bg-amber-50 text-amber-700 border-amber-200"
+                                  : "bg-emerald-50 text-emerald-700 border-emerald-200"
+                              }`}
+                            >
+                              {isFull ? "Filled" : `${spotsLeft} spot${spotsLeft === 1 ? "" : "s"} left`}
+                            </span>
+                          ) : (
+                            <span className="text-xs px-3 py-1 rounded-full bg-blue-50 text-blue-700 border border-blue-200 font-semibold">
+                              Unlimited
+                            </span>
+                          )}
+                        </div>
+
+                        {/* Visual capacity progress bar */}
+                        {slot.capacity > 0 && (
+                          <div className="w-48 h-1.5 bg-slate-200/70 rounded-full overflow-hidden mt-2">
+                            <div
+                              className={`h-full rounded-full transition-all duration-300 ${
+                                isFull ? "bg-slate-400" : "bg-blue-600"
+                              }`}
+                              style={{ width: `${fillPercent}%` }}
+                            />
+                          </div>
                         )}
                       </div>
 
-                      {(slot.startTime || slot.endTime) && (
-                        <p className="text-xs text-slate-500">
-                          ⏰ {slot.startTime} {slot.endTime ? `– ${slot.endTime}` : ""}
-                        </p>
-                      )}
+                      <button
+                        type="button"
+                        disabled={isFull}
+                        onClick={() => setSelectedSlotForSignup({ id: slot.id, title: signupLabel })}
+                        className={`px-6 py-3 rounded-2xl text-xs font-bold transition-all shadow-sm shrink-0 inline-flex items-center gap-1.5 ${
+                          isFull
+                            ? "bg-slate-100 text-slate-400 cursor-not-allowed border border-slate-200"
+                            : "bg-blue-600 text-white hover:bg-blue-700 hover:scale-[1.02] active:scale-[0.98]"
+                        }`}
+                      >
+                        {isFull ? (
+                          "Full"
+                        ) : (
+                          <>
+                            Sign Up <ArrowRight className="w-3.5 h-3.5" />
+                          </>
+                        )}
+                      </button>
+                    </div>
 
-                      {/* Visual capacity progress bar */}
-                      {slot.capacity > 0 && (
-                        <div className="w-48 h-1.5 bg-slate-100 rounded-full overflow-hidden mt-2">
-                          <div
-                            className={`h-full rounded-full transition-all duration-300 ${
-                              isFull ? "bg-slate-400" : "bg-blue-600"
-                            }`}
-                            style={{ width: `${fillPercent}%` }}
-                          />
+                    {/* Confirmed Roster Container */}
+                    <div>
+                      <div className="text-[11px] font-bold uppercase tracking-wider text-slate-500 mb-3">
+                        Confirmed ({slotSignups.length} {slot.capacity > 0 ? `of ${slot.capacity}` : ""})
+                      </div>
+
+                      {slotSignups.length === 0 ? (
+                        <div className="text-xs text-slate-400 italic py-1">
+                          No one has signed up for this task yet. Claim the first spot!
+                        </div>
+                      ) : (
+                        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-2.5">
+                          {slotSignups.map((s, idx) => {
+                            if (!s) return null;
+                            let customNotes = "";
+                            try {
+                              const parsed = JSON.parse(s.customFields);
+                              customNotes = parsed.comment || "";
+                            } catch (_) {}
+
+                            return (
+                              <div
+                                key={s.id}
+                                className="bg-white p-3 rounded-xl border border-slate-200/80 text-xs flex items-center justify-between shadow-sm"
+                              >
+                                <div className="truncate mr-2">
+                                  <span className="font-semibold text-slate-800">
+                                    {idx + 1}. {s.participantName}
+                                  </span>
+                                  {customNotes && (
+                                    <span className="block text-[11px] text-slate-500 truncate mt-0.5">
+                                      "{customNotes}"
+                                    </span>
+                                  )}
+                                </div>
+
+                                {isAdmin && (
+                                  <Form method="post" className="shrink-0">
+                                    <input type="hidden" name="intent" value="cancel_signup" />
+                                    <input type="hidden" name="signupId" value={s.id} />
+                                    <input type="hidden" name="adminToken" value={adminToken || ""} />
+                                    <button
+                                      type="submit"
+                                      title="Cancel volunteer entry"
+                                      className="text-slate-400 hover:text-rose-600 p-1 transition-colors"
+                                    >
+                                      <X className="w-3.5 h-3.5" />
+                                    </button>
+                                  </Form>
+                                )}
+                              </div>
+                            );
+                          })}
                         </div>
                       )}
                     </div>
-
-                    <button
-                      type="button"
-                      disabled={isFull}
-                      onClick={() => setSelectedSlotForSignup({ id: slot.id, title: slot.title })}
-                      className={`px-6 py-3 rounded-2xl text-xs font-bold transition-all shadow-sm shrink-0 ${
-                        isFull
-                          ? "bg-slate-100 text-slate-400 cursor-not-allowed border border-slate-200"
-                          : "bg-blue-600 text-white hover:bg-blue-700 hover:scale-[1.02] active:scale-[0.98]"
-                      }`}
-                    >
-                      {isFull ? "Full" : "Sign Up →"}
-                    </button>
                   </div>
+                );
+              };
 
-                  {/* Confirmed Roster Container */}
-                  <div className="bg-[#fafafc] rounded-2xl p-4 sm:p-5 border border-slate-100">
-                    <div className="text-[11px] font-bold uppercase tracking-wider text-slate-500 mb-3">
-                      Confirmed Attendees ({slotSignups.length} {slot.capacity > 0 ? `of ${slot.capacity}` : ""})
-                    </div>
-
-                    {slotSignups.length === 0 ? (
-                      <div className="text-xs text-slate-400 italic py-1">
-                        No one has signed up for this slot yet. Claim the first spot!
-                      </div>
-                    ) : (
-                      <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-2.5">
-                        {slotSignups.map((s, idx) => {
-                          if (!s) return null;
-                          let customNotes = "";
-                          try {
-                            const parsed = JSON.parse(s.customFields);
-                            customNotes = parsed.comment || "";
-                          } catch (_) {}
-
-                          return (
-                            <div
-                              key={s.id}
-                              className="bg-white p-3 rounded-xl border border-slate-200/80 text-xs flex items-center justify-between shadow-sm"
-                            >
-                              <div className="truncate mr-2">
-                                <span className="font-semibold text-slate-800">
-                                  {idx + 1}. {s.participantName}
-                                </span>
-                                {customNotes && (
-                                  <span className="block text-[11px] text-slate-500 truncate mt-0.5">
-                                    "{customNotes}"
-                                  </span>
-                                )}
-                              </div>
-
-                              {isAdmin && (
-                                <Form method="post" className="shrink-0">
-                                  <input type="hidden" name="intent" value="cancel_signup" />
-                                  <input type="hidden" name="signupId" value={s.id} />
-                                  <input type="hidden" name="adminToken" value={adminToken || ""} />
-                                  <button
-                                    type="submit"
-                                    title="Cancel volunteer entry"
-                                    className="text-slate-400 hover:text-rose-600 text-xs px-1 font-bold transition-colors"
-                                  >
-                                    ✕
-                                  </button>
-                                </Form>
-                              )}
-                            </div>
-                          );
-                        })}
-                      </div>
+              return (
+                <div
+                  key={group.key}
+                  className="bg-white border border-slate-200/80 rounded-3xl p-6 sm:p-8 shadow-[0_2px_12px_rgba(0,0,0,0.03)] hover:shadow-[0_6px_20px_rgba(0,0,0,0.05)] transition-all space-y-5"
+                >
+                  <div className="space-y-1.5">
+                    {group.shiftName && (
+                      <h3 className="font-bold text-lg text-slate-900">{group.shiftName}</h3>
+                    )}
+                    {(group.startTime || group.endTime) && (
+                      <p className="text-xs text-slate-500 inline-flex items-center gap-1.5 font-semibold">
+                        <Clock className="w-3.5 h-3.5" /> {group.startTime} {group.endTime ? `– ${group.endTime}` : ""}
+                      </p>
+                    )}
+                    {!group.shiftName && !(group.startTime || group.endTime) && group.tasks.length === 1 && (
+                      <h3 className="font-bold text-lg text-slate-900">{group.tasks[0].title}</h3>
                     )}
                   </div>
+
+                  {group.shiftName || group.startTime || group.endTime || group.tasks.length > 1 ? (
+                    <div className="space-y-4">{group.tasks.map(renderTask)}</div>
+                  ) : (
+                    renderTask(group.tasks[0])
+                  )}
                 </div>
               );
             })}
@@ -1059,7 +1198,7 @@ export default function EventView() {
       )}
 
       {/* ===================================================================== */}
-      {/* SECTION 2: MEETING TIME FINDER (Classic Doodle Matrix)                 */}
+      {/* SECTION 2: MEETING TIME FINDER                                          */}
       {/* ===================================================================== */}
       {event.type === "TIME_POLL" && pollData && (
         <div className="space-y-6">
@@ -1067,13 +1206,13 @@ export default function EventView() {
           {topSlot && (
             <div className="bg-gradient-to-r from-blue-50/70 to-indigo-50/70 border border-blue-200/80 rounded-3xl p-6 sm:p-8 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-5 shadow-sm">
               <div className="space-y-1.5">
-                <div className="inline-flex items-center gap-2 text-xs font-bold text-blue-700 uppercase tracking-wider">
-                  <span>⭐ Consensus Leader</span>
+                <div className="inline-flex items-center gap-1.5 text-xs font-bold text-blue-700 uppercase tracking-wider">
+                  <Star className="w-3.5 h-3.5" /> Consensus Leader
                 </div>
                 <div className="text-xl font-extrabold text-slate-900">{topSlot.slot.title}</div>
                 {(topSlot.slot.startTime || topSlot.slot.endTime) && (
-                  <div className="text-xs font-semibold text-blue-700">
-                    ⏰ {formatTime(topSlot.slot.startTime)}
+                  <div className="text-xs font-semibold text-blue-700 inline-flex items-center gap-1.5">
+                    <Clock className="w-3.5 h-3.5" /> {formatTime(topSlot.slot.startTime)}
                     {topSlot.slot.endTime ? ` – ${formatTime(topSlot.slot.endTime)}` : ""}
                   </div>
                 )}
@@ -1089,9 +1228,9 @@ export default function EventView() {
                   <input type="hidden" name="winningSlotId" value={topSlot.slot.id} />
                   <button
                     type="submit"
-                    className="px-5 py-3 bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold rounded-2xl shadow-sm transition-all hover:scale-[1.02] active:scale-[0.98]"
+                    className="px-5 py-3 bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold rounded-2xl shadow-sm transition-all hover:scale-[1.02] active:scale-[0.98] inline-flex items-center gap-2"
                   >
-                    Lock This Time as Final Meeting 🎯
+                    <Lock className="w-3.5 h-3.5" /> Lock This Time as Final Meeting
                   </button>
                 </Form>
               )}
@@ -1118,14 +1257,14 @@ export default function EventView() {
                         >
                           <div className="font-bold text-slate-900">{s.title}</div>
                           {(s.startTime || s.endTime) && (
-                            <div className="font-semibold text-blue-700 mt-0.5">
-                              ⏰ {formatTime(s.startTime)}
+                            <div className="font-semibold text-blue-700 mt-0.5 inline-flex items-center justify-center gap-1">
+                              <Clock className="w-3 h-3" /> {formatTime(s.startTime)}
                               {s.endTime ? ` – ${formatTime(s.endTime)}` : ""}
                             </div>
                           )}
                           {isWinning && (
-                            <span className="inline-block mt-1 text-[10px] px-2.5 py-0.5 rounded-full bg-purple-100 text-purple-800 font-bold">
-                              Selected Meeting Time 🏆
+                            <span className="mt-1 text-[10px] px-2.5 py-0.5 rounded-full bg-purple-100 text-purple-800 font-bold inline-flex items-center gap-1">
+                              <Trophy className="w-3 h-3" /> Selected Meeting Time
                             </span>
                           )}
                         </th>
@@ -1145,18 +1284,18 @@ export default function EventView() {
                         return (
                           <td key={s.id} className="p-3 text-center border-r border-slate-100">
                             {resp === "YES" && (
-                              <span className="inline-flex items-center justify-center w-8 h-8 rounded-xl bg-emerald-500 text-white font-bold text-sm shadow-sm">
-                                ✔
+                              <span className="inline-flex items-center justify-center w-8 h-8 rounded-xl bg-emerald-500 text-white shadow-sm">
+                                <Check className="w-4 h-4" />
                               </span>
                             )}
                             {resp === "MAYBE" && (
-                              <span className="inline-flex items-center justify-center w-8 h-8 rounded-xl bg-amber-400 text-slate-900 font-bold text-xs shadow-sm">
-                                (✔)
+                              <span className="inline-flex items-center justify-center w-8 h-8 rounded-xl bg-amber-400 text-slate-900 shadow-sm">
+                                <Check className="w-4 h-4" />
                               </span>
                             )}
                             {resp === "NO" && (
-                              <span className="inline-flex items-center justify-center w-8 h-8 rounded-xl bg-slate-100 text-slate-400 font-bold text-xs">
-                                –
+                              <span className="inline-flex items-center justify-center w-8 h-8 rounded-xl bg-slate-100 text-slate-400">
+                                <Minus className="w-4 h-4" />
                               </span>
                             )}
                           </td>
@@ -1191,7 +1330,7 @@ export default function EventView() {
                             <button
                               type="button"
                               onClick={() => cycleSlotVote(s.id)}
-                              className={`w-9 h-9 rounded-xl font-bold text-xs transition-all shadow-sm ${
+                              className={`w-9 h-9 rounded-xl font-bold text-xs transition-all shadow-sm inline-flex items-center justify-center ${
                                 cur === "YES"
                                   ? "bg-emerald-500 text-white scale-105"
                                   : cur === "MAYBE"
@@ -1199,7 +1338,13 @@ export default function EventView() {
                                   : "bg-white border border-slate-300 hover:border-blue-500 text-slate-400"
                               }`}
                             >
-                              {cur === "YES" ? "✔" : cur === "MAYBE" ? "(✔)" : "–"}
+                              {cur === "YES" ? (
+                                <Check className="w-4 h-4" />
+                              ) : cur === "MAYBE" ? (
+                                <Check className="w-4 h-4" />
+                              ) : (
+                                <Minus className="w-4 h-4" />
+                              )}
                             </button>
                           </td>
                         );
@@ -1230,7 +1375,7 @@ export default function EventView() {
                               (+{t.maybe})
                             </span>
                           )}
-                          {isTop && <span className="ml-1 text-sm">⭐</span>}
+                          {isTop && <Star className="ml-1 w-3.5 h-3.5 inline text-blue-600" />}
                         </td>
                       );
                     })}
@@ -1244,15 +1389,15 @@ export default function EventView() {
               <div className="p-5 sm:p-6 bg-[#fafafc] border-t border-slate-200/80 flex flex-col sm:flex-row items-center justify-between gap-4">
                 <div className="flex items-center gap-4 text-xs text-slate-500">
                   <span className="flex items-center gap-1.5">
-                    <span className="w-4 h-4 rounded-lg bg-emerald-500 text-white inline-flex items-center justify-center font-bold text-[10px]">✔</span>
+                    <span className="w-4 h-4 rounded-lg bg-emerald-500 text-white inline-flex items-center justify-center"><Check className="w-3 h-3" /></span>
                     <span>Available</span>
                   </span>
                   <span className="flex items-center gap-1.5">
-                    <span className="w-4 h-4 rounded-lg bg-amber-400 text-slate-900 inline-flex items-center justify-center font-bold text-[10px]">(✔)</span>
+                    <span className="w-4 h-4 rounded-lg bg-amber-400 text-slate-900 inline-flex items-center justify-center"><Check className="w-3 h-3" /></span>
                     <span>If need be</span>
                   </span>
                   <span className="flex items-center gap-1.5">
-                    <span className="w-4 h-4 rounded-lg border border-slate-300 bg-white text-slate-400 inline-flex items-center justify-center font-bold text-[10px]">–</span>
+                    <span className="w-4 h-4 rounded-lg border border-slate-300 bg-white text-slate-400 inline-flex items-center justify-center"><Minus className="w-3 h-3" /></span>
                     <span>Unavailable</span>
                   </span>
                 </div>
@@ -1290,9 +1435,9 @@ export default function EventView() {
                   <button
                     type="submit"
                     disabled={isSubmitting}
-                    className="w-full sm:w-auto px-7 py-3 bg-blue-600 hover:bg-blue-700 text-white rounded-2xl text-xs font-bold shadow-sm transition-all hover:scale-[1.02] active:scale-[0.98] disabled:opacity-50"
+                    className="w-full sm:w-auto px-7 py-3 bg-blue-600 hover:bg-blue-700 text-white rounded-2xl text-xs font-bold shadow-sm transition-all hover:scale-[1.02] active:scale-[0.98] disabled:opacity-50 inline-flex items-center gap-2"
                   >
-                    {isSubmitting ? "Saving..." : "Save My Availability →"}
+                    {isSubmitting ? "Saving..." : <>Save My Availability <ArrowRight className="w-3.5 h-3.5" /></>}
                   </button>
                 </Form>
               </div>
@@ -1310,9 +1455,9 @@ export default function EventView() {
               <button
                 type="button"
                 onClick={() => setSelectedSlotForSignup(null)}
-                className="text-slate-400 hover:text-slate-600 font-bold text-lg p-1"
+                className="text-slate-400 hover:text-slate-600 p-1"
               >
-                ✕
+                <X className="w-5 h-5" />
               </button>
             </div>
 

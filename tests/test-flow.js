@@ -80,7 +80,7 @@ const isSlot1Full = slot1Signups.count >= 2;
 assert.strictEqual(isSlot1Full, true, "Slot 1 should be recognized as full");
 console.log("✓ Slot capacity enforcement verified: Slot 1 is full!");
 
-console.log("\n--- TEST 2: Meeting Time Poll Flow (Classic Doodle) ---");
+console.log("\n--- TEST 2: Meeting Time Poll Flow ---");
 const pollEventId = "test-poll-event-" + testIdSuffix;
 db.prepare(`
   INSERT INTO events (id, type, title, event_date, description, location, organizer_name, organizer_email, admin_token, status, settings, timezone, created_at, updated_at)

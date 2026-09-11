@@ -1,0 +1,1 @@
+ALTER TABLE `event_slots` ADD `shift_name` text;

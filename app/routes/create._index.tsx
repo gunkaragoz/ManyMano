@@ -1,4 +1,5 @@
 import { Link } from "@remix-run/react";
+import { ArrowRight, CalendarDays, ClipboardList } from "lucide-react";
 
 export default function CreateChooser() {
   return (
@@ -17,17 +18,17 @@ export default function CreateChooser() {
           className="group bg-white border border-slate-200/80 rounded-3xl p-8 shadow-[0_2px_12px_rgba(0,0,0,0.03)] hover:shadow-[0_8px_24px_rgba(0,0,0,0.06)] hover:border-blue-300 transition-all flex flex-col justify-between space-y-6"
         >
           <div className="space-y-3">
-            <div className="w-12 h-12 rounded-2xl bg-blue-50 text-blue-600 flex items-center justify-center text-xl font-bold border border-blue-100 group-hover:scale-105 transition-transform">
-              📋
+            <div className="w-12 h-12 rounded-2xl bg-blue-50 text-blue-600 flex items-center justify-center border border-blue-100 group-hover:scale-105 transition-transform">
+              <ClipboardList className="w-6 h-6" />
             </div>
             <h2 className="text-xl font-bold text-slate-900">Volunteer Sign-Up Sheet</h2>
             <p className="text-xs text-slate-500 leading-relaxed">
-              Create customizable shifts, roles, and potluck lists with specific spot limits.
+              Create customizable shifts with multiple tasks and potluck lists with specific spot limits.
             </p>
           </div>
           <span className="text-xs font-bold text-blue-600 flex items-center gap-1">
             <span>Create Sheet</span>
-            <span>→</span>
+            <ArrowRight className="w-3.5 h-3.5" />
           </span>
         </Link>
 
@@ -37,17 +38,17 @@ export default function CreateChooser() {
           className="group bg-white border border-slate-200/80 rounded-3xl p-8 shadow-[0_2px_12px_rgba(0,0,0,0.03)] hover:shadow-[0_8px_24px_rgba(0,0,0,0.06)] hover:border-emerald-300 transition-all flex flex-col justify-between space-y-6"
         >
           <div className="space-y-3">
-            <div className="w-12 h-12 rounded-2xl bg-emerald-50 text-emerald-600 flex items-center justify-center text-xl font-bold border border-emerald-100 group-hover:scale-105 transition-transform">
-              📅
+            <div className="w-12 h-12 rounded-2xl bg-emerald-50 text-emerald-600 flex items-center justify-center border border-emerald-100 group-hover:scale-105 transition-transform">
+              <CalendarDays className="w-6 h-6" />
             </div>
             <h2 className="text-xl font-bold text-slate-900">Meeting Time Finder</h2>
             <p className="text-xs text-slate-500 leading-relaxed">
-              Propose candidate time slots on a clean Doodle grid and let everyone vote.
+              Propose candidate time slots on a clean consensus grid and let everyone vote.
             </p>
           </div>
           <span className="text-xs font-bold text-emerald-600 flex items-center gap-1">
             <span>Create Poll</span>
-            <span>→</span>
+            <ArrowRight className="w-3.5 h-3.5" />
           </span>
         </Link>
       </div>
