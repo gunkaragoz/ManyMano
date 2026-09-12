@@ -1785,18 +1785,23 @@ export default function EventView() {
                   s.startTime || s.endTime
                     ? `${formatTime(s.startTime)}${s.endTime ? ` – ${formatTime(s.endTime)}` : ""}`
                     : "All day";
+                const dayLabel = slotDayLabel[s.id] || "Undated";
+                // Auto-generated titles duplicate day + time already shown above — only show custom labels.
+                const autoTitle = `${dayLabel} · ${timeLabel}`;
+                const rawTitle = (s.title || "").trim();
+                const customLabel = rawTitle && rawTitle !== autoTitle ? s.title : "";
                 return (
                   <div key={s.id} className={`p-5 space-y-4 ${isWinning ? "bg-purple-50/50" : ""}`}>
                     <div className="flex items-start justify-between gap-3">
                       <div className="min-w-0">
                         <div className="text-[11px] font-bold uppercase tracking-wider text-slate-500">
-                          {slotDayLabel[s.id] || "Undated"}
+                          {dayLabel}
                         </div>
                         <div className="font-extrabold text-slate-900 text-lg leading-tight mt-0.5">
                           {timeLabel}
                         </div>
-                        {s.title && (
-                          <div className="text-xs text-slate-500 mt-0.5 truncate">{s.title}</div>
+                        {customLabel && (
+                          <div className="text-xs text-slate-500 mt-0.5 truncate">{customLabel}</div>
                         )}
                         <div className="flex items-center gap-2 mt-2 flex-wrap">
                           <span className="inline-flex items-center gap-1 text-xs font-bold text-green-700 bg-green-50 border border-green-200 px-2.5 py-1 rounded-full">
