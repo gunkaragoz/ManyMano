@@ -3,7 +3,7 @@ import { absoluteUrl } from "~/utils/seo";
 import { getSiteConfig } from "~/utils/site";
 
 // Serves /.well-known/security.txt dynamically so Contact/Canonical follow
-// SECURITY_CONTACT / SITE_URL. No hardcoded domain fallback.
+// the site config (SECURITY_CONTACT override or derived default) / SITE_URL.
 //
 // NOTE: flat-routes escaping — `[.]` renders a literal dot, so this file
 // maps to the `/.well-known/security.txt` path.

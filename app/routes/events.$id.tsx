@@ -155,9 +155,9 @@ export async function loader({ params, request, context }: LoaderFunctionArgs) {
     GITHUB_REPO_URL?: string;
     FOOTER_CREDIT_URL?: string;
     FOOTER_CREDIT_LABEL?: string;
-    SECURITY_CONTACT: string;
-    ICS_UID_DOMAIN: string;
-    ICS_PRODID: string;
+    SECURITY_CONTACT?: string;
+    ICS_UID_DOMAIN?: string;
+    ICS_PRODID?: string;
   };
   const site = getSiteConfig(env);
   const db = getDb(env.DB);
@@ -392,9 +392,9 @@ export async function action({ request, params, context }: ActionFunctionArgs) {
     GITHUB_REPO_URL?: string;
     FOOTER_CREDIT_URL?: string;
     FOOTER_CREDIT_LABEL?: string;
-    SECURITY_CONTACT: string;
-    ICS_UID_DOMAIN: string;
-    ICS_PRODID: string;
+    SECURITY_CONTACT?: string;
+    ICS_UID_DOMAIN?: string;
+    ICS_PRODID?: string;
     TURNSTILE_SECRET_KEY?: string;
     TURNSTILE_HOSTNAMES?: string;
   };

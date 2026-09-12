@@ -88,9 +88,9 @@ export async function action({ request, context }: ActionFunctionArgs) {
     GITHUB_REPO_URL?: string;
     FOOTER_CREDIT_URL?: string;
     FOOTER_CREDIT_LABEL?: string;
-    SECURITY_CONTACT: string;
-    ICS_UID_DOMAIN: string;
-    ICS_PRODID: string;
+    SECURITY_CONTACT?: string;
+    ICS_UID_DOMAIN?: string;
+    ICS_PRODID?: string;
     TURNSTILE_SECRET_KEY?: string;
     TURNSTILE_HOSTNAMES?: string;
   };

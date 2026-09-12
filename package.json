@@ -8,10 +8,12 @@
     "dev": "VITE_CJS_IGNORE_WARNING=true remix vite:dev",
     "start": "wrangler pages dev ./build/client",
     "typecheck": "tsc",
+    "test:predeploy": "node tests/predeploy.mjs",
+    "test": "npm run typecheck && npm run test:predeploy",
     "db:generate": "drizzle-kit generate",
     "db:migrate:local": "wrangler d1 migrations apply manymano-db --local",
     "db:migrate:remote": "wrangler d1 migrations apply manymano-db --remote",
-    "deploy": "npm run build && wrangler pages deploy ./build/client"
+    "deploy": "npm run typecheck && npm run build && npm run test:predeploy && wrangler pages deploy ./build/client"
   },
   "dependencies": {
     "@remix-run/cloudflare": "^2.17.5",

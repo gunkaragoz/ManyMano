@@ -17,9 +17,9 @@ declare module "@remix-run/cloudflare" {
         GITHUB_REPO_URL?: string;
         FOOTER_CREDIT_URL?: string;
         FOOTER_CREDIT_LABEL?: string;
-        SECURITY_CONTACT: string;
-        ICS_UID_DOMAIN: string;
-        ICS_PRODID: string;
+        SECURITY_CONTACT?: string;
+        ICS_UID_DOMAIN?: string;
+        ICS_PRODID?: string;
         TURNSTILE_SITE_KEY?: string;
         TURNSTILE_SECRET_KEY?: string;
         TURNSTILE_HOSTNAMES?: string;

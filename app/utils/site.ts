@@ -2,13 +2,16 @@
 //
 // Required values come from the runtime environment
 // (Cloudflare Pages dashboard in production, `.dev.vars` locally).
-// There are intentionally NO hardcoded fallbacks for required vars: a missing
-// variable throws at request time so a rebrand / fork can never silently serve
-// the old ManyMano defaults (e.g. mail.manymano.com).
+// Only the core brand vars are required: a missing required variable throws
+// at request time so a rebrand / fork can never silently serve stale defaults.
 //
 // Required vars (see `.env.sample`):
-//   SITE_URL, SITE_NAME, SITE_TAGLINE, SITE_DESCRIPTION,
-//   FROM_EMAIL, SECURITY_CONTACT, ICS_UID_DOMAIN, ICS_PRODID
+//   SITE_URL, SITE_NAME, SITE_TAGLINE, SITE_DESCRIPTION, FROM_EMAIL
+//
+// Optional vars with derived defaults (empty/unset falls back, never throws):
+//   SECURITY_CONTACT → GITHUB_REPO_URL + "/issues", else mailto:FROM_EMAIL
+//   ICS_UID_DOMAIN   → hostname of SITE_URL (e.g. manymano.com)
+//   ICS_PRODID       → PRODID:-//{SITE_NAME}//Open Source Scheduling//EN
 //
 // Optional vars (empty/unset hides the corresponding footer link / metadata):
 //   GITHUB_REPO_URL, FOOTER_CREDIT_URL, FOOTER_CREDIT_LABEL
@@ -85,9 +88,25 @@ function optional(env: SiteEnv, key: keyof SiteEnv): string | undefined {
 }
 
 /**
+ * Default security.txt Contact when SECURITY_CONTACT is unset. Prefers the
+ * repo issue tracker (already brand-correct via GITHUB_REPO_URL); otherwise
+ * falls back to the FROM_EMAIL address. FROM_EMAIL is required, so this
+ * always resolves — never throws, never hardcodes a brand.
+ */
+function defaultSecurityContact(githubRepoUrl: string | undefined, fromEmail: string): string {
+  if (githubRepoUrl) return `${githubRepoUrl}/issues`;
+  const angled = fromEmail.match(/<([^<>@\s]+@[^<>@\s]+)>/)?.[1];
+  const bare = fromEmail.trim();
+  const addr = angled ?? (/^[^<>\s]+@[^<>\s]+$/.test(bare) ? bare : null);
+  return addr ? `mailto:${addr}` : bare;
+}
+
+/**
  * Resolve + validate full site config. Required fields throw when absent
  * (fail-fast, no fallback); GITHUB_REPO_URL / FOOTER_CREDIT_URL /
- * FOOTER_CREDIT_LABEL are optional and resolve to `undefined` when unset.
+ * FOOTER_CREDIT_LABEL are optional and resolve to `undefined` when unset;
+ * SECURITY_CONTACT / ICS_UID_DOMAIN / ICS_PRODID fall back to values derived
+ * from the required vars (never throw, never hardcode a brand).
  */
 export function getSiteConfig(env: SiteEnv): SiteConfig {
   const siteUrl = required(env, "SITE_URL").replace(/\/$/, "");
@@ -101,9 +120,10 @@ export function getSiteConfig(env: SiteEnv): SiteConfig {
   const githubRepoUrl = optional(env, "GITHUB_REPO_URL")?.replace(/\/$/, "") || undefined;
   const footerCreditUrl = optional(env, "FOOTER_CREDIT_URL")?.replace(/\/$/, "") || undefined;
   const footerCreditLabel = optional(env, "FOOTER_CREDIT_LABEL");
-  const securityContact = required(env, "SECURITY_CONTACT");
-  const icsUidDomain = required(env, "ICS_UID_DOMAIN");
-  const icsProdid = required(env, "ICS_PRODID");
+  const securityContact =
+    optional(env, "SECURITY_CONTACT") ?? defaultSecurityContact(githubRepoUrl, fromEmail);
+  const icsUidDomain = optional(env, "ICS_UID_DOMAIN") ?? new URL(siteUrl).hostname;
+  const icsProdid = optional(env, "ICS_PRODID") ?? `PRODID:-//${siteName}//Open Source Scheduling//EN`;
 
   return {
     siteUrl,

@@ -8,7 +8,8 @@ import { getSiteConfig } from "~/utils/site";
 
 export async function loader({ params, request, context }: LoaderFunctionArgs) {
   const env = context.cloudflare.env;
-  // Fail-fast: ICS_PRODID / ICS_UID_DOMAIN / SITE_NAME required — no fallback.
+  // Site config resolves ICS_PRODID / ICS_UID_DOMAIN defaults from SITE_* —
+  // never throws for those (see app/utils/site.ts).
   const site = getSiteConfig(env);
   const db = getDb((env as { DB: D1Database }).DB);
   const eventId = params.id;
