@@ -26,6 +26,18 @@ function GithubIcon({ className }: { className?: string }) {
     </svg>
   );
 }
+
+function BrandName({ name }: { name: string }) {
+  if (name.toLowerCase() === "manymano") {
+    return (
+      <>
+        <span className="text-blue-600">{name.slice(0, 4)}</span>
+        <span className="text-green-600">{name.slice(4)}</span>
+      </>
+    );
+  }
+  return <>{name}</>;
+}
 import stylesheet from "~/tailwind.css?url";
 import {
   CREATE_STICKY_HEADER_EVENT,
@@ -62,7 +74,8 @@ export const meta: MetaFunction<typeof loader> = ({ data }) => {
   const { site } = data;
   const siteUrl = site.siteUrl;
   const siteName = site.siteName;
-  const ogTitle = `${siteName} — Sign-Up Sheets & Meeting Polls, No Account Needed`;
+  const tagline = site.siteTagline;
+  const ogTitle = `${siteName} - ${tagline}`;
   const ogImage = absoluteUrl("/og-cover.png", siteUrl);
   return [
     { charset: "utf-8" },
@@ -85,7 +98,7 @@ export const meta: MetaFunction<typeof loader> = ({ data }) => {
     { property: "og:image", content: ogImage },
     { property: "og:image:width", content: String(OG_IMAGE_WIDTH) },
     { property: "og:image:height", content: String(OG_IMAGE_HEIGHT) },
-    { property: "og:image:alt", content: `${siteName} — coordinate people without the chaos` },
+    { property: "og:image:alt", content: ogTitle },
     { property: "og:locale", content: "en_US" },
     // Twitter
     { name: "twitter:card", content: "summary_large_image" },
@@ -155,10 +168,10 @@ export default function App() {
               </div>
               <div className="flex flex-col leading-none">
                 <span className="font-bold text-base tracking-tight text-slate-900">
-                  {site.siteName}
+                  <BrandName name={site.siteName} />
                 </span>
                 <span className="hidden sm:block text-[11px] font-medium text-slate-500 tracking-tight">
-                  Sign-up sheets & meeting polls
+                  {site.siteTagline}
                 </span>
               </div>
             </Link>
@@ -231,7 +244,7 @@ export default function App() {
             </nav>
           <div className="flex flex-col sm:flex-row items-center justify-between gap-4">
             <div className="flex items-center gap-2">
-              <span className="font-semibold text-slate-900">{site.siteName}</span>
+              <span className="font-semibold text-slate-900"><BrandName name={site.siteName} /></span>
               <span>—</span>
               <span>{site.siteTagline}</span>
             </div>
