@@ -236,23 +236,27 @@ export default function App() {
               <span>{site.siteTagline}</span>
             </div>
             <div className="flex items-center gap-5 text-slate-400">
-              <a
-                href={site.footerCreditUrl}
-                target="_blank"
-                rel="noreferrer"
-                className="hover:text-slate-900 transition-colors font-medium text-slate-600"
-              >
-                {site.footerCreditLabel}
-              </a>
-              <a
-                href={site.githubRepoUrl}
-                target="_blank"
-                rel="noreferrer"
-                aria-label="GitHub"
-                className="hover:text-slate-900 transition-colors font-medium text-slate-600"
-              >
-                <GithubIcon className="w-5 h-5" />
-              </a>
+              {site.footerCreditUrl && site.footerCreditLabel && (
+                <a
+                  href={site.footerCreditUrl}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="hover:text-slate-900 transition-colors font-medium text-slate-600"
+                >
+                  {site.footerCreditLabel}
+                </a>
+              )}
+              {site.githubRepoUrl && (
+                <a
+                  href={site.githubRepoUrl}
+                  target="_blank"
+                  rel="noreferrer"
+                  aria-label="GitHub"
+                  className="hover:text-slate-900 transition-colors font-medium text-slate-600"
+                >
+                  <GithubIcon className="w-5 h-5" />
+                </a>
+              )}
             </div>
           </div>
           </div>

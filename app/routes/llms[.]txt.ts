@@ -13,6 +13,15 @@ export async function loader({ request, context }: LoaderFunctionArgs) {
   const link = (label: string, path: string) =>
     `- [${label}](${absoluteUrl(path, siteUrl)})`;
 
+  const links = [
+    link("Home", "/"),
+    link("Create a sign-up sheet", "/create/signup"),
+    link("Create a meeting poll", "/create/poll"),
+    link("How it works", "/create"),
+    ...(githubRepoUrl ? [`- [GitHub](${githubRepoUrl})`] : []),
+    "",
+  ];
+
   const body = [
     `# ${siteName}`,
     "",
@@ -30,12 +39,7 @@ export async function loader({ request, context }: LoaderFunctionArgs) {
     "",
     "## Key pages",
     "",
-    link("Home", "/"),
-    link("Create a sign-up sheet", "/create/signup"),
-    link("Create a meeting poll", "/create/poll"),
-    link("How it works", "/create"),
-    `- [GitHub](${githubRepoUrl})`,
-    "",
+    ...links,
   ].join("\n");
 
   return new Response(body, {

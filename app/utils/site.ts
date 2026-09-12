@@ -1,16 +1,17 @@
 // Central site/brand configuration — single source of truth.
 //
-// Every value here is REQUIRED and comes from the runtime environment
+// Required values come from the runtime environment
 // (Cloudflare Pages dashboard in production, `.dev.vars` locally).
-// There are intentionally NO hardcoded fallbacks: a missing variable
-// throws at request time so a rebrand / fork can never silently serve
+// There are intentionally NO hardcoded fallbacks for required vars: a missing
+// variable throws at request time so a rebrand / fork can never silently serve
 // the old ManyMano defaults (e.g. mail.manymano.com).
 //
 // Required vars (see `.env.sample`):
 //   SITE_URL, SITE_NAME, SITE_TAGLINE, SITE_DESCRIPTION,
-//   FROM_EMAIL, GITHUB_REPO_URL,
-//   FOOTER_CREDIT_URL, FOOTER_CREDIT_LABEL,
-//   SECURITY_CONTACT, ICS_UID_DOMAIN, ICS_PRODID
+//   FROM_EMAIL, SECURITY_CONTACT, ICS_UID_DOMAIN, ICS_PRODID
+//
+// Optional vars (empty/unset hides the corresponding footer link / metadata):
+//   GITHUB_REPO_URL, FOOTER_CREDIT_URL, FOOTER_CREDIT_LABEL
 
 export interface SiteEnv {
   SITE_URL?: string;
@@ -32,9 +33,9 @@ export interface SiteConfig {
   siteTagline: string;
   siteDescription: string;
   fromEmail: string;
-  githubRepoUrl: string;
-  footerCreditUrl: string;
-  footerCreditLabel: string;
+  githubRepoUrl?: string;
+  footerCreditUrl?: string;
+  footerCreditLabel?: string;
   securityContact: string;
   icsUidDomain: string;
   icsProdid: string;
@@ -46,9 +47,9 @@ export interface PublicSiteConfig {
   siteName: string;
   siteTagline: string;
   siteDescription: string;
-  githubRepoUrl: string;
-  footerCreditUrl: string;
-  footerCreditLabel: string;
+  githubRepoUrl?: string;
+  footerCreditUrl?: string;
+  footerCreditLabel?: string;
 }
 
 export function toPublicSiteConfig(c: SiteConfig): PublicSiteConfig {
@@ -75,8 +76,18 @@ function required(env: SiteEnv, key: keyof SiteEnv): string {
 }
 
 /**
- * Resolve + validate full site config. No fallbacks — every field throws
- * when absent so misconfiguration fails fast instead of leaking defaults.
+ * Read an optional env var. Empty/unset (or whitespace-only) resolves to
+ * `undefined` so callers can hide the corresponding UI / metadata.
+ */
+function optional(env: SiteEnv, key: keyof SiteEnv): string | undefined {
+  const raw = (env[key] ?? "").trim();
+  return raw ? raw : undefined;
+}
+
+/**
+ * Resolve + validate full site config. Required fields throw when absent
+ * (fail-fast, no fallback); GITHUB_REPO_URL / FOOTER_CREDIT_URL /
+ * FOOTER_CREDIT_LABEL are optional and resolve to `undefined` when unset.
  */
 export function getSiteConfig(env: SiteEnv): SiteConfig {
   const siteUrl = required(env, "SITE_URL").replace(/\/$/, "");
@@ -87,9 +98,9 @@ export function getSiteConfig(env: SiteEnv): SiteConfig {
   const siteTagline = required(env, "SITE_TAGLINE");
   const siteDescription = required(env, "SITE_DESCRIPTION");
   const fromEmail = required(env, "FROM_EMAIL");
-  const githubRepoUrl = required(env, "GITHUB_REPO_URL").replace(/\/$/, "");
-  const footerCreditUrl = required(env, "FOOTER_CREDIT_URL").replace(/\/$/, "");
-  const footerCreditLabel = required(env, "FOOTER_CREDIT_LABEL");
+  const githubRepoUrl = optional(env, "GITHUB_REPO_URL")?.replace(/\/$/, "") || undefined;
+  const footerCreditUrl = optional(env, "FOOTER_CREDIT_URL")?.replace(/\/$/, "") || undefined;
+  const footerCreditLabel = optional(env, "FOOTER_CREDIT_LABEL");
   const securityContact = required(env, "SECURITY_CONTACT");
   const icsUidDomain = required(env, "ICS_UID_DOMAIN");
   const icsProdid = required(env, "ICS_PRODID");

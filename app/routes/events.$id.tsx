@@ -152,9 +152,9 @@ export async function loader({ params, request, context }: LoaderFunctionArgs) {
     SITE_TAGLINE: string;
     SITE_DESCRIPTION: string;
     FROM_EMAIL: string;
-    GITHUB_REPO_URL: string;
-    FOOTER_CREDIT_URL: string;
-    FOOTER_CREDIT_LABEL: string;
+    GITHUB_REPO_URL?: string;
+    FOOTER_CREDIT_URL?: string;
+    FOOTER_CREDIT_LABEL?: string;
     SECURITY_CONTACT: string;
     ICS_UID_DOMAIN: string;
     ICS_PRODID: string;
@@ -389,9 +389,9 @@ export async function action({ request, params, context }: ActionFunctionArgs) {
     SITE_NAME: string;
     SITE_TAGLINE: string;
     SITE_DESCRIPTION: string;
-    GITHUB_REPO_URL: string;
-    FOOTER_CREDIT_URL: string;
-    FOOTER_CREDIT_LABEL: string;
+    GITHUB_REPO_URL?: string;
+    FOOTER_CREDIT_URL?: string;
+    FOOTER_CREDIT_LABEL?: string;
     SECURITY_CONTACT: string;
     ICS_UID_DOMAIN: string;
     ICS_PRODID: string;

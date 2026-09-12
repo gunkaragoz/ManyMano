@@ -59,8 +59,11 @@ when any is missing (no hardcoded fallbacks, so a fork can never silently
 serve the old defaults):
 - `SITE_URL`, `SITE_NAME`, `SITE_TAGLINE`, `SITE_DESCRIPTION`
 - `FROM_EMAIL` (e.g. `YourName <no-reply@mail.yourdomain.com>`)
-- `GITHUB_REPO_URL`, `FOOTER_CREDIT_URL`, `FOOTER_CREDIT_LABEL`
 - `SECURITY_CONTACT`, `ICS_UID_DOMAIN`, `ICS_PRODID`
+
+Optional branding (leave empty/unset to hide — no throw):
+- `GITHUB_REPO_URL` (footer GitHub icon, Organization JSON-LD `sameAs`, llms.txt)
+- `FOOTER_CREDIT_URL` + `FOOTER_CREDIT_LABEL` (footer credit link, shown only when both are set)
 
 ### Step 5 (Optional): Configure integrations
 - `RESEND_API_KEY`: Your API key from [resend.com](https://resend.com).

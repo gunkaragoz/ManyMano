@@ -3,7 +3,8 @@
 //
 // Brand + domain values are NOT hardcoded here. Every helper takes an
 // explicit `siteUrl` / `siteName` / `githubRepoUrl` argument resolved from
-// `getSiteConfig(env)` — missing env throws (fail-fast, no fallback).
+// `getSiteConfig(env)` — missing required env throws (fail-fast, no fallback).
+// `githubRepoUrl` is optional: when omitted the Organization `sameAs` is left out.
 
 import type { PublicSiteConfig } from "~/utils/site";
 
@@ -27,16 +28,15 @@ export function absoluteUrl(path: string, siteUrl: string): string {
   return `${base}${p}`;
 }
 
-export function organizationJsonLd(siteUrl: string, siteName: string, githubRepoUrl: string) {
+export function organizationJsonLd(siteUrl: string, siteName: string, githubRepoUrl?: string) {
   if (!siteName) throw new Error("[config] organizationJsonLd requires siteName (SITE_NAME).");
-  if (!githubRepoUrl) throw new Error("[config] organizationJsonLd requires githubRepoUrl (GITHUB_REPO_URL).");
   return {
     "@context": "https://schema.org",
     "@type": "Organization",
     name: siteName,
     url: siteUrl,
     logo: absoluteUrl("/favicon.svg", siteUrl),
-    sameAs: [githubRepoUrl],
+    ...(githubRepoUrl ? { sameAs: [githubRepoUrl] } : {}),
   };
 }
 
