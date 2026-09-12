@@ -40,16 +40,19 @@ export default async function handleRequest(
   if (!responseHeaders.has("Permissions-Policy")) {
     responseHeaders.set("Permissions-Policy", "camera=(), microphone=(), geolocation=()");
   }
-  // CSP: lock down script/style/img sources. Tailwind + Remix need
-  // 'unsafe-inline' for styles; scripts stay self-only plus the Turnstile
-  // CDN (widget script + challenge iframe), no inline JS in app.
+  // CSP: lock down resource origins. Remix 2 renders its hydration runtime
+  // (ScrollRestoration, __remixContext, route manifest) as inline <script>
+  // with no nonce support — and per-request payloads rule out hashes — so
+  // script-src keeps 'unsafe-inline'. The app itself ships no inline
+  // scripts/handlers; React escaping remains the XSS backstop. Turnstile
+  // CDN added for widget script + challenge iframe.
   // frame-ancestors mirrors X-Frame-Options for CSP-aware browsers.
   if (!responseHeaders.has("Content-Security-Policy")) {
     responseHeaders.set(
       "Content-Security-Policy",
       [
         "default-src 'self'",
-        "script-src 'self' https://challenges.cloudflare.com",
+        "script-src 'self' 'unsafe-inline' https://challenges.cloudflare.com",
         "style-src 'self' 'unsafe-inline'",
         "img-src 'self' data:",
         "font-src 'self' data:",
