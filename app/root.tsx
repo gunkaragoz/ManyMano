@@ -146,13 +146,13 @@ export default function App() {
               <div className="w-8 h-8 rounded-lg bg-white border-2 border-blue-600 flex items-center justify-center text-green-600 shadow-sm group-hover:bg-blue-50 transition-colors">
                 <HeartHandshake className="w-5 h-5" aria-hidden="true" />
               </div>
-              <div className="flex items-center gap-2">
+              <div className="flex flex-col leading-none">
                 <span className="font-bold text-base tracking-tight">
                   <span className="text-blue-600">Many</span>
                   <span className="text-green-600">Mano</span>
                 </span>
-                <span className="text-[10px] font-semibold tracking-wide px-2 py-0.5 rounded-full bg-slate-100 text-slate-600 border border-slate-200/60">
-                  Free forever
+                <span className="hidden sm:block text-[11px] font-medium text-slate-500 tracking-tight">
+                  Sign-up sheets & meeting polls
                 </span>
               </div>
             </Link>
