@@ -10,6 +10,9 @@ declare module "@remix-run/cloudflare" {
         DB: D1Database;
         RESEND_API_KEY?: string;
         FROM_EMAIL?: string;
+        TURNSTILE_SITE_KEY?: string;
+        TURNSTILE_SECRET_KEY?: string;
+        TURNSTILE_HOSTNAMES?: string;
       };
       cf: CfProperties;
       ctx: ExecutionContext;

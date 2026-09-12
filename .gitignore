@@ -3,6 +3,7 @@ node_modules
 build
 .cache
 .env
+.dev.vars
 *.local
 .pnpm-store
 .DS_Store

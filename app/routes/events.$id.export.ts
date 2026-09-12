@@ -1,5 +1,5 @@
 import type { LoaderFunctionArgs } from "@remix-run/cloudflare";
-import { eq, and } from "drizzle-orm";
+import { eq, and, inArray } from "drizzle-orm";
 import { getDb, events, eventSlots, signups, pollVotes, pollVoteEntries } from "~/db";
 import { getPresentedAdminToken, secretMatches, checkAdminRateLimit } from "~/utils/auth";
 import { isExpired, pruneExpiredEvents } from "~/utils/retention";
@@ -96,7 +96,15 @@ export async function loader({ params, request, context }: LoaderFunctionArgs) {
     csvRows.push(header);
 
     const votes = await db.select().from(pollVotes).where(eq(pollVotes.eventId, eventId));
-    const entries = await db.select().from(pollVoteEntries);
+    const voteIds = votes.map((v) => v.id);
+    // Scope entries to this event's votes only — never load the whole table.
+    const entries =
+      voteIds.length > 0
+        ? await db
+            .select()
+            .from(pollVoteEntries)
+            .where(inArray(pollVoteEntries.pollVoteId, voteIds))
+        : [];
 
     for (const v of votes) {
       const vEntries = entries.filter((e) => e.pollVoteId === v.id);
@@ -112,13 +120,16 @@ export async function loader({ params, request, context }: LoaderFunctionArgs) {
     }
   }
 
-  const csvString = csvRows
-    .map((row) =>
-      row
-        .map((val) => `"${String(val).replace(/"/g, '""')}"`)
-        .join(",")
-    )
-    .join("\r\n");
+  // Neutralize CSV formula injection: prefix fields starting with
+  // =,+,-,@ (after optional whitespace) so Excel/Sheets treat them as text.
+  const sanitizeCsvCell = (val: unknown): string => {
+    const s = String(val ?? "");
+    const needsGuard = /^[ \t]*[=+\-@]/.test(s);
+    const guarded = needsGuard ? `'${s}` : s;
+    return `"${guarded.replace(/"/g, '""')}"`;
+  };
+
+  const csvString = csvRows.map((row) => row.map(sanitizeCsvCell).join(",")).join("\r\n");
 
   return new Response(csvString, {
     status: 200,

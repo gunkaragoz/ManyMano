@@ -1,6 +1,6 @@
 import type { ActionFunctionArgs, LoaderFunctionArgs, MetaFunction } from "@remix-run/cloudflare";
 import { json, redirect } from "@remix-run/cloudflare";
-import { Form, useActionData, useNavigation, Link } from "@remix-run/react";
+import { Form, useActionData, useLoaderData, useNavigation, Link } from "@remix-run/react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { ArrowLeft, ArrowRight, CalendarDays, TriangleAlert, X } from "lucide-react";
 import { usePersistentState } from "~/utils/usePersistentState";
@@ -16,6 +16,20 @@ import {
 import { sendEmail } from "~/utils/email";
 import { escapeHtml } from "~/utils/sanitize";
 import { buildAdminCookie, hashSecretForStorage } from "~/utils/auth";
+import { verifyTurnstile, turnstileFailure } from "~/utils/turnstile";
+import Turnstile from "~/components/Turnstile";
+import {
+  DESCRIPTION_MAX,
+  EMAIL_MAX,
+  LOCATION_MAX,
+  MAX_SLOTS_PER_EVENT,
+  ORGANIZER_NAME_MAX,
+  SLOT_TITLE_MAX,
+  TITLE_MAX,
+  cleanText,
+  isValidEmail,
+  normalizeTimezone,
+} from "~/utils/validation";
 import { pruneExpiredEvents } from "~/utils/retention";
 import { addMinutesToTimeString, formatSlotDateLabel, formatDurationLabel } from "~/utils/calendar";
 import {
@@ -38,8 +52,11 @@ export const meta: MetaFunction = ({ matches }) => {
   ]);
 };
 
-export async function loader({ request }: LoaderFunctionArgs) {
-  return json({});
+export async function loader({ context }: LoaderFunctionArgs) {
+  const env = context.cloudflare.env as {
+    TURNSTILE_SITE_KEY?: string;
+  };
+  return json({ turnstileSiteKey: env.TURNSTILE_SITE_KEY ?? null });
 }
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
@@ -56,19 +73,25 @@ function formatTimeDisplay(t: string): string {
 }
 
 export async function action({ request, context }: ActionFunctionArgs) {
-  const env = context.cloudflare.env as { DB: D1Database; RESEND_API_KEY?: string; FROM_EMAIL?: string };
+  const env = context.cloudflare.env as {
+    DB: D1Database;
+    RESEND_API_KEY?: string;
+    FROM_EMAIL?: string;
+    TURNSTILE_SECRET_KEY?: string;
+    TURNSTILE_HOSTNAMES?: string;
+  };
   const db = getDb(env.DB);
   try {
     await pruneExpiredEvents(db);
   } catch {}
   const formData = await request.formData();
 
-  const title = (formData.get("title") as string)?.trim();
-  const description = (formData.get("description") as string)?.trim() || null;
-  const location = (formData.get("location") as string)?.trim() || null;
-  const organizerName = (formData.get("organizerName") as string)?.trim();
-  const organizerEmail = (formData.get("organizerEmail") as string)?.trim();
-  const timezone = (formData.get("timezone") as string)?.trim() || "UTC";
+  const title = cleanText(formData.get("title"), TITLE_MAX);
+  const description = cleanText(formData.get("description"), DESCRIPTION_MAX) || null;
+  const location = cleanText(formData.get("location"), LOCATION_MAX) || null;
+  const organizerName = cleanText(formData.get("organizerName"), ORGANIZER_NAME_MAX);
+  const organizerEmail = cleanText(formData.get("organizerEmail"), EMAIL_MAX);
+  const timezone = normalizeTimezone(formData.get("timezone") as string);
 
   if (!title) {
     return json({ error: "Please enter a meeting title." }, { status: 400 });
@@ -76,8 +99,20 @@ export async function action({ request, context }: ActionFunctionArgs) {
   if (!organizerName) {
     return json({ error: "Please enter your name." }, { status: 400 });
   }
-  if (!organizerEmail || !organizerEmail.includes("@")) {
+  if (!isValidEmail(organizerEmail)) {
     return json({ error: "A valid email is required to receive your secret management link." }, { status: 400 });
+  }
+
+  // Bot protection before any DB work.
+  const turnstile = await verifyTurnstile({
+    token: formData.get("cf-turnstile-response") as string | null,
+    expectedAction: "create-poll",
+    env,
+    remoteIp: request.headers.get("cf-connecting-ip"),
+  });
+  if (!turnstile.ok) {
+    const f = turnstileFailure();
+    return json(f.body, { status: f.status });
   }
 
   // Single duration for the whole poll. "allday" (or missing) => NULL = All day.
@@ -106,13 +141,21 @@ export async function action({ request, context }: ActionFunctionArgs) {
     displayOrder: number;
   }> = [];
 
+  if (slotDates.length > MAX_SLOTS_PER_EVENT) {
+    return json(
+      { error: `Too many options — maximum ${MAX_SLOTS_PER_EVENT} per poll.` },
+      { status: 400 }
+    );
+  }
+
   for (let idx = 0; idx < slotDates.length; idx++) {
+    if (validSlots.length >= MAX_SLOTS_PER_EVENT) break;
     const date = (slotDates[idx] || "").trim();
     if (!date) continue;
     if (!DATE_RE.test(date)) {
       return json({ error: `Row ${idx + 1}: please pick a valid day.` }, { status: 400 });
     }
-    const label = (slotLabels[idx] || "").trim();
+    const label = cleanText(slotLabels[idx], SLOT_TITLE_MAX);
     if (durationMinutes === null) {
       validSlots.push({
         slotDate: date,
@@ -290,6 +333,7 @@ function defaultDays(): DayRow[] {
 
 export default function CreateMeetingPoll() {
   const actionData = useActionData<{ error?: string }>();
+  const { turnstileSiteKey } = useLoaderData<typeof loader>();
   const navigation = useNavigation();
   const isSubmitting = navigation.state === "submitting";
 
@@ -826,6 +870,11 @@ export default function CreateMeetingPoll() {
         </div>
 
         <div className="pt-4 border-t border-slate-100 flex flex-col sm:flex-row items-stretch sm:items-center justify-end gap-3">
+          {turnstileSiteKey && (
+            <div className="sm:mr-auto">
+              <Turnstile siteKey={turnstileSiteKey} action="create-poll" resetKey={navigation.state} />
+            </div>
+          )}
           <button
             type="button"
             onClick={startOver}

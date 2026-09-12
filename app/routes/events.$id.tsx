@@ -37,6 +37,8 @@ import {
   secretMatches,
 } from "~/utils/auth";
 import { expiryDateFor, isExpired, pruneExpiredEvents, RETENTION_DAYS } from "~/utils/retention";
+import { verifyTurnstile, turnstileFailure } from "~/utils/turnstile";
+import Turnstile from "~/components/Turnstile";
 import DatePicker from "~/components/DatePicker";
 import { buildGoogleCalendarUrl, pickCalendarSlot, effectiveDateForSlot, formatSlotDateLabel, formatDurationLabel } from "~/utils/calendar";
 import {
@@ -45,6 +47,20 @@ import {
   pageMetaOverrides,
   truncate,
 } from "~/utils/seo";
+import {
+  COMMENT_MAX,
+  DESCRIPTION_MAX,
+  EMAIL_MAX,
+  LOCATION_MAX,
+  MAX_SLOTS_PER_EVENT,
+  ORGANIZER_NAME_MAX,
+  PARTICIPANT_NAME_MAX,
+  SHIFT_NAME_MAX,
+  SLOT_TITLE_MAX,
+  TITLE_MAX,
+  cleanText,
+  isValidEmail,
+} from "~/utils/validation";
 
 // Events are unlisted (robots.txt disallows /events/). Keep them out of
 // search indexes and give each event a real title/description. Remix renders
@@ -110,7 +126,12 @@ function adminEventShape(e: typeof events.$inferSelect) {
 }
 
 export async function loader({ params, request, context }: LoaderFunctionArgs) {
-  const env = context.cloudflare.env as { DB: D1Database; RESEND_API_KEY?: string; FROM_EMAIL?: string };
+  const env = context.cloudflare.env as {
+    DB: D1Database;
+    RESEND_API_KEY?: string;
+    FROM_EMAIL?: string;
+    TURNSTILE_SITE_KEY?: string;
+  };
   const db = getDb(env.DB);
   const eventId = params.id;
 
@@ -138,7 +159,11 @@ export async function loader({ params, request, context }: LoaderFunctionArgs) {
   const url = new URL(request.url);
 
   // Self-serve cancellation via emailed ?cancel_token= (signup or poll vote).
+  // Security: GET never mutates — it only validates the token and surfaces a
+  // one-click confirm form. Actual deletion happens in the `cancel_by_token`
+  // POST action below (CSRF-safe, no <img>/prefetch deletion).
   const cancelToken = url.searchParams.get("cancel_token");
+  let pendingCancel: { kind: "signup" | "vote"; name: string } | null = null;
   if (cancelToken) {
     const candidates = await db.select().from(signups).where(eq(signups.eventId, eventId));
     let matchedSignup: typeof candidates[number] | null = null;
@@ -149,18 +174,19 @@ export async function loader({ params, request, context }: LoaderFunctionArgs) {
       }
     }
     if (matchedSignup) {
-      await db.delete(signups).where(eq(signups.id, matchedSignup.id));
-      return redirect(`/events/${eventId}?cancelled=1`);
-    }
-    const voteCandidates = await db.select().from(pollVotes).where(eq(pollVotes.eventId, eventId));
-    for (const v of voteCandidates) {
-      if (await secretMatches(cancelToken, v.editToken)) {
-        await db.delete(pollVoteEntries).where(eq(pollVoteEntries.pollVoteId, v.id));
-        await db.delete(pollVotes).where(eq(pollVotes.id, v.id));
-        return redirect(`/events/${eventId}?cancelled=1`);
+      pendingCancel = { kind: "signup", name: matchedSignup.participantName };
+    } else {
+      const voteCandidates = await db.select().from(pollVotes).where(eq(pollVotes.eventId, eventId));
+      for (const v of voteCandidates) {
+        if (await secretMatches(cancelToken, v.editToken)) {
+          pendingCancel = { kind: "vote", name: v.participantName };
+          break;
+        }
+      }
+      if (!pendingCancel) {
+        return redirect(`/events/${eventId}?cancel_error=1`);
       }
     }
-    return redirect(`/events/${eventId}?cancel_error=1`);
   }
 
   // Check admin access: HttpOnly cookie preferred, ?admin= supported for bookmarks.
@@ -235,20 +261,32 @@ export async function loader({ params, request, context }: LoaderFunctionArgs) {
         // Forms prefer the HttpOnly cookie; this is a fallback for cookie-less clients.
         adminToken: isAdmin ? presented : null,
         pollData: null,
+        pendingCancel,
+        turnstileSiteKey: env.TURNSTILE_SITE_KEY ?? null,
       },
-      { headers: { "Cache-Control": isAdmin ? "private, no-store" : "public, max-age=15" } }
+      {
+        headers: {
+          "Cache-Control": isAdmin || pendingCancel ? "private, no-store" : "public, max-age=15",
+        },
+      }
     );
   } else {
-    // TIME_POLL: Fetch votes and entries
+    // TIME_POLL: Fetch votes and entries (scoped to this event only —
+    // never load the whole poll_vote_entries table).
     const votes = await db.select().from(pollVotes).where(eq(pollVotes.eventId, eventId));
-    const entries = await db
-      .select({
-        id: pollVoteEntries.id,
-        pollVoteId: pollVoteEntries.pollVoteId,
-        slotId: pollVoteEntries.slotId,
-        response: pollVoteEntries.response,
-      })
-      .from(pollVoteEntries);
+    const voteIds = votes.map((v) => v.id);
+    const entries =
+      voteIds.length > 0
+        ? await db
+            .select({
+              id: pollVoteEntries.id,
+              pollVoteId: pollVoteEntries.pollVoteId,
+              slotId: pollVoteEntries.slotId,
+              response: pollVoteEntries.response,
+            })
+            .from(pollVoteEntries)
+            .where(inArray(pollVoteEntries.pollVoteId, voteIds))
+        : [];
 
     // Map votes with their entry responses — emails only for admins,
     // edit tokens never leave the server.
@@ -292,14 +330,26 @@ export async function loader({ params, request, context }: LoaderFunctionArgs) {
           votes: votesWithResponses,
           tallies: slotTallies,
         },
+        pendingCancel,
+        turnstileSiteKey: env.TURNSTILE_SITE_KEY ?? null,
       },
-      { headers: { "Cache-Control": isAdmin ? "private, no-store" : "public, max-age=15" } }
+      {
+        headers: {
+          "Cache-Control": isAdmin || pendingCancel ? "private, no-store" : "public, max-age=15",
+        },
+      }
     );
   }
 }
 
 export async function action({ request, params, context }: ActionFunctionArgs) {
-  const env = context.cloudflare.env as { DB: D1Database; RESEND_API_KEY?: string; FROM_EMAIL?: string };
+  const env = context.cloudflare.env as {
+    DB: D1Database;
+    RESEND_API_KEY?: string;
+    FROM_EMAIL?: string;
+    TURNSTILE_SECRET_KEY?: string;
+    TURNSTILE_HOSTNAMES?: string;
+  };
   const db = getDb(env.DB);
   const eventId = params.id;
 
@@ -335,13 +385,29 @@ export async function action({ request, params, context }: ActionFunctionArgs) {
 
   // 1. Sign-Up Slot Claim (transactional capacity guard)
   if (intent === "signup") {
-    const slotId = formData.get("slotId") as string;
-    const participantName = (formData.get("participantName") as string)?.trim();
-    const participantEmail = (formData.get("participantEmail") as string)?.trim() || null;
-    const comment = (formData.get("comment") as string)?.trim().slice(0, 500) || "";
+    const slotId = cleanText(formData.get("slotId"), 32);
+    const participantName = cleanText(formData.get("participantName"), PARTICIPANT_NAME_MAX);
+    const rawEmail = cleanText(formData.get("participantEmail"), EMAIL_MAX);
+    const participantEmail = rawEmail || null;
+    const comment = cleanText(formData.get("comment"), COMMENT_MAX);
 
     if (!slotId || !participantName) {
       return json({ error: "Name is required to sign up." }, { status: 400 });
+    }
+    if (participantEmail && !isValidEmail(participantEmail)) {
+      return json({ error: "Please enter a valid email address." }, { status: 400 });
+    }
+
+    // Bot protection before any DB work.
+    const turnstileSignup = await verifyTurnstile({
+      token: formData.get("cf-turnstile-response") as string | null,
+      expectedAction: "event-signup",
+      env,
+      remoteIp: request.headers.get("cf-connecting-ip"),
+    });
+    if (!turnstileSignup.ok) {
+      const f = turnstileFailure();
+      return json(f.body, { status: f.status });
     }
 
     const [targetSlot] = await db.select().from(eventSlots).where(eq(eventSlots.id, slotId)).limit(1);
@@ -353,8 +419,8 @@ export async function action({ request, params, context }: ActionFunctionArgs) {
     const editTokenPlain = generateSecretToken();
     const editTokenStored = await hashSecretForStorage(editTokenPlain);
 
-    const safeName = participantName.slice(0, 120);
-    const safeEmail = participantEmail?.slice(0, 254) || null;
+    const safeName = participantName.slice(0, PARTICIPANT_NAME_MAX);
+    const safeEmail = participantEmail?.slice(0, EMAIL_MAX) || null;
     const customFields = JSON.stringify({ comment });
 
     // D1 does not allow raw BEGIN/COMMIT via SQL (drizzle's .transaction()
@@ -474,11 +540,27 @@ export async function action({ request, params, context }: ActionFunctionArgs) {
 
   // 3. Meeting Poll Vote
   if (intent === "vote_poll") {
-    const participantName = (formData.get("participantName") as string)?.trim();
-    const participantEmail = (formData.get("participantEmail") as string)?.trim() || null;
+    const participantName = cleanText(formData.get("participantName"), PARTICIPANT_NAME_MAX);
+    const rawVoteEmail = cleanText(formData.get("participantEmail"), EMAIL_MAX);
+    const participantEmail = rawVoteEmail || null;
 
     if (!participantName) {
       return json({ error: "Your name is required to vote." }, { status: 400 });
+    }
+    if (participantEmail && !isValidEmail(participantEmail)) {
+      return json({ error: "Please enter a valid email address." }, { status: 400 });
+    }
+
+    // Bot protection before any DB writes.
+    const turnstileVote = await verifyTurnstile({
+      token: formData.get("cf-turnstile-response") as string | null,
+      expectedAction: "poll-vote",
+      env,
+      remoteIp: request.headers.get("cf-connecting-ip"),
+    });
+    if (!turnstileVote.ok) {
+      const f = turnstileFailure();
+      return json(f.body, { status: f.status });
     }
 
     const voteId = generateInternalId();
@@ -487,8 +569,8 @@ export async function action({ request, params, context }: ActionFunctionArgs) {
     await db.insert(pollVotes).values({
       id: voteId,
       eventId,
-      participantName: participantName.slice(0, 120),
-      participantEmail: participantEmail?.slice(0, 254) || null,
+      participantName,
+      participantEmail,
       editToken: await hashSecretForStorage(editTokenPlain),
       createdAt: now,
       updatedAt: now,
@@ -550,7 +632,19 @@ export async function action({ request, params, context }: ActionFunctionArgs) {
     if (!(await requireAdmin())) {
       return json({ error: "Unauthorized." }, { status: 403 });
     }
-    const winningSlotId = formData.get("winningSlotId") as string;
+    const winningSlotId = cleanText(formData.get("winningSlotId"), 32);
+    if (!winningSlotId) {
+      return json({ error: "Please choose a winning option." }, { status: 400 });
+    }
+    // Validate the winning slot belongs to this event (no arbitrary IDs).
+    const [winningSlot] = await db
+      .select({ id: eventSlots.id, eventId: eventSlots.eventId })
+      .from(eventSlots)
+      .where(eq(eventSlots.id, winningSlotId))
+      .limit(1);
+    if (!winningSlot || winningSlot.eventId !== eventId) {
+      return json({ error: "Winning option not found for this event." }, { status: 400 });
+    }
 
     await db
       .update(events)
@@ -570,11 +664,11 @@ export async function action({ request, params, context }: ActionFunctionArgs) {
       return json({ error: "Unauthorized." }, { status: 403 });
     }
 
-    const title = (formData.get("title") as string)?.trim();
-    const description = (formData.get("description") as string)?.trim() || null;
-    const eventDate = (formData.get("eventDate") as string)?.trim() || null;
-    const location = (formData.get("location") as string)?.trim() || null;
-    const organizerName = (formData.get("organizerName") as string)?.trim();
+    const title = cleanText(formData.get("title"), TITLE_MAX);
+    const description = cleanText(formData.get("description"), DESCRIPTION_MAX) || null;
+    const eventDate = cleanText(formData.get("eventDate"), 32) || null;
+    const location = cleanText(formData.get("location"), LOCATION_MAX) || null;
+    const organizerName = cleanText(formData.get("organizerName"), ORGANIZER_NAME_MAX);
 
     if (!title) {
       return json({ error: "Event title is required." }, { status: 400 });
@@ -597,27 +691,40 @@ export async function action({ request, params, context }: ActionFunctionArgs) {
       return json({ error: "Unauthorized." }, { status: 403 });
     }
 
-    const title = (formData.get("slotTitle") as string)?.trim();
-    const shiftName = (formData.get("slotShiftName") as string)?.trim() || null;
-    const slotDateRaw = ((formData.get("slotDate") as string) || "").trim();
+    const title = cleanText(formData.get("slotTitle"), SLOT_TITLE_MAX);
+    const shiftName = cleanText(formData.get("slotShiftName"), SHIFT_NAME_MAX) || null;
+    const slotDateRaw = cleanText(formData.get("slotDate"), 10);
     const slotDate = /^\d{4}-\d{2}-\d{2}$/.test(slotDateRaw) ? slotDateRaw : null;
-    const startTime = (formData.get("slotStartTime") as string)?.trim() || null;
-    const endTime = (formData.get("slotEndTime") as string)?.trim() || null;
-    const capacityRaw = (formData.get("slotCapacity") as string)?.trim() || "1";
+    const startTime = cleanText(formData.get("slotStartTime"), 16) || null;
+    const endTime = cleanText(formData.get("slotEndTime"), 16) || null;
+    const capacityRaw = cleanText(formData.get("slotCapacity"), 8) || "1";
     if (!title && !startTime && !shiftName && !slotDate) {
       return json({ error: "Give the new option a title, day or time." }, { status: 400 });
     }
 
     const existingSlots = await db.select().from(eventSlots).where(eq(eventSlots.eventId, eventId));
+    if (existingSlots.length >= MAX_SLOTS_PER_EVENT) {
+      return json(
+        { error: `Too many options — maximum ${MAX_SLOTS_PER_EVENT} per event.` },
+        { status: 400 }
+      );
+    }
     const maxOrder = existingSlots.reduce((m, s) => Math.max(m, s.displayOrder ?? 0), -1);
+    const rawCap = parseInt(capacityRaw, 10);
+    const capacity =
+      event.type === "SIGNUP_SHEET"
+        ? Number.isFinite(rawCap)
+          ? Math.min(Math.max(rawCap, 1), 999)
+          : 1
+        : 999;
 
     await db.insert(eventSlots).values({
       id: generateInternalId(),
       eventId,
-      title: title || shiftName || (endTime ? `${startTime} – ${endTime}` : (startTime as string)) || slotDate || "New option",
+      title: (title || shiftName || (endTime ? `${startTime} – ${endTime}` : (startTime as string)) || slotDate || "New option").slice(0, SLOT_TITLE_MAX),
       shiftName,
       slotDate,
-      capacity: event.type === "SIGNUP_SHEET" ? parseInt(capacityRaw, 10) || 1 : 999,
+      capacity,
       startTime,
       endTime,
       displayOrder: maxOrder + 1,
@@ -632,14 +739,14 @@ export async function action({ request, params, context }: ActionFunctionArgs) {
       return json({ error: "Unauthorized." }, { status: 403 });
     }
 
-    const slotId = formData.get("slotId") as string;
-    const title = (formData.get("slotTitle") as string)?.trim();
-    const shiftName = (formData.get("slotShiftName") as string)?.trim() || null;
-    const slotDateRaw = ((formData.get("slotDate") as string) || "").trim();
+    const slotId = cleanText(formData.get("slotId"), 32);
+    const title = cleanText(formData.get("slotTitle"), SLOT_TITLE_MAX);
+    const shiftName = cleanText(formData.get("slotShiftName"), SHIFT_NAME_MAX) || null;
+    const slotDateRaw = cleanText(formData.get("slotDate"), 10);
     const slotDate = slotDateRaw === "" ? null : (/^\d{4}-\d{2}-\d{2}$/.test(slotDateRaw) ? slotDateRaw : null);
-    const startTime = (formData.get("slotStartTime") as string)?.trim() || null;
-    const endTime = (formData.get("slotEndTime") as string)?.trim() || null;
-    const capacityRaw = (formData.get("slotCapacity") as string)?.trim();
+    const startTime = cleanText(formData.get("slotStartTime"), 16) || null;
+    const endTime = cleanText(formData.get("slotEndTime"), 16) || null;
+    const capacityRaw = cleanText(formData.get("slotCapacity"), 8);
 
     const [target] = await db.select().from(eventSlots).where(eq(eventSlots.id, slotId)).limit(1);
     if (!target || target.eventId !== eventId) {
@@ -648,6 +755,7 @@ export async function action({ request, params, context }: ActionFunctionArgs) {
     if (!title) {
       return json({ error: "Slot title is required." }, { status: 400 });
     }
+    const parsedCap = capacityRaw ? parseInt(capacityRaw, 10) : NaN;
 
     await db
       .update(eventSlots)
@@ -658,7 +766,11 @@ export async function action({ request, params, context }: ActionFunctionArgs) {
         startTime,
         endTime,
         ...(event.type === "SIGNUP_SHEET" && capacityRaw
-          ? { capacity: parseInt(capacityRaw, 10) || target.capacity }
+          ? {
+              capacity: Number.isFinite(parsedCap)
+                ? Math.min(Math.max(parsedCap, 1), 999)
+                : target.capacity,
+            }
           : {}),
       })
       .where(eq(eventSlots.id, slotId));
@@ -717,6 +829,30 @@ export async function action({ request, params, context }: ActionFunctionArgs) {
     return redirect("/?deleted=1", { headers });
   }
 
+  // 10. Self-serve cancellation via emailed token (POST only — see loader).
+  if (intent === "cancel_by_token") {
+    const cancelToken = cleanText(formData.get("cancel_token"), 64);
+    if (!cancelToken) {
+      return json({ error: "Missing cancellation token." }, { status: 400 });
+    }
+    const candidates = await db.select().from(signups).where(eq(signups.eventId, eventId));
+    for (const s of candidates) {
+      if (await secretMatches(cancelToken, s.editToken)) {
+        await db.delete(signups).where(eq(signups.id, s.id));
+        return redirect(`/events/${eventId}?cancelled=1`);
+      }
+    }
+    const voteCandidates = await db.select().from(pollVotes).where(eq(pollVotes.eventId, eventId));
+    for (const v of voteCandidates) {
+      if (await secretMatches(cancelToken, v.editToken)) {
+        await db.delete(pollVoteEntries).where(eq(pollVoteEntries.pollVoteId, v.id));
+        await db.delete(pollVotes).where(eq(pollVotes.id, v.id));
+        return redirect(`/events/${eventId}?cancelled=1`);
+      }
+    }
+    return redirect(`/events/${eventId}?cancel_error=1`);
+  }
+
   return json({ error: "Unknown intent" }, { status: 400 });
 }
 
@@ -732,11 +868,12 @@ function formatTime(t: string | null | undefined): string {
 }
 
 export default function EventView() {
-  const { event, slots, signups: initialSignups, isAdmin, adminToken, pollData } = useLoaderData<typeof loader>();
+  const { event, slots, signups: initialSignups, isAdmin, adminToken, pollData, pendingCancel, turnstileSiteKey } = useLoaderData<typeof loader>();
   const actionData = useActionData<{ success?: boolean; message?: string; error?: string }>();
   const [searchParams] = useSearchParams();
   const navigation = useNavigation();
   const isSubmitting = navigation.state === "submitting";
+  const cancelTokenParam = searchParams.get("cancel_token");
 
   const justCreated = Boolean(searchParams.get("created"));
   const justCancelled = Boolean(searchParams.get("cancelled"));
@@ -1023,6 +1160,34 @@ export default function EventView() {
         <div className="p-4 rounded-2xl bg-rose-50 border border-rose-200/80 text-rose-800 text-sm font-semibold flex items-center gap-2.5 animate-fade-in">
           <TriangleAlert className="w-4 h-4 shrink-0" />
           <span>That cancel link was invalid or already used.</span>
+        </div>
+      )}
+      {pendingCancel && cancelTokenParam && (
+        <div className="p-5 rounded-2xl bg-amber-50 border border-amber-200/80 text-amber-900 text-sm animate-fade-in">
+          <p className="font-semibold">
+            Confirm cancellation for {pendingCancel.name}?
+          </p>
+          <p className="text-xs text-amber-700/90 mt-1">
+            This will remove the {pendingCancel.kind === "signup" ? "sign-up" : "vote"}. This
+            cannot be undone.
+          </p>
+          <Form method="post" className="mt-3 flex flex-wrap gap-2">
+            <input type="hidden" name="intent" value="cancel_by_token" />
+            <input type="hidden" name="cancel_token" value={cancelTokenParam} />
+            <button
+              type="submit"
+              disabled={isSubmitting}
+              className="px-4 py-2 rounded-xl bg-red-600 hover:bg-red-700 text-white text-xs font-bold shadow-sm disabled:opacity-50"
+            >
+              {isSubmitting ? "Removing…" : "Yes, remove my entry"}
+            </button>
+            <a
+              href={`/events/${event.id}`}
+              className="px-4 py-2 rounded-xl border border-amber-300 bg-white hover:bg-amber-100/50 text-amber-900 text-xs font-bold"
+            >
+              Keep my entry
+            </a>
+          </Form>
         </div>
       )}
       {actionData?.message && (
@@ -2173,6 +2338,12 @@ export default function EventView() {
                     />
                   ))}
 
+                  {turnstileSiteKey && (
+                    <div className="flex justify-center sm:justify-start">
+                      <Turnstile siteKey={turnstileSiteKey} action="poll-vote" resetKey={navigation.state} />
+                    </div>
+                  )}
+
                   <button
                     type="submit"
                     disabled={isSubmitting}
@@ -2245,6 +2416,10 @@ export default function EventView() {
                   className="w-full px-4 py-3 rounded-xl border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500"
                 />
               </div>
+
+              {turnstileSiteKey && (
+                <Turnstile siteKey={turnstileSiteKey} action="event-signup" resetKey={navigation.state} />
+              )}
 
               <div className="flex items-center justify-end gap-3 pt-3 border-t border-slate-100">
                 <button

@@ -85,12 +85,28 @@ export function buildExpiredAdminCookie(eventId: string): string {
 }
 
 // Best-effort in-memory rate limit for admin guesses (per worker isolate).
+// Bounded: evicts expired entries and caps size to avoid memory-exhaustion
+// abuse via distinct keys. For production-grade limiting across isolates,
+// add Cloudflare Rate Limiting Rules in front of /events/* instead.
 const attempts = new Map<string, { count: number; resetAt: number }>();
+const RATE_LIMIT_MAX_KEYS = 5000;
 
 export function checkAdminRateLimit(key: string, limit = 20, windowMs = 10 * 60 * 1000): boolean {
   const now = Date.now();
   const entry = attempts.get(key);
   if (!entry || now > entry.resetAt) {
+    // Opportunistic cleanup on insert path (amortized, no timer needed).
+    if (attempts.size >= RATE_LIMIT_MAX_KEYS) {
+      for (const [k, v] of attempts) {
+        if (now > v.resetAt) attempts.delete(k);
+        if (attempts.size < RATE_LIMIT_MAX_KEYS * 0.8) break;
+      }
+      // Still full (active flood): evict oldest inserted key (Map order).
+      if (attempts.size >= RATE_LIMIT_MAX_KEYS) {
+        const oldest = attempts.keys().next();
+        if (!oldest.done) attempts.delete(oldest.value);
+      }
+    }
     attempts.set(key, { count: 1, resetAt: now + windowMs });
     return true;
   }

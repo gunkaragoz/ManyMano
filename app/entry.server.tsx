@@ -27,7 +27,7 @@ export default async function handleRequest(
   }
 
   responseHeaders.set("Content-Type", "text/html");
-  // App hardening: no referrer leaks of ?admin=, no framing.
+  // App hardening: no referrer leaks of ?admin= / ?cancel_token=, no framing.
   if (!responseHeaders.has("Referrer-Policy")) {
     responseHeaders.set("Referrer-Policy", "no-referrer");
   }
@@ -39,6 +39,35 @@ export default async function handleRequest(
   }
   if (!responseHeaders.has("Permissions-Policy")) {
     responseHeaders.set("Permissions-Policy", "camera=(), microphone=(), geolocation=()");
+  }
+  // CSP: lock down script/style/img sources. Tailwind + Remix need
+  // 'unsafe-inline' for styles; scripts stay self-only plus the Turnstile
+  // CDN (widget script + challenge iframe), no inline JS in app.
+  // frame-ancestors mirrors X-Frame-Options for CSP-aware browsers.
+  if (!responseHeaders.has("Content-Security-Policy")) {
+    responseHeaders.set(
+      "Content-Security-Policy",
+      [
+        "default-src 'self'",
+        "script-src 'self' https://challenges.cloudflare.com",
+        "style-src 'self' 'unsafe-inline'",
+        "img-src 'self' data:",
+        "font-src 'self' data:",
+        "connect-src 'self' https://challenges.cloudflare.com",
+        "frame-src https://challenges.cloudflare.com",
+        "form-action 'self'",
+        "frame-ancestors 'none'",
+        "base-uri 'self'",
+      ].join("; ")
+    );
+  }
+  // HSTS: production HTTPS only. Browsers ignore it on http://localhost,
+  // and Cloudflare already sends HSTS on proxied zones — harmless to repeat.
+  if (!responseHeaders.has("Strict-Transport-Security")) {
+    responseHeaders.set(
+      "Strict-Transport-Security",
+      "max-age=31536000; includeSubDomains; preload"
+    );
   }
   return new Response(body, {
     headers: responseHeaders,

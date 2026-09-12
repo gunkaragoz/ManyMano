@@ -14,11 +14,11 @@
     "deploy": "npm run build && wrangler pages deploy ./build/client"
   },
   "dependencies": {
-    "@remix-run/cloudflare": "^2.16.0",
+    "@remix-run/cloudflare": "^2.17.5",
     "@remix-run/cloudflare-pages": "^2.17.5",
-    "@remix-run/react": "^2.16.0",
+    "@remix-run/react": "^2.17.5",
     "clsx": "^2.1.1",
-    "drizzle-orm": "^0.40.0",
+    "drizzle-orm": "^0.45.2",
     "isbot": "^5.1.23",
     "lucide-react": "^1.16.0",
     "react": "^18.3.1",
@@ -27,7 +27,7 @@
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^4.20250224.0",
-    "@remix-run/dev": "^2.16.0",
+    "@remix-run/dev": "^2.17.5",
     "@types/react": "^18.3.18",
     "@types/react-dom": "^18.3.5",
     "autoprefixer": "^10.4.20",
