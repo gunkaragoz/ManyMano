@@ -37,7 +37,7 @@ export const meta: MetaFunction<typeof loader> = ({ data, matches }) => {
 };
 
 export default function Index() {
-  const { faq, site } = useLoaderData<typeof loader>();
+  const { faq } = useLoaderData<typeof loader>();
   return (
     <div className="space-y-16 py-4 md:py-8">
       {/* Hero Section */}
@@ -56,7 +56,7 @@ export default function Index() {
         </h1>
 
         <p className="text-base sm:text-lg text-slate-600 leading-relaxed max-w-xl mx-auto font-normal">
-          {site.siteTagline}
+          Create sign-up sheets and meeting polls in seconds.
         </p>
       </div>
 
