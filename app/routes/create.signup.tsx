@@ -4,6 +4,7 @@ import { Form, useActionData, useNavigation, Link } from "@remix-run/react";
 import { useEffect, useRef } from "react";
 import { ArrowLeft, ArrowRight, ClipboardList, TriangleAlert, X } from "lucide-react";
 import { usePersistentState } from "~/utils/usePersistentState";
+import DatePicker from "~/components/DatePicker";
 import { useCreateStickyHeader, formatStickyDate } from "~/utils/useCreateStickyHeader";
 import { getDb, events, eventSlots } from "~/db";
 import { eq } from "drizzle-orm";
@@ -389,13 +390,10 @@ export default function CreateSignupSheet() {
                 <label className="block text-xs font-semibold text-slate-700 mb-1.5">
                   Event Date *
                 </label>
-                <input
-                  type="date"
+                <DatePicker
                   name="eventDate"
-                  required
                   value={details.eventDate || todayStr}
-                  onChange={(e) => updateDetails({ eventDate: e.target.value })}
-                  className="w-full px-4 py-3 rounded-xl border border-slate-200/90 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all text-slate-800"
+                  onChange={(iso) => updateDetails({ eventDate: iso })}
                 />
                 {(details.eventDate || todayStr) && (
                   <span className="text-[11px] text-slate-500 mt-1 block">

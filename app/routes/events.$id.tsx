@@ -37,6 +37,7 @@ import {
   secretMatches,
 } from "~/utils/auth";
 import { expiryDateFor, isExpired, pruneExpiredEvents, RETENTION_DAYS } from "~/utils/retention";
+import DatePicker from "~/components/DatePicker";
 import { buildGoogleCalendarUrl, pickCalendarSlot, effectiveDateForSlot, formatSlotDateLabel, formatDurationLabel } from "~/utils/calendar";
 import {
   SITE_NAME,
@@ -1185,11 +1186,9 @@ export default function EventView() {
               </div>
               <div>
                 <label className="block text-xs font-semibold text-slate-700 mb-1.5">Date</label>
-                <input
-                  type="date"
+                <DatePicker
                   name="eventDate"
                   defaultValue={event.eventDate || ""}
-                  className="w-full px-4 py-3 rounded-xl border border-slate-200/90 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all text-slate-800"
                 />
               </div>
               <div>
@@ -1272,11 +1271,9 @@ export default function EventView() {
                     {event.type === "TIME_POLL" && (
                       <div className="lg:col-span-2">
                         <label className="block text-[10px] uppercase font-bold text-slate-400 mb-1">Day</label>
-                        <input
-                          type="date"
+                        <DatePicker
                           name="slotDate"
                           defaultValue={(s as { slotDate?: string | null }).slotDate || ""}
-                          className="w-full px-3 py-2 rounded-xl border border-slate-200 text-xs bg-white focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all"
                         />
                       </div>
                     )}
@@ -1389,10 +1386,8 @@ export default function EventView() {
                 {event.type === "TIME_POLL" && (
                   <div className="lg:col-span-2">
                     <label className="block text-[10px] uppercase font-bold text-slate-400 mb-1">Day</label>
-                    <input
-                      type="date"
+                    <DatePicker
                       name="slotDate"
-                      className="w-full px-3 py-2 rounded-xl border border-slate-200 text-xs bg-white focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all"
                     />
                   </div>
                 )}

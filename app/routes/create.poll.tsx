@@ -4,6 +4,7 @@ import { Form, useActionData, useNavigation, Link } from "@remix-run/react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { ArrowLeft, ArrowRight, CalendarDays, TriangleAlert, X } from "lucide-react";
 import { usePersistentState } from "~/utils/usePersistentState";
+import DatePicker from "~/components/DatePicker";
 import { useCreateStickyHeader, formatStickyDate } from "~/utils/useCreateStickyHeader";
 import { getDb, events, eventSlots } from "~/db";
 import { eq } from "drizzle-orm";
@@ -780,12 +781,9 @@ export default function CreateMeetingPoll() {
                         <label className="block text-[10px] uppercase font-bold text-slate-400 mb-1">
                           Day *
                         </label>
-                        <input
-                          type="date"
-                          required
+                        <DatePicker
                           value={day.date}
-                          onChange={(e) => updateDay(day.id, { date: e.target.value })}
-                          className="w-full px-3 py-2 text-xs rounded-xl border border-slate-200 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500"
+                          onChange={(iso) => updateDay(day.id, { date: iso })}
                         />
                       </div>
 
