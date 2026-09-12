@@ -2321,6 +2321,7 @@ export default function EventView() {
 
                 <Form
                   method="post"
+                  className="flex flex-col gap-3 sm:items-end"
                   onSubmit={(e) => {
                     if (!voterName.trim()) {
                       e.preventDefault();
@@ -2343,7 +2344,7 @@ export default function EventView() {
                   ))}
 
                   {turnstileSiteKey && (
-                    <div className="flex justify-center sm:justify-start">
+                    <div className="flex justify-center sm:justify-end [&:empty]:hidden [&:has(.cf-turnstile:empty)]:hidden">
                       <Turnstile siteKey={turnstileSiteKey} action="poll-vote" resetKey={navigation.state} />
                     </div>
                   )}

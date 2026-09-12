@@ -37,6 +37,12 @@ interface TurnstileProps {
   action: string;
   /** Pass navigation.state — widget resets to a fresh token when a submission settles. */
   resetKey?: string;
+  /**
+   * `interaction-only` (default) keeps the widget hidden unless Cloudflare
+   * actually needs visitor interaction — cleanest UX, most visitors never
+   * see the checkbox. Use `always` only where you want visible proof.
+   */
+  appearance?: "always" | "execute" | "interaction-only";
 }
 
 /**
@@ -44,7 +50,7 @@ interface TurnstileProps {
  * solved `cf-turnstile-response` token is submitted with the form data.
  * Tokens are single-use: after each completed submission the widget resets.
  */
-export default function Turnstile({ siteKey, action, resetKey }: TurnstileProps) {
+export default function Turnstile({ siteKey, action, resetKey, appearance = "interaction-only" }: TurnstileProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const widgetIdRef = useRef<string | null>(null);
   const prevResetKey = useRef(resetKey);
@@ -66,6 +72,7 @@ export default function Turnstile({ siteKey, action, resetKey }: TurnstileProps)
           sitekey: siteKey,
           action,
           theme: "auto",
+          appearance,
         });
       })
       .catch(() => {
@@ -75,7 +82,7 @@ export default function Turnstile({ siteKey, action, resetKey }: TurnstileProps)
     return () => {
       cancelled = true;
     };
-  }, [siteKey, action]);
+  }, [siteKey, action, appearance]);
 
   // Fresh single-use token for retries: reset only on transition TO idle.
   useEffect(() => {
@@ -102,5 +109,5 @@ export default function Turnstile({ siteKey, action, resetKey }: TurnstileProps)
     };
   }, []);
 
-  return <div ref={containerRef} className="cf-turnstile" />;
+  return <div ref={containerRef} className="cf-turnstile [&:empty]:hidden" />;
 }
