@@ -5,7 +5,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { ArrowLeft, ArrowRight, CalendarDays, TriangleAlert, X } from "lucide-react";
 import { usePersistentState } from "~/utils/usePersistentState";
 import DatePicker from "~/components/DatePicker";
-import { useCreateStickyHeader, formatStickyDate } from "~/utils/useCreateStickyHeader";
+import { useCreateStickyHeader } from "~/utils/useCreateStickyHeader";
 import { getDb, events, eventSlots } from "~/db";
 import { eq } from "drizzle-orm";
 import {
@@ -730,102 +730,93 @@ export default function CreateMeetingPoll() {
               </div>
             </div>
 
-            <div className="space-y-3.5">
+            <div className="space-y-2">
+              {/* Single header row — no per-option duplication */}
+              <div className="hidden sm:grid grid-cols-[24px_minmax(0,1.35fr)_104px_86px_minmax(0,1fr)_52px] gap-2 px-2 text-[10px] uppercase font-bold tracking-wide text-slate-400">
+                <span>#</span>
+                <span>Day *</span>
+                <span>Start *</span>
+                <span>Ends</span>
+                <span>Label</span>
+                <span />
+              </div>
               {days.map((day, index) => {
                 const end = endFor(day.startTime);
                 return (
                   <div
                     key={day.id}
-                    className="p-4 bg-slate-50/70 rounded-2xl border border-slate-200/80 transition-all space-y-3"
+                    className="flex items-center gap-2 p-2 bg-slate-50/70 rounded-xl border border-slate-200/80 transition-all hover:border-slate-300"
                   >
                     <input type="hidden" name="slotDate" value={day.date} />
                     <input type="hidden" name="slotStartTime" value={isAllDay ? "" : day.startTime} />
                     <input type="hidden" name="slotEndTime" value={isAllDay ? "" : end} />
-                    <div className="flex items-center justify-between">
-                      <span className="text-xs font-bold text-slate-700">
-                        Option {index + 1}
-                        {day.date && (
-                          <span className="ml-2 font-semibold text-slate-500">
-                            {formatStickyDate(day.date)}
-                            {!isAllDay && day.startTime && end && (
-                              <> · {formatTimeDisplay(day.startTime)} – {formatTimeDisplay(end)}</>
-                            )}
-                            {isAllDay && <> · All day</>}
-                          </span>
-                        )}
-                      </span>
-                      <div className="flex items-center gap-3 shrink-0">
-                        {!isAllDay && (
-                          <button
-                            type="button"
-                            onClick={() => addHourAfter(day.id)}
-                            title={`Add the next ${formatDurationLabel(durationMinutes)} block on the same day`}
-                            className="text-green-700 hover:text-green-800 font-bold text-xs transition-colors inline-flex items-center gap-1"
-                          >
-                            + Add hour
-                          </button>
-                        )}
-                        <button
-                          type="button"
-                          onClick={() => removeDay(day.id)}
-                          disabled={days.length <= 1}
-                          className="text-slate-400 hover:text-rose-500 font-bold text-xs disabled:opacity-20 transition-colors inline-flex items-center gap-1"
+                    <span
+                      aria-hidden="true"
+                      className="w-6 h-6 shrink-0 rounded-full bg-white border border-slate-200 text-[11px] font-bold text-slate-500 flex items-center justify-center"
+                    >
+                      {index + 1}
+                    </span>
+
+                    <div className="flex-1 min-w-0 grid grid-cols-2 sm:flex sm:items-center gap-2">
+                      <span className="sr-only">Option {index + 1}</span>
+                      <DatePicker
+                        value={day.date}
+                        onChange={(iso) => updateDay(day.id, { date: iso })}
+                        className="col-span-2 sm:col-span-1 sm:w-[168px] sm:shrink-0"
+                      />
+
+                      {!isAllDay && (
+                        <input
+                          type="time"
+                          required
+                          aria-label={`Start time for option ${index + 1}`}
+                          value={day.startTime}
+                          onChange={(e) => updateDay(day.id, { startTime: e.target.value })}
+                          className="w-full sm:w-[104px] sm:shrink-0 px-2.5 py-2 text-xs rounded-xl border border-slate-200 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500"
+                        />
+                      )}
+
+                      {!isAllDay && (
+                        <span
+                          title={end ? `Ends ${formatTimeDisplay(end)}` : "End time"}
+                          className="self-center text-[11px] font-semibold text-slate-500 whitespace-nowrap tabular-nums sm:w-[86px] sm:shrink-0"
                         >
-                          Remove <X className="w-3 h-3" />
-                        </button>
-                      </div>
+                          → {end ? formatTimeDisplay(end) : "—"}
+                        </span>
+                      )}
+
+                      <input
+                        type="text"
+                        name="slotTitle"
+                        placeholder="Label (optional)"
+                        aria-label={`Label for option ${index + 1} (optional)`}
+                        value={day.label}
+                        onChange={(e) => updateDay(day.id, { label: e.target.value })}
+                        className="col-span-2 sm:col-span-1 px-2.5 py-2 text-xs rounded-xl border border-slate-200 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 placeholder:text-slate-400 sm:flex-1 sm:min-w-0"
+                      />
                     </div>
 
-                    <div className="grid grid-cols-1 sm:grid-cols-12 gap-3 items-end">
-                      <div className={isAllDay ? "sm:col-span-6" : "sm:col-span-4"}>
-                        <label className="block text-[10px] uppercase font-bold text-slate-400 mb-1">
-                          Day *
-                        </label>
-                        <DatePicker
-                          value={day.date}
-                          onChange={(iso) => updateDay(day.id, { date: iso })}
-                        />
-                      </div>
-
+                    <div className="flex shrink-0 items-center gap-0.5">
                       {!isAllDay && (
-                        <div className="sm:col-span-3">
-                          <label className="block text-[10px] uppercase font-bold text-slate-400 mb-1">
-                            Start time *
-                          </label>
-                          <input
-                            type="time"
-                            required
-                            value={day.startTime}
-                            onChange={(e) => updateDay(day.id, { startTime: e.target.value })}
-                            className="w-full px-3 py-2 text-xs rounded-xl border border-slate-200 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500"
-                          />
-                        </div>
+                        <button
+                          type="button"
+                          onClick={() => addHourAfter(day.id)}
+                          title={`Add the next ${formatDurationLabel(durationMinutes)} block on the same day`}
+                          className="px-1.5 py-1.5 text-green-700 hover:text-green-800 hover:bg-green-50 rounded-lg font-bold text-[11px] transition-colors whitespace-nowrap"
+                        >
+                          +{formatDurationLabel(durationMinutes).replace(" ", "")}
+                        </button>
                       )}
-
-                      {!isAllDay && (
-                        <div className="sm:col-span-2">
-                          <label className="block text-[10px] uppercase font-bold text-slate-400 mb-1">
-                            Ends
-                          </label>
-                          <div className="w-full px-3 py-2 text-xs rounded-xl border border-slate-100 bg-slate-100/70 text-slate-600 font-semibold">
-                            {end ? formatTimeDisplay(end) : "—"}
-                          </div>
-                        </div>
-                      )}
-
-                      <div className={isAllDay ? "sm:col-span-6" : "sm:col-span-3"}>
-                        <label className="block text-[10px] uppercase font-bold text-slate-400 mb-1">
-                          Label (optional)
-                        </label>
-                        <input
-                          type="text"
-                          name="slotTitle"
-                          placeholder="e.g., Kickoff"
-                          value={day.label}
-                          onChange={(e) => updateDay(day.id, { label: e.target.value })}
-                          className="w-full px-3 py-2 text-xs rounded-xl border border-slate-200 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500"
-                        />
-                      </div>
+                      <button
+                        type="button"
+                        onClick={() => removeDay(day.id)}
+                        disabled={days.length <= 1}
+                        title="Remove this option"
+                        aria-label={`Remove option ${index + 1}`}
+                        className="p-1.5 rounded-lg text-slate-400 hover:text-rose-500 hover:bg-rose-50 disabled:opacity-20 transition-colors"
+                      >
+                        <X className="w-3.5 h-3.5" />
+                      </button>
                     </div>
                   </div>
                 );

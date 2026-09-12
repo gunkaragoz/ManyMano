@@ -141,10 +141,10 @@ export default function DatePicker({
         onClick={() => setOpen((v) => !v)}
         aria-haspopup="dialog"
         aria-expanded={open}
-        className="w-full px-3 py-2 text-xs sm:text-sm rounded-xl border border-slate-200 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all flex items-center gap-2 text-left text-slate-800 hover:border-slate-300"
+        className="w-full px-3 py-2 text-xs sm:text-sm rounded-xl border border-slate-200 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all flex items-center gap-2 text-left text-slate-800 hover:border-slate-300 min-w-0"
       >
         <CalendarDays className="w-4 h-4 text-slate-400 shrink-0" />
-        <span className={current ? "font-semibold" : "text-slate-400"}>
+        <span className={`${current ? "font-semibold" : "text-slate-400"} truncate whitespace-nowrap min-w-0 flex-1`}>
           {current ? formatDisplay(current) : placeholder}
         </span>
       </button>

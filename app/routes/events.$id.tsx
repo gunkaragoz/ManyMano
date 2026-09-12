@@ -747,6 +747,9 @@ export default function EventView() {
 
   // Active poll vote states for interactive row: Record<slotId, 'NO' | 'YES' | 'MAYBE'>
   const [userVotes, setUserVotes] = useState<Record<string, "NO" | "YES" | "MAYBE">>({});
+  const [voterName, setVoterName] = useState("");
+  const [voterEmail, setVoterEmail] = useState("");
+  const [showAllVotesMobile, setShowAllVotesMobile] = useState(false);
 
   const cycleSlotVote = (slotId: string) => {
     const current = userVotes[slotId] || "NO";
@@ -760,6 +763,29 @@ export default function EventView() {
       [slotId]: nextMap[current],
     }));
   };
+
+  const setSlotVote = (slotId: string, value: "NO" | "YES" | "MAYBE") => {
+    setUserVotes((prev) => ({ ...prev, [slotId]: value }));
+  };
+
+  const setAllVotes = (value: "NO" | "YES" | "MAYBE") => {
+    setUserVotes(() => {
+      const next: Record<string, "NO" | "YES" | "MAYBE"> = {};
+      slots.forEach((s) => {
+        next[s.id] = value;
+      });
+      return next;
+    });
+  };
+
+  const yesCount = useMemo(
+    () => Object.values(userVotes).filter((v) => v === "YES").length,
+    [userVotes]
+  );
+  const maybeCount = useMemo(
+    () => Object.values(userVotes).filter((v) => v === "MAYBE").length,
+    [userVotes]
+  );
 
   const copyToClipboard = async (text: string, label: string) => {
     const markCopied = () => {
@@ -839,6 +865,17 @@ export default function EventView() {
     if (dated.length === 1) return dated[0].label;
     return `${dated[0].label} – ${dated[dated.length - 1].label}`;
   }, [event.type, dayGroups]);
+
+  // slotId -> day label for mobile cards
+  const slotDayLabel = useMemo(() => {
+    const map: Record<string, string> = {};
+    dayGroups.forEach((g) => {
+      g.slots.forEach((s) => {
+        map[s.id] = g.label;
+      });
+    });
+    return map;
+  }, [dayGroups]);
   // Group signup slots into shifts sharing name + time window.
   // Each slot is one task; a shift card lists its tasks.
   type SlotRow = (typeof slots)[number];
@@ -1659,9 +1696,253 @@ export default function EventView() {
             </div>
           )}
 
-          {/* Matrix Grid Card */}
+          {/* Voting + Results Card — responsive: cards on mobile, matrix on desktop */}
           <div className="bg-white border border-slate-200/80 rounded-3xl shadow-[0_2px_12px_rgba(0,0,0,0.03)] overflow-hidden">
-            <div className="overflow-x-auto">
+            {/* Card header */}
+            <div className="p-5 sm:p-6 border-b border-slate-100 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div>
+                <h3 className="font-bold text-slate-900 text-base">
+                  {event.status === "FINALIZED" ? "Results" : "Vote your availability"}
+                </h3>
+                <p className="text-xs text-slate-500 mt-0.5">
+                  {pollData.votes.length} {pollData.votes.length === 1 ? "response" : "responses"} so far
+                  {event.status !== "FINALIZED" && (
+                    <span className="hidden sm:inline"> · Tap a cell to cycle No → Yes → If need be</span>
+                  )}
+                  {event.status !== "FINALIZED" && (
+                    <span className="sm:hidden"> · Tap an option below</span>
+                  )}
+                </p>
+              </div>
+              {event.status !== "FINALIZED" && (
+                <div className="flex items-center gap-2 text-xs">
+                  <button
+                    type="button"
+                    onClick={() => setAllVotes("YES")}
+                    className="px-3.5 py-2 rounded-full border border-green-200 bg-green-50 text-green-700 font-bold hover:bg-green-100 transition-colors min-h-[36px]"
+                  >
+                    All Yes
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setAllVotes("NO")}
+                    className="px-3.5 py-2 rounded-full border border-slate-200 bg-white text-slate-600 font-bold hover:bg-slate-50 transition-colors min-h-[36px]"
+                  >
+                    Reset
+                  </button>
+                </div>
+              )}
+            </div>
+
+            {/* Voter identity — shared by mobile cards + desktop matrix */}
+            {event.status !== "FINALIZED" && (
+              <div className="p-5 sm:p-6 bg-blue-50/40 border-b border-slate-100 grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label htmlFor="voter-name" className="block text-xs font-bold text-slate-700 mb-1.5">
+                    Your name *
+                  </label>
+                  <input
+                    id="voter-name"
+                    type="text"
+                    value={voterName}
+                    onChange={(e) => setVoterName(e.target.value)}
+                    placeholder="e.g. Maya Lin"
+                    autoComplete="name"
+                    className="w-full text-sm font-medium px-4 py-3.5 rounded-2xl border border-slate-200 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 min-h-[52px]"
+                  />
+                </div>
+                <div>
+                  <label htmlFor="voter-email" className="block text-xs font-bold text-slate-700 mb-1.5">
+                    Email <span className="font-normal text-slate-400">(optional, for edit link)</span>
+                  </label>
+                  <input
+                    id="voter-email"
+                    type="email"
+                    value={voterEmail}
+                    onChange={(e) => setVoterEmail(e.target.value)}
+                    placeholder="maya@example.com"
+                    autoComplete="email"
+                    className="w-full text-sm px-4 py-3.5 rounded-2xl border border-slate-200 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 min-h-[52px]"
+                  />
+                </div>
+              </div>
+            )}
+
+            {/* ---- MOBILE: stacked option cards (thumb-friendly) ---- */}
+            <div className="md:hidden divide-y divide-slate-100">
+              {slots.map((s) => {
+                const t = pollData.tallies[s.id] || { yes: 0, maybe: 0 };
+                const cur = userVotes[s.id] || "NO";
+                const isWinning = event.winningSlotId === s.id;
+                const isTop = topSlot?.slot.id === s.id;
+                const yesVoters = pollData.votes
+                  .filter((v) => v.responses[s.id] === "YES")
+                  .map((v) => v.participantName);
+                const maybeVoters = pollData.votes
+                  .filter((v) => v.responses[s.id] === "MAYBE")
+                  .map((v) => v.participantName);
+                const timeLabel =
+                  s.startTime || s.endTime
+                    ? `${formatTime(s.startTime)}${s.endTime ? ` – ${formatTime(s.endTime)}` : ""}`
+                    : "All day";
+                return (
+                  <div key={s.id} className={`p-5 space-y-4 ${isWinning ? "bg-purple-50/50" : ""}`}>
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <div className="text-[11px] font-bold uppercase tracking-wider text-slate-500">
+                          {slotDayLabel[s.id] || "Undated"}
+                        </div>
+                        <div className="font-extrabold text-slate-900 text-lg leading-tight mt-0.5">
+                          {timeLabel}
+                        </div>
+                        {s.title && (
+                          <div className="text-xs text-slate-500 mt-0.5 truncate">{s.title}</div>
+                        )}
+                        <div className="flex items-center gap-2 mt-2 flex-wrap">
+                          <span className="inline-flex items-center gap-1 text-xs font-bold text-green-700 bg-green-50 border border-green-200 px-2.5 py-1 rounded-full">
+                            <Check className="w-3 h-3" /> {t.yes} Yes
+                          </span>
+                          {t.maybe > 0 && (
+                            <span className="inline-flex items-center text-xs font-semibold text-amber-800 bg-amber-50 border border-amber-200 px-2.5 py-1 rounded-full">
+                              +{t.maybe} If need be
+                            </span>
+                          )}
+                          {isTop && pollData.votes.length > 0 && (
+                            <span className="inline-flex items-center gap-1 text-[11px] font-bold text-blue-700 bg-blue-50 border border-blue-200 px-2.5 py-1 rounded-full">
+                              <Star className="w-3 h-3" /> Leader
+                            </span>
+                          )}
+                          {isWinning && (
+                            <span className="inline-flex items-center gap-1 text-[11px] font-bold text-purple-800 bg-purple-100 border border-purple-200 px-2.5 py-1 rounded-full">
+                              <Trophy className="w-3 h-3" /> Final
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+
+                    {event.status !== "FINALIZED" ? (
+                      <div
+                        role="group"
+                        aria-label={`Your availability for ${slotDayLabel[s.id]} ${timeLabel}`}
+                        className="grid grid-cols-3 gap-2"
+                      >
+                        <button
+                          type="button"
+                          aria-pressed={cur === "YES"}
+                          onClick={() => setSlotVote(s.id, "YES")}
+                          className={`min-h-[56px] rounded-2xl border-2 font-bold text-sm transition-all active:scale-[0.97] inline-flex flex-col items-center justify-center gap-0.5 ${
+                            cur === "YES"
+                              ? "bg-green-600 border-green-600 text-white shadow-md"
+                              : "bg-white border-slate-200 text-slate-500 hover:border-green-400 hover:text-green-700"
+                          }`}
+                        >
+                          <Check className="w-5 h-5" />
+                          Yes
+                        </button>
+                        <button
+                          type="button"
+                          aria-pressed={cur === "MAYBE"}
+                          onClick={() => setSlotVote(s.id, "MAYBE")}
+                          className={`min-h-[56px] rounded-2xl border-2 font-bold text-sm transition-all active:scale-[0.97] inline-flex flex-col items-center justify-center gap-0.5 ${
+                            cur === "MAYBE"
+                              ? "bg-amber-400 border-amber-400 text-slate-900 shadow-md"
+                              : "bg-white border-slate-200 text-slate-500 hover:border-amber-400 hover:text-amber-700"
+                          }`}
+                        >
+                          <span className="text-base leading-none font-extrabold">~</span>
+                          <span className="text-xs">If need be</span>
+                        </button>
+                        <button
+                          type="button"
+                          aria-pressed={cur === "NO"}
+                          onClick={() => setSlotVote(s.id, "NO")}
+                          className={`min-h-[56px] rounded-2xl border-2 font-bold text-sm transition-all active:scale-[0.97] inline-flex flex-col items-center justify-center gap-0.5 ${
+                            cur === "NO"
+                              ? "bg-slate-800 border-slate-800 text-white shadow-md"
+                              : "bg-white border-slate-200 text-slate-500 hover:border-slate-400 hover:text-slate-700"
+                          }`}
+                        >
+                          <X className="w-5 h-5" />
+                          No
+                        </button>
+                      </div>
+                    ) : null}
+
+                    {(yesVoters.length > 0 || maybeVoters.length > 0) && (
+                      <details className="text-xs text-slate-500">
+                        <summary className="cursor-pointer font-semibold text-slate-600 py-2 min-h-[44px] flex items-center">
+                          Who voted? ({yesVoters.length + maybeVoters.length})
+                        </summary>
+                        <div className="flex flex-wrap gap-1.5 pb-1">
+                          {yesVoters.map((n) => (
+                            <span key={`y-${s.id}-${n}`} className="px-2.5 py-1.5 rounded-full bg-green-50 border border-green-200 text-green-800 font-semibold">
+                              {n} ✓
+                            </span>
+                          ))}
+                          {maybeVoters.map((n) => (
+                            <span key={`m-${s.id}-${n}`} className="px-2.5 py-1.5 rounded-full bg-amber-50 border border-amber-200 text-amber-800 font-semibold">
+                              {n} ~
+                            </span>
+                          ))}
+                        </div>
+                      </details>
+                    )}
+                  </div>
+                );
+              })}
+
+              {/* Mobile: all responses (collapsible, avoids giant matrix) */}
+              {pollData.votes.length > 0 && (
+                <div className="p-5 bg-slate-50/60">
+                  <button
+                    type="button"
+                    onClick={() => setShowAllVotesMobile((v) => !v)}
+                    aria-expanded={showAllVotesMobile}
+                    className="w-full min-h-[48px] px-4 py-3 rounded-2xl border border-slate-200 bg-white text-xs font-bold text-slate-700 shadow-sm"
+                  >
+                    {showAllVotesMobile
+                      ? "Hide all responses"
+                      : `Show all ${pollData.votes.length} responses`}
+                  </button>
+                  {showAllVotesMobile && (
+                    <div className="mt-3 space-y-2">
+                      {pollData.votes.map((v) => {
+                        const vYes = Object.values(v.responses).filter((r) => r === "YES").length;
+                        return (
+                          <div key={v.id} className="bg-white border border-slate-200/80 rounded-2xl p-3.5 flex items-center justify-between gap-2 text-xs">
+                            <span className="font-bold text-slate-800 truncate">
+                              {v.participantName}
+                              <span className="block font-normal text-slate-500">
+                                {vYes} Yes · {Object.values(v.responses).filter((r) => r === "MAYBE").length} If need be
+                              </span>
+                            </span>
+                            {isAdmin && (
+                              <Form method="post" className="shrink-0">
+                                <input type="hidden" name="intent" value="delete_poll_vote" />
+                                <input type="hidden" name="voteId" value={v.id} />
+                                <input type="hidden" name="adminToken" value={adminToken || ""} />
+                                <button
+                                  type="submit"
+                                  title="Remove vote"
+                                  aria-label={`Remove vote by ${v.participantName}`}
+                                  className="min-w-[44px] min-h-[44px] inline-flex items-center justify-center text-slate-400 hover:text-rose-600 transition-colors"
+                                >
+                                  <X className="w-4 h-4" />
+                                </button>
+                              </Form>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+
+            {/* ---- DESKTOP: matrix grid (44px+ targets) ---- */}
+            <div className="hidden md:block overflow-x-auto">
               <table className="w-full text-left border-collapse text-xs">
                 <thead>
                   {/* Day-group row: one header per day spanning its time options */}
@@ -1762,33 +2043,31 @@ export default function EventView() {
                     </tr>
                   ))}
 
-                  {/* Active Voting Row */}
+                  {/* Active Voting Row — desktop: 44px targets + labels */}
                   {event.status !== "FINALIZED" && (
                     <tr className="bg-blue-50/30 border-t-2 border-blue-400/80">
-                      <td className="p-4 sticky left-0 bg-blue-50/70 border-r border-slate-200/80 space-y-2">
-                        <input
-                          id="new-voter-name"
-                          type="text"
-                          required
-                          placeholder="Your Name *"
-                          className="w-full text-xs font-semibold px-3 py-2 rounded-xl border border-blue-300 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500"
-                        />
-                        <input
-                          id="new-voter-email"
-                          type="email"
-                          placeholder="Email (optional)"
-                          className="w-full text-[11px] px-3 py-1.5 rounded-xl border border-slate-200 bg-white focus:outline-none focus:ring-1 focus:ring-blue-400"
-                        />
+                      <td className="p-4 sticky left-0 bg-blue-50 border-r border-slate-200/80">
+                        <div className="text-xs font-bold text-blue-900">
+                          {voterName.trim() ? voterName.trim() : "Your vote"}
+                        </div>
+                        <div className="text-[11px] text-blue-700/80 mt-0.5">
+                          {yesCount > 0 || maybeCount > 0
+                            ? `${yesCount} Yes${maybeCount ? ` · ${maybeCount} If need be` : ""}`
+                            : "Tap a cell to vote"}
+                        </div>
                       </td>
 
                       {slots.map((s) => {
                         const cur = userVotes[s.id] || "NO";
+                        const label = cur === "YES" ? "Yes" : cur === "MAYBE" ? "If need be" : "No";
                         return (
-                          <td key={s.id} className="p-3 text-center border-r border-slate-200/80">
+                          <td key={s.id} className="p-2.5 text-center border-r border-slate-200/80">
                             <button
                               type="button"
                               onClick={() => cycleSlotVote(s.id)}
-                              className={`w-9 h-9 rounded-xl font-bold text-xs transition-all shadow-sm inline-flex items-center justify-center ${
+                              title={`${label} — click to change`}
+                              aria-label={`Your vote: ${label}. Activate to change.`}
+                              className={`min-w-[48px] min-h-[48px] px-2 rounded-xl font-bold text-xs transition-all shadow-sm inline-flex flex-col items-center justify-center gap-0.5 ${
                                 cur === "YES"
                                   ? "bg-green-500 text-white scale-105"
                                   : cur === "MAYBE"
@@ -1797,12 +2076,13 @@ export default function EventView() {
                               }`}
                             >
                               {cur === "YES" ? (
-                                <Check className="w-4 h-4" />
+                                <Check className="w-5 h-5" />
                               ) : cur === "MAYBE" ? (
-                                <Check className="w-4 h-4" />
+                                <Check className="w-5 h-5" />
                               ) : (
-                                <Minus className="w-4 h-4" />
+                                <Minus className="w-5 h-5" />
                               )}
+                              <span className="text-[10px] leading-none">{label}</span>
                             </button>
                           </td>
                         );
@@ -1842,10 +2122,10 @@ export default function EventView() {
               </table>
             </div>
 
-            {/* Matrix Voting Footer */}
+            {/* Voting footer / submit — shared */}
             {event.status !== "FINALIZED" && (
-              <div className="p-5 sm:p-6 bg-[#fafafc] border-t border-slate-200/80 flex flex-col sm:flex-row items-center justify-between gap-4">
-                <div className="flex items-center gap-4 text-xs text-slate-500">
+              <div className="p-5 sm:p-6 bg-[#fafafc] border-t border-slate-200/80 flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-4">
+                <div className="flex items-center gap-4 text-xs text-slate-500 flex-wrap">
                   <span className="flex items-center gap-1.5">
                     <span className="w-4 h-4 rounded-lg bg-green-500 text-white inline-flex items-center justify-center"><Check className="w-3 h-3" /></span>
                     <span>Available</span>
@@ -1855,31 +2135,29 @@ export default function EventView() {
                     <span>If need be</span>
                   </span>
                   <span className="flex items-center gap-1.5">
-                    <span className="w-4 h-4 rounded-lg border border-slate-300 bg-white text-slate-400 inline-flex items-center justify-center"><Minus className="w-3 h-3" /></span>
+                    <span className="w-4 h-4 rounded-lg border border-slate-300 bg-slate-800 text-white inline-flex items-center justify-center"><X className="w-3 h-3" /></span>
                     <span>Unavailable</span>
                   </span>
+                  {(yesCount > 0 || maybeCount > 0) && (
+                    <span className="font-bold text-slate-700">
+                      You: {yesCount} Yes{maybeCount ? ` · ${maybeCount} If need be` : ""}
+                    </span>
+                  )}
                 </div>
 
                 <Form
                   method="post"
                   onSubmit={(e) => {
-                    const nameInput = document.getElementById("new-voter-name") as HTMLInputElement;
-                    const emailInput = document.getElementById("new-voter-email") as HTMLInputElement;
-                    if (!nameInput?.value.trim()) {
+                    if (!voterName.trim()) {
                       e.preventDefault();
+                      document.getElementById("voter-name")?.focus();
                       alert("Please enter your name first!");
-                      return;
                     }
-                    const form = e.currentTarget;
-                    const nameField = form.querySelector('input[name="participantName"]') as HTMLInputElement;
-                    const emailField = form.querySelector('input[name="participantEmail"]') as HTMLInputElement;
-                    if (nameField) nameField.value = nameInput.value;
-                    if (emailField) emailField.value = emailInput?.value || "";
                   }}
                 >
                   <input type="hidden" name="intent" value="vote_poll" />
-                  <input type="hidden" name="participantName" value="" />
-                  <input type="hidden" name="participantEmail" value="" />
+                  <input type="hidden" name="participantName" value={voterName} />
+                  <input type="hidden" name="participantEmail" value={voterEmail} />
 
                   {slots.map((s) => (
                     <input
@@ -1893,9 +2171,9 @@ export default function EventView() {
                   <button
                     type="submit"
                     disabled={isSubmitting}
-                    className="w-full sm:w-auto px-7 py-3 bg-blue-600 hover:bg-blue-700 text-white rounded-2xl text-xs font-bold shadow-sm transition-all hover:scale-[1.02] active:scale-[0.98] disabled:opacity-50 inline-flex items-center gap-2"
+                    className="w-full sm:w-auto min-h-[52px] px-7 py-3.5 bg-blue-600 hover:bg-blue-700 text-white rounded-2xl text-sm font-bold shadow-sm transition-all hover:scale-[1.02] active:scale-[0.98] disabled:opacity-50 inline-flex items-center justify-center gap-2"
                   >
-                    {isSubmitting ? "Saving..." : <>Save My Availability <ArrowRight className="w-3.5 h-3.5" /></>}
+                    {isSubmitting ? "Saving..." : <>Save My Availability <ArrowRight className="w-4 h-4" /></>}
                   </button>
                 </Form>
               </div>
