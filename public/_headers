@@ -1,4 +1,7 @@
-# Cloudflare Pages headers: crawl safety + static caching.
+# Cloudflare Pages headers: HSTS + crawl safety + static caching.
+/*
+  Strict-Transport-Security: max-age=15552000; includeSubDomains
+  X-Content-Type-Options: nosniff
 /events/*
   X-Robots-Tag: noindex, nofollow, noarchive
   Referrer-Policy: no-referrer
@@ -15,4 +18,6 @@
 /sitemap.xml
   Cache-Control: public, max-age=86400
 /llms.txt
+  Cache-Control: public, max-age=86400
+/.well-known/security.txt
   Cache-Control: public, max-age=86400

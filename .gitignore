@@ -7,4 +7,3 @@ build
 *.local
 .pnpm-store
 .DS_Store
-MONETIZATION_TODO.md
