@@ -43,6 +43,11 @@ interface TurnstileProps {
    * see the checkbox. Use `always` only where you want visible proof.
    */
   appearance?: "always" | "execute" | "interaction-only";
+  /**
+   * `compact` keeps the footer footprint small — best next to submit buttons.
+   * Defaults to compact since all our placements are inline footers/modals.
+   */
+  size?: "normal" | "compact" | "flexible";
 }
 
 /**
@@ -50,7 +55,7 @@ interface TurnstileProps {
  * solved `cf-turnstile-response` token is submitted with the form data.
  * Tokens are single-use: after each completed submission the widget resets.
  */
-export default function Turnstile({ siteKey, action, resetKey, appearance = "interaction-only" }: TurnstileProps) {
+export default function Turnstile({ siteKey, action, resetKey, appearance = "interaction-only", size = "compact" }: TurnstileProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const widgetIdRef = useRef<string | null>(null);
   const prevResetKey = useRef(resetKey);
@@ -73,6 +78,7 @@ export default function Turnstile({ siteKey, action, resetKey, appearance = "int
           action,
           theme: "auto",
           appearance,
+          size,
         });
       })
       .catch(() => {
@@ -82,7 +88,7 @@ export default function Turnstile({ siteKey, action, resetKey, appearance = "int
     return () => {
       cancelled = true;
     };
-  }, [siteKey, action, appearance]);
+  }, [siteKey, action, appearance, size]);
 
   // Fresh single-use token for retries: reset only on transition TO idle.
   useEffect(() => {

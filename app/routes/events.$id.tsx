@@ -2343,19 +2343,21 @@ export default function EventView() {
                     />
                   ))}
 
-                  {turnstileSiteKey && (
-                    <div className="flex justify-center sm:justify-end [&:empty]:hidden [&:has(.cf-turnstile:empty)]:hidden">
-                      <Turnstile siteKey={turnstileSiteKey} action="poll-vote" resetKey={navigation.state} />
-                    </div>
-                  )}
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-end gap-3">
+                    {turnstileSiteKey && (
+                      <div className="flex justify-end sm:items-center [&:empty]:hidden [&:has(.cf-turnstile:empty)]:hidden">
+                        <Turnstile siteKey={turnstileSiteKey} action="poll-vote" resetKey={navigation.state} />
+                      </div>
+                    )}
 
-                  <button
-                    type="submit"
-                    disabled={isSubmitting}
-                    className="w-full sm:w-auto min-h-[52px] px-7 py-3.5 bg-blue-600 hover:bg-blue-700 text-white rounded-2xl text-sm font-bold shadow-sm transition-all hover:scale-[1.02] active:scale-[0.98] disabled:opacity-50 inline-flex items-center justify-center gap-2"
-                  >
-                    {isSubmitting ? "Saving..." : <>Save My Availability <ArrowRight className="w-4 h-4" /></>}
-                  </button>
+                    <button
+                      type="submit"
+                      disabled={isSubmitting}
+                      className="w-full sm:w-auto min-h-[52px] px-7 py-3.5 bg-blue-600 hover:bg-blue-700 text-white rounded-2xl text-sm font-bold shadow-sm transition-all hover:scale-[1.02] active:scale-[0.98] disabled:opacity-50 inline-flex items-center justify-center gap-2"
+                    >
+                      {isSubmitting ? "Saving..." : <>Save My Availability <ArrowRight className="w-4 h-4" /></>}
+                    </button>
+                  </div>
                 </Form>
               </div>
             )}
