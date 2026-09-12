@@ -804,7 +804,7 @@ export default function CreateMeetingPoll() {
                           title={`Add the next ${formatDurationLabel(durationMinutes)} block on the same day`}
                           className="px-1.5 py-1.5 text-green-700 hover:text-green-800 hover:bg-green-50 rounded-lg font-bold text-[11px] transition-colors whitespace-nowrap"
                         >
-                          +{formatDurationLabel(durationMinutes).replace(" ", "")}
+                          +{formatDurationLabel(durationMinutes).replace(/\s+/g, "")}
                         </button>
                       )}
                       <button
