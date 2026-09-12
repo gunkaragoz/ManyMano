@@ -1,16 +1,18 @@
 import type { LoaderFunctionArgs } from "@remix-run/cloudflare";
-import { DEFAULT_SITE_URL, absoluteUrl } from "~/utils/seo";
+import { absoluteUrl } from "~/utils/seo";
+import { getSiteConfig } from "~/utils/site";
 
-export async function loader({ request }: LoaderFunctionArgs) {
+export async function loader({ request, context }: LoaderFunctionArgs) {
   const origin = (() => {
     try {
       return new URL(request.url).origin;
     } catch {
-      return DEFAULT_SITE_URL;
+      throw new Error("[config] robots.txt requires a valid request origin.");
     }
   })();
-  // Canonical sitemap URL always points at production.
-  const sitemapUrl = absoluteUrl("/sitemap.xml", DEFAULT_SITE_URL);
+  // Canonical sitemap URL always points at production (SITE_URL). No fallback.
+  const { siteUrl } = getSiteConfig(context.cloudflare.env);
+  const sitemapUrl = absoluteUrl("/sitemap.xml", siteUrl);
   void origin;
   const body = [
     "User-agent: *",

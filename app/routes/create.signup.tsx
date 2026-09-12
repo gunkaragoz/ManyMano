@@ -31,24 +31,28 @@ import {
   normalizeTimezone,
 } from "~/utils/validation";
 import { pruneExpiredEvents } from "~/utils/retention";
+import { getSiteConfig } from "~/utils/site";
 import { verifyTurnstile, turnstileFailure } from "~/utils/turnstile";
 import Turnstile from "~/components/Turnstile";
 import {
-  PAGE_META,
+  getPageMeta,
   breadcrumbJsonLd,
   mergeParentMeta,
   pageMetaOverrides,
+  rootSiteFromMatches,
 } from "~/utils/seo";
 
 export const meta: MetaFunction = ({ matches }) => {
+  const site = rootSiteFromMatches(matches);
+  const page = getPageMeta(site.siteName).createSignup;
   return mergeParentMeta(matches, [
-    ...pageMetaOverrides(PAGE_META.createSignup),
+    ...pageMetaOverrides({ ...page, siteUrl: site.siteUrl }),
     {
       "script:ld+json": breadcrumbJsonLd([
         { name: "Home", path: "/" },
         { name: "Create", path: "/create" },
         { name: "Sign-Up Sheet", path: "/create/signup" },
-      ]),
+      ], site.siteUrl),
     },
   ]);
 };
@@ -64,10 +68,21 @@ export async function action({ request, context }: ActionFunctionArgs) {
   const env = context.cloudflare.env as {
     DB: D1Database;
     RESEND_API_KEY?: string;
-    FROM_EMAIL?: string;
+    FROM_EMAIL: string;
+    SITE_URL: string;
+    SITE_NAME: string;
+    SITE_TAGLINE: string;
+    SITE_DESCRIPTION: string;
+    GITHUB_REPO_URL: string;
+    FOOTER_CREDIT_URL: string;
+    FOOTER_CREDIT_LABEL: string;
+    SECURITY_CONTACT: string;
+    ICS_UID_DOMAIN: string;
+    ICS_PRODID: string;
     TURNSTILE_SECRET_KEY?: string;
     TURNSTILE_HOSTNAMES?: string;
   };
+  const site = getSiteConfig(env);
   const db = getDb(env.DB);
   try {
     await pruneExpiredEvents(db);
@@ -199,7 +214,7 @@ export async function action({ request, context }: ActionFunctionArgs) {
 
   await sendEmail({
     apiKey: env.RESEND_API_KEY,
-    from: env.FROM_EMAIL,
+    from: site.fromEmail,
     to: organizerEmail,
     subject: `Your sign-up sheet: "${title}" is ready!`,
     html: `
@@ -213,7 +228,7 @@ export async function action({ request, context }: ActionFunctionArgs) {
         </div>
         ${eventDate ? `<p><strong>Date:</strong> ${escapeHtml(eventDate)}</p>` : ""}
         <p style="font-size: 13px; color: #64748b;">Use the secret management link to view RSVPs, download CSV spreadsheets, and manage sign-ups. You can delete it anytime from Organizer Admin Mode.</p>
-        <p style="margin-top: 24px; font-weight: 600;">— ManyMano</p>
+        <p style="margin-top: 24px; font-weight: 600;">— ${escapeHtml(site.siteName)}</p>
       </div>
     `,
   });

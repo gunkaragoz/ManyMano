@@ -1,4 +1,5 @@
-import type { LinksFunction, MetaFunction } from "@remix-run/cloudflare";
+import type { LinksFunction, LoaderFunctionArgs, MetaFunction } from "@remix-run/cloudflare";
+import { json } from "@remix-run/cloudflare";
 import {
   Links,
   Meta,
@@ -6,6 +7,7 @@ import {
   Scripts,
   ScrollRestoration,
   Link,
+  useLoaderData,
   useLocation,
   useNavigation,
 } from "@remix-run/react";
@@ -31,16 +33,20 @@ import {
   type CreateStickyHeaderDetail,
 } from "~/utils/useCreateStickyHeader";
 import {
-  DEFAULT_SITE_URL,
   OG_IMAGE_HEIGHT,
   OG_IMAGE_WIDTH,
-  SITE_NAME,
-  SITE_TAGLINE,
   absoluteUrl,
   organizationJsonLd,
   softwareAppJsonLd,
   websiteJsonLd,
 } from "~/utils/seo";
+import { getSiteConfig, toPublicSiteConfig } from "~/utils/site";
+
+export async function loader({ context }: LoaderFunctionArgs) {
+  // Fail-fast: missing SITE_* env throws here instead of serving stale brand.
+  const config = getSiteConfig(context.cloudflare.env);
+  return json({ site: toPublicSiteConfig(config) });
+}
 
 export const links: LinksFunction = () => [
   { rel: "stylesheet", href: stylesheet },
@@ -51,45 +57,46 @@ export const links: LinksFunction = () => [
   { rel: "manifest", href: "/site.webmanifest" },
 ];
 
-const OG_TITLE = `${SITE_NAME} — Sign-Up Sheets & Meeting Polls, No Account Needed`;
-const OG_DESCRIPTION = SITE_TAGLINE;
-
-export const meta: MetaFunction = () => {
-  const siteUrl = DEFAULT_SITE_URL;
+export const meta: MetaFunction<typeof loader> = ({ data }) => {
+  if (!data?.site) throw new Error("[config] Root loader must provide `site` (SITE_URL/SITE_NAME).");
+  const { site } = data;
+  const siteUrl = site.siteUrl;
+  const siteName = site.siteName;
+  const ogTitle = `${siteName} — Sign-Up Sheets & Meeting Polls, No Account Needed`;
   const ogImage = absoluteUrl("/og-cover.png", siteUrl);
   return [
     { charset: "utf-8" },
     { name: "viewport", content: "width=device-width, initial-scale=1" },
-    { title: OG_TITLE },
+    { title: ogTitle },
     {
       name: "description",
-      content:
-        "Free sign-up sheets and meeting polls. No accounts, no ads — create and share in seconds. A free Doodle and SignUpGenius alternative.",
+      content: site.siteDescription,
     },
     { tagName: "link", rel: "canonical", href: siteUrl + "/" },
     { name: "robots", content: "index, follow" },
     { name: "theme-color", content: "#ffffff" },
-    { name: "application-name", content: SITE_NAME },
+    { name: "application-name", content: siteName },
     // Open Graph
     { property: "og:type", content: "website" },
-    { property: "og:site_name", content: SITE_NAME },
-    { property: "og:title", content: OG_TITLE },
-    { property: "og:description", content: OG_DESCRIPTION },
+    { property: "og:site_name", content: siteName },
+    { property: "og:title", content: ogTitle },
+    { property: "og:description", content: site.siteTagline },
     { property: "og:url", content: siteUrl + "/" },
     { property: "og:image", content: ogImage },
     { property: "og:image:width", content: String(OG_IMAGE_WIDTH) },
     { property: "og:image:height", content: String(OG_IMAGE_HEIGHT) },
-    { property: "og:image:alt", content: "ManyMano — coordinate people without the chaos" },
+    { property: "og:image:alt", content: `${siteName} — coordinate people without the chaos` },
     { property: "og:locale", content: "en_US" },
     // Twitter
     { name: "twitter:card", content: "summary_large_image" },
-    { name: "twitter:title", content: OG_TITLE },
-    { name: "twitter:description", content: OG_DESCRIPTION },
+    { name: "twitter:title", content: ogTitle },
+    { name: "twitter:description", content: site.siteTagline },
     { name: "twitter:image", content: ogImage },
   ];
 };
 
 export default function App() {
+  const { site } = useLoaderData<typeof loader>();
   const navigation = useNavigation();
   const location = useLocation();
   const isLoading = navigation.state !== "idle";
@@ -127,9 +134,9 @@ export default function App() {
           type="application/ld+json"
           dangerouslySetInnerHTML={{
             __html: JSON.stringify([
-              organizationJsonLd(DEFAULT_SITE_URL),
-              websiteJsonLd(DEFAULT_SITE_URL),
-              softwareAppJsonLd(DEFAULT_SITE_URL),
+              organizationJsonLd(site.siteUrl, site.siteName, site.githubRepoUrl),
+              websiteJsonLd(site.siteUrl, site.siteName, site.siteTagline),
+              softwareAppJsonLd(site.siteUrl, site.siteName, site.siteDescription),
             ]),
           }}
         />
@@ -147,9 +154,8 @@ export default function App() {
                 <HeartHandshake className="w-5 h-5" aria-hidden="true" />
               </div>
               <div className="flex flex-col leading-none">
-                <span className="font-bold text-base tracking-tight">
-                  <span className="text-blue-600">Many</span>
-                  <span className="text-green-600">Mano</span>
+                <span className="font-bold text-base tracking-tight text-slate-900">
+                  {site.siteName}
                 </span>
                 <span className="hidden sm:block text-[11px] font-medium text-slate-500 tracking-tight">
                   Sign-up sheets & meeting polls
@@ -225,24 +231,21 @@ export default function App() {
             </nav>
           <div className="flex flex-col sm:flex-row items-center justify-between gap-4">
             <div className="flex items-center gap-2">
-              <span className="font-semibold">
-                <span className="text-blue-600">Many</span>
-                <span className="text-green-600">Mano</span>
-              </span>
+              <span className="font-semibold text-slate-900">{site.siteName}</span>
               <span>—</span>
-              <span>Free sign-up sheets & meeting polls. No accounts, no ads.</span>
+              <span>{site.siteTagline}</span>
             </div>
             <div className="flex items-center gap-5 text-slate-400">
               <a
-                href="https://gnkz.net"
+                href={site.footerCreditUrl}
                 target="_blank"
                 rel="noreferrer"
                 className="hover:text-slate-900 transition-colors font-medium text-slate-600"
               >
-                gnkz.net
+                {site.footerCreditLabel}
               </a>
               <a
-                href="https://github.com/gunkaragoz/ManyMano"
+                href={site.githubRepoUrl}
                 target="_blank"
                 rel="noreferrer"
                 aria-label="GitHub"

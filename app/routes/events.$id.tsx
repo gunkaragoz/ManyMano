@@ -1,8 +1,8 @@
-import type { ActionFunctionArgs, LoaderFunctionArgs, MetaFunction } from "@remix-run/cloudflare";
+import type { ActionFunctionArgs, HeadersFunction, LoaderFunctionArgs, MetaFunction } from "@remix-run/cloudflare";
 import { json, redirect } from "@remix-run/cloudflare";
-import { useLoaderData, useActionData, useNavigation, useSearchParams, Form } from "@remix-run/react";
+import { useLoaderData, useActionData, useNavigation, useSearchParams, useFetcher, Form } from "@remix-run/react";
 import { eq, and, inArray } from "drizzle-orm";
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect, useRef } from "react";
 import {
   ArrowRight,
   CalendarDays,
@@ -42,11 +42,12 @@ import Turnstile from "~/components/Turnstile";
 import DatePicker from "~/components/DatePicker";
 import { buildGoogleCalendarUrl, pickCalendarSlot, effectiveDateForSlot, formatSlotDateLabel, formatDurationLabel } from "~/utils/calendar";
 import {
-  SITE_NAME,
   mergeParentMeta,
   pageMetaOverrides,
+  rootSiteFromMatches,
   truncate,
 } from "~/utils/seo";
+import { getSiteConfig } from "~/utils/site";
 import {
   COMMENT_MAX,
   DESCRIPTION_MAX,
@@ -67,7 +68,10 @@ import {
 // only the deepest `meta` export, so merge parent descriptors (OG image,
 // twitter card, etc.) and override title/description/canonical/robots.
 export const meta: MetaFunction<typeof loader> = ({ data, matches }) => {
-  const fallbackTitle = `Event | ${SITE_NAME}`;
+  const site = rootSiteFromMatches(matches);
+  const siteName = site.siteName;
+  const siteUrl = site.siteUrl;
+  const fallbackTitle = `Event | ${siteName}`;
   const fallbackDescription =
     "View event details and respond. No account needed.";
   if (!data?.event) {
@@ -77,11 +81,12 @@ export const meta: MetaFunction<typeof loader> = ({ data, matches }) => {
         description: fallbackDescription,
         path: "/",
         robots: "noindex, nofollow",
+        siteUrl,
       }),
     ]);
   }
   const rawTitle = (data.event.title || "Untitled event").trim() || "Untitled event";
-  const title = truncate(`${rawTitle} | ${SITE_NAME}`, 70);
+  const title = truncate(`${rawTitle} | ${siteName}`, 70);
   const rawDesc =
     (data.event.description || "").trim() ||
     (data.event.type === "SIGNUP_SHEET"
@@ -94,6 +99,7 @@ export const meta: MetaFunction<typeof loader> = ({ data, matches }) => {
       description,
       path: `/events/${data.event.id}`,
       robots: "noindex, nofollow",
+      siteUrl,
     }),
   ]);
 };
@@ -125,13 +131,35 @@ function adminEventShape(e: typeof events.$inferSelect) {
   };
 }
 
+// Forward the loader's Cache-Control to the actual HTTP response. Remix
+// only propagates Set-Cookie from loader responses by default — without this
+// export, both `public, max-age=15` (initial loads) and `private, no-store`
+// (background `?poll=1` live-syncs) would be silently dropped, letting
+// browsers heuristically cache poll responses instead of hitting the origin.
+export const headers: HeadersFunction = ({ loaderHeaders }) => {
+  const headers = new Headers();
+  const cacheControl = loaderHeaders.get("Cache-Control");
+  if (cacheControl) headers.set("Cache-Control", cacheControl);
+  return headers;
+};
+
 export async function loader({ params, request, context }: LoaderFunctionArgs) {
   const env = context.cloudflare.env as {
     DB: D1Database;
-    RESEND_API_KEY?: string;
-    FROM_EMAIL?: string;
     TURNSTILE_SITE_KEY?: string;
+    SITE_URL: string;
+    SITE_NAME: string;
+    SITE_TAGLINE: string;
+    SITE_DESCRIPTION: string;
+    FROM_EMAIL: string;
+    GITHUB_REPO_URL: string;
+    FOOTER_CREDIT_URL: string;
+    FOOTER_CREDIT_LABEL: string;
+    SECURITY_CONTACT: string;
+    ICS_UID_DOMAIN: string;
+    ICS_PRODID: string;
   };
+  const site = getSiteConfig(env);
   const db = getDb(env.DB);
   const eventId = params.id;
 
@@ -157,6 +185,10 @@ export async function loader({ params, request, context }: LoaderFunctionArgs) {
   }
 
   const url = new URL(request.url);
+  // Background poll requests (`?poll=1` from the live-sync hook below) must
+  // always hit the origin: private/no-store so neither the browser HTTP cache
+  // (public max-age below) nor the CDN serves a stale roster/tallies snapshot.
+  const isPoll = url.searchParams.get("poll") === "1";
 
   // Self-serve cancellation via emailed ?cancel_token= (signup or poll vote).
   // Security: GET never mutates — it only validates the token and surfaces a
@@ -264,10 +296,12 @@ export async function loader({ params, request, context }: LoaderFunctionArgs) {
         pendingCancel,
         turnstileSiteKey: env.TURNSTILE_SITE_KEY ?? null,
         origin: url.origin,
+        siteName: site.siteName,
       },
       {
         headers: {
-          "Cache-Control": isAdmin || pendingCancel ? "private, no-store" : "public, max-age=15",
+          "Cache-Control":
+            isAdmin || pendingCancel || isPoll ? "private, no-store" : "public, max-age=15",
         },
       }
     );
@@ -334,10 +368,12 @@ export async function loader({ params, request, context }: LoaderFunctionArgs) {
         pendingCancel,
         turnstileSiteKey: env.TURNSTILE_SITE_KEY ?? null,
         origin: url.origin,
+        siteName: site.siteName,
       },
       {
         headers: {
-          "Cache-Control": isAdmin || pendingCancel ? "private, no-store" : "public, max-age=15",
+          "Cache-Control":
+            isAdmin || pendingCancel || isPoll ? "private, no-store" : "public, max-age=15",
         },
       }
     );
@@ -348,10 +384,22 @@ export async function action({ request, params, context }: ActionFunctionArgs) {
   const env = context.cloudflare.env as {
     DB: D1Database;
     RESEND_API_KEY?: string;
-    FROM_EMAIL?: string;
+    FROM_EMAIL: string;
+    SITE_URL: string;
+    SITE_NAME: string;
+    SITE_TAGLINE: string;
+    SITE_DESCRIPTION: string;
+    GITHUB_REPO_URL: string;
+    FOOTER_CREDIT_URL: string;
+    FOOTER_CREDIT_LABEL: string;
+    SECURITY_CONTACT: string;
+    ICS_UID_DOMAIN: string;
+    ICS_PRODID: string;
     TURNSTILE_SECRET_KEY?: string;
     TURNSTILE_HOSTNAMES?: string;
   };
+  // Fail-fast: FROM_EMAIL / SITE_NAME / ICS_* required — no fallback.
+  const site = getSiteConfig(env);
   const db = getDb(env.DB);
   const eventId = params.id;
 
@@ -489,10 +537,11 @@ export async function action({ request, params, context }: ActionFunctionArgs) {
         startTime: targetSlot.startTime,
         endTime: targetSlot.endTime,
         url: `${url.origin}/events/${eventId}`,
+        fallbackTitle: `${site.siteName} Event`,
       });
       await sendEmail({
         apiKey: env.RESEND_API_KEY,
-        from: env.FROM_EMAIL,
+        from: site.fromEmail,
         to: participantEmail,
         subject: `Confirmed: "${taskLabel}" for ${event.title}`,
         html: `
@@ -510,7 +559,7 @@ export async function action({ request, params, context }: ActionFunctionArgs) {
               <p style="margin: 0 0 10px 0; font-size: 13px;"><strong>Need to cancel?</strong></p>
               <a href="${escapeHtml(cancelUrl)}" style="color: #dc2626; font-size: 13px;">Cancel this sign-up</a>
             </div>
-            <p style="margin-top: 24px; font-weight: 600;">— ManyMano</p>
+            <p style="margin-top: 24px; font-weight: 600;">— ${escapeHtml(site.siteName)}</p>
           </div>
         `,
       });
@@ -565,6 +614,84 @@ export async function action({ request, params, context }: ActionFunctionArgs) {
       return json(f.body, { status: f.status });
     }
 
+    const voteSlots = await db.select().from(eventSlots).where(eq(eventSlots.eventId, eventId));
+    const clientVoteId = cleanText(formData.get("clientVoteId"), 32) || null;
+
+    // Identity: the browser remembers its own vote id (localStorage) and sends
+    // it back. Display names must be unique per event so two different "John"s
+    // (no email) can't silently overwrite each other. Same browser updates its
+    // own vote; same name + same non-empty email reclaims it (e.g. new device
+    // or cleared storage); otherwise a 409 tells the voter to pick another name.
+    const normName = participantName.trim().toLowerCase();
+    const normEmail = (participantEmail || "").trim().toLowerCase();
+    const existingVotes = await db.select().from(pollVotes).where(eq(pollVotes.eventId, eventId));
+
+    const saveEntries = async (pollVoteId: string) => {
+      for (const s of voteSlots) {
+        const resp = (formData.get(`slot_${s.id}`) as string) || "NO";
+        if (resp === "YES" || resp === "MAYBE") {
+          await db.insert(pollVoteEntries).values({
+            id: generateInternalId(),
+            pollVoteId,
+            slotId: s.id,
+            response: resp,
+          });
+        }
+      }
+    };
+
+    const takenMessage =
+      "That name already voted. If that's you, please vote from your original browser or device (or enter the same email address). Otherwise pick a different name, e.g. \"John S.\"";
+
+    if (clientVoteId) {
+      const ownVote = existingVotes.find((v) => v.id === clientVoteId);
+      if (ownVote) {
+        const renamedIntoTaken = existingVotes.some(
+          (v) => v.id !== ownVote.id && (v.participantName || "").trim().toLowerCase() === normName
+        );
+        if (renamedIntoTaken) {
+          return json({ error: takenMessage }, { status: 409 });
+        }
+        await db
+          .update(pollVotes)
+          .set({ participantName, participantEmail, updatedAt: now })
+          .where(eq(pollVotes.id, ownVote.id));
+        await db.delete(pollVoteEntries).where(eq(pollVoteEntries.pollVoteId, ownVote.id));
+        await saveEntries(ownVote.id);
+
+        return json({
+          success: true,
+          message: `Availability updated for ${participantName}!`,
+          voteId: ownVote.id,
+        });
+      }
+      // Unknown/stale id (e.g. vote deleted by admin): fall through to name checks.
+    }
+
+    const nameCollision = existingVotes.find(
+      (v) => (v.participantName || "").trim().toLowerCase() === normName
+    );
+    if (nameCollision) {
+      const reclaimable =
+        normEmail !== "" &&
+        (nameCollision.participantEmail || "").trim().toLowerCase() === normEmail;
+      if (reclaimable) {
+        await db
+          .update(pollVotes)
+          .set({ participantName, participantEmail, updatedAt: now })
+          .where(eq(pollVotes.id, nameCollision.id));
+        await db.delete(pollVoteEntries).where(eq(pollVoteEntries.pollVoteId, nameCollision.id));
+        await saveEntries(nameCollision.id);
+
+        return json({
+          success: true,
+          message: `Availability updated for ${participantName}!`,
+          voteId: nameCollision.id,
+        });
+      }
+      return json({ error: takenMessage }, { status: 409 });
+    }
+
     const voteId = generateInternalId();
     const editTokenPlain = generateSecretToken();
 
@@ -578,24 +705,13 @@ export async function action({ request, params, context }: ActionFunctionArgs) {
       updatedAt: now,
     });
 
-    const slots = await db.select().from(eventSlots).where(eq(eventSlots.eventId, eventId));
-    for (const s of slots) {
-      const resp = (formData.get(`slot_${s.id}`) as string) || "NO";
-      if (resp === "YES" || resp === "MAYBE") {
-        await db.insert(pollVoteEntries).values({
-          id: generateInternalId(),
-          pollVoteId: voteId,
-          slotId: s.id,
-          response: resp,
-        });
-      }
-    }
+    await saveEntries(voteId);
 
     if (participantEmail) {
       const manageUrl = `${url.origin}/events/${eventId}?cancel_token=${encodeURIComponent(editTokenPlain)}`;
       await sendEmail({
         apiKey: env.RESEND_API_KEY,
-        from: env.FROM_EMAIL,
+        from: site.fromEmail,
         to: participantEmail,
         subject: `Your vote for "${event.title}" is recorded`,
         html: `
@@ -608,7 +724,7 @@ export async function action({ request, params, context }: ActionFunctionArgs) {
       });
     }
 
-    return json({ success: true, message: `Availability recorded for ${participantName}!` });
+    return json({ success: true, message: `Availability recorded for ${participantName}!`, voteId });
   }
 
   // 3b. Delete poll vote (admin, or owner via emailed edit token)
@@ -870,12 +986,113 @@ function formatTime(t: string | null | undefined): string {
 }
 
 export default function EventView() {
-  const { event, slots, signups: initialSignups, isAdmin, adminToken, pollData, pendingCancel, turnstileSiteKey, origin } = useLoaderData<typeof loader>();
-  const actionData = useActionData<{ success?: boolean; message?: string; error?: string }>();
+  const {
+    event: serverEvent,
+    slots: serverSlots,
+    signups: serverSignups,
+    isAdmin,
+    adminToken,
+    pollData: serverPollData,
+    pendingCancel,
+    turnstileSiteKey,
+    origin,
+    siteName,
+  } = useLoaderData<typeof loader>();
+  const actionData = useActionData<{ success?: boolean; message?: string; error?: string; voteId?: string }>();
   const [searchParams] = useSearchParams();
   const navigation = useNavigation();
   const isSubmitting = navigation.state === "submitting";
   const cancelTokenParam = searchParams.get("cancel_token");
+
+  // ------------------------------------------------------------------
+  // Real-time sync (polling): re-run the event loader in the background
+  // with a useFetcher so rosters / tallies stay fresh while the page is
+  // open. No new infra: each poll is one loader read (~votes + entries +
+  // slots + event). Polls only while the tab is visible, back off to ~25s
+  // after 60s without interaction, and revalidate immediately after a save.
+  // ------------------------------------------------------------------
+  const pollFetcher = useFetcher<typeof loader>();
+  const pollFetcherRef = useRef(pollFetcher);
+  pollFetcherRef.current = pollFetcher;
+  const lastActivityRef = useRef(Date.now());
+  const lastPollRef = useRef(Date.now());
+  const prevNavStateRef = useRef(navigation.state);
+  const [lastSyncedAt, setLastSyncedAt] = useState<number | null>(null);
+
+  // Merging happens here so every consumer below (signup roster, poll
+  // matrix, tallies, consensus banner, finalize state) sees live data.
+  // Local draft state (userVotes, voterName) is untouched — only server
+  // snapshots are swapped.
+  const live = pollFetcher.data ?? null;
+  const event = live?.event ?? serverEvent;
+  const slots = live?.slots ?? serverSlots;
+  const initialSignups = live?.signups ?? serverSignups;
+  const pollData = live?.pollData ?? serverPollData;
+
+  useEffect(() => {
+    if (pollFetcher.data) setLastSyncedAt(Date.now());
+  }, [pollFetcher.data]);
+
+  // Any interaction marks the tab active again (drives the idle backoff).
+  useEffect(() => {
+    const markActive = () => {
+      lastActivityRef.current = Date.now();
+    };
+    const opts: AddEventListenerOptions = { passive: true };
+    window.addEventListener("mousemove", markActive, opts);
+    window.addEventListener("keydown", markActive, opts);
+    window.addEventListener("touchstart", markActive, opts);
+    window.addEventListener("click", markActive, opts);
+    window.addEventListener("scroll", markActive, opts);
+    return () => {
+      window.removeEventListener("mousemove", markActive);
+      window.removeEventListener("keydown", markActive);
+      window.removeEventListener("touchstart", markActive);
+      window.removeEventListener("click", markActive);
+      window.removeEventListener("scroll", markActive);
+    };
+  }, []);
+
+  useEffect(() => {
+    let stopped = false;
+    const pollUrl = `/events/${serverEvent.id}?poll=1`;
+    const tryPoll = () => {
+      if (stopped) return;
+      // Pause entirely while the tab is hidden — no wasted reads/requests.
+      if (typeof document !== "undefined" && document.hidden) return;
+      const f = pollFetcherRef.current;
+      if (f.state !== "idle") return;
+      const now = Date.now();
+      const idleFor = now - lastActivityRef.current;
+      // Active: ~7s cadence; idle (>60s no input): ~25s cadence.
+      const interval = idleFor > 60_000 ? 25_000 : 7_000;
+      if (now - lastPollRef.current < interval) return;
+      lastPollRef.current = now;
+      f.load(pollUrl);
+    };
+    // Tick faster than the cadence and gate on elapsed time, so the idle
+    // backoff switches without resetting timers.
+    const timer = window.setInterval(tryPoll, 2000);
+    document.addEventListener("visibilitychange", tryPoll);
+    return () => {
+      stopped = true;
+      window.clearInterval(timer);
+      document.removeEventListener("visibilitychange", tryPoll);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [serverEvent.id]);
+
+  // Revalidate immediately after any form save completes, so the author's
+  // own vote/signup (and concurrent admin edits) appear without waiting
+  // for the next poll tick.
+  useEffect(() => {
+    if (prevNavStateRef.current === "submitting" && navigation.state === "idle") {
+      lastPollRef.current = Date.now();
+      pollFetcherRef.current.load(`/events/${serverEvent.id}?poll=1`);
+    }
+    prevNavStateRef.current = navigation.state;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [navigation.state, serverEvent.id]);
 
   const justCreated = Boolean(searchParams.get("created"));
   const justCancelled = Boolean(searchParams.get("cancelled"));
@@ -889,6 +1106,46 @@ export default function EventView() {
   const [voterName, setVoterName] = useState("");
   const [voterEmail, setVoterEmail] = useState("");
   const [showAllVotesMobile, setShowAllVotesMobile] = useState(false);
+
+  // The browser remembers its own vote id so repeat saves update it instead
+  // of creating duplicates or clobbering a different person with the same name.
+  // Read in an effect (not the initializer) to avoid a hydration mismatch.
+  const voteStorageKey = `mm_poll_vote_${event.id}`;
+  const [clientVoteId, setClientVoteId] = useState<string | null>(null);
+  useEffect(() => {
+    try {
+      const stored = window.localStorage.getItem(voteStorageKey);
+      if (!stored) return;
+      setClientVoteId(stored);
+      const own = pollData?.votes.find((v) => v.id === stored);
+      if (own) {
+        setVoterName((prev) => prev || own.participantName);
+        const next: Record<string, "NO" | "YES" | "MAYBE"> = {};
+        Object.entries(own.responses).forEach(([slotId, resp]) => {
+          if (resp === "YES" || resp === "MAYBE") next[slotId] = resp;
+        });
+        setUserVotes((prev) => (Object.keys(prev).length === 0 ? next : prev));
+      }
+    } catch {
+      // private mode / blocked storage: voting still works, just no prefill
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Remember our vote id after a successful save.
+  useEffect(() => {
+    if (actionData?.success && actionData?.voteId) {
+      try {
+        window.localStorage.setItem(voteStorageKey, actionData.voteId);
+      } catch {
+        // ignore storage failures
+      }
+      setClientVoteId(actionData.voteId);
+    }
+  }, [actionData, voteStorageKey]);
+
+  const ownVote =
+    clientVoteId && pollData ? pollData.votes.find((v) => v.id === clientVoteId) ?? null : null;
 
   const cycleSlotVote = (slotId: string) => {
     const current = userVotes[slotId] || "NO";
@@ -1072,8 +1329,31 @@ export default function EventView() {
       startTime: calendarSlot?.startTime ?? null,
       endTime: calendarSlot?.endTime ?? null,
       url: origin ? `${origin}/events/${event.id}` : null,
+      fallbackTitle: `${siteName} Event`,
     });
-  }, [event.title, event.description, event.location, event.eventDate, event.id, calendarSlot, origin]);
+  }, [event.title, event.description, event.location, event.eventDate, event.id, calendarSlot, origin, siteName]);
+
+  // Live-sync badge: SSR-safe (no Date.now() in render — lastSyncedAt is only
+  // ever set client-side after a poll resolves, so server HTML matches).
+  const syncing = pollFetcher.state !== "idle";
+  const liveBadgeTitle = lastSyncedAt
+    ? `Auto-updates every few seconds. Last synced ${new Date(lastSyncedAt).toLocaleTimeString()}.`
+    : "Auto-updates every few seconds while this tab is visible.";
+  const liveBadge = (
+    <span
+      title={liveBadgeTitle}
+      aria-live="off"
+      className="inline-flex items-center gap-1.5 text-[11px] font-semibold text-green-700 bg-green-50 border border-green-200 px-2.5 py-1 rounded-full"
+    >
+      <span className="relative flex h-2 w-2">
+        <span
+          className={`absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75 ${syncing ? "animate-ping" : "animate-pulse"}`}
+        />
+        <span className="relative inline-flex rounded-full h-2 w-2 bg-green-500" />
+      </span>
+      Live{syncing ? " · syncing…" : ""}
+    </span>
+  );
 
   return (
     <div className="space-y-10 py-2">
@@ -1654,7 +1934,10 @@ export default function EventView() {
       {event.type === "SIGNUP_SHEET" && (
         <div className="space-y-6">
           <div className="flex items-center justify-between px-1">
-            <h2 className="text-xl font-bold text-slate-900 tracking-tight">Available Shifts & Tasks</h2>
+            <h2 className="text-xl font-bold text-slate-900 tracking-tight inline-flex items-center gap-2">
+              Available Shifts & Tasks
+              {liveBadge}
+            </h2>
             <span className="text-xs font-medium text-slate-500">
               {initialSignups.length} confirmed {initialSignups.length === 1 ? "signup" : "signups"}
             </span>
@@ -1875,14 +2158,17 @@ export default function EventView() {
                 <h3 className="font-bold text-slate-900 text-base">
                   {event.status === "FINALIZED" ? "Results" : "Vote your availability"}
                 </h3>
-                <p className="text-xs text-slate-500 mt-0.5">
-                  {pollData.votes.length} {pollData.votes.length === 1 ? "response" : "responses"} so far
+                <p className="text-xs text-slate-500 mt-0.5 flex items-center gap-2 flex-wrap">
+                  <span>
+                    {pollData.votes.length} {pollData.votes.length === 1 ? "response" : "responses"} so far
                   {event.status !== "FINALIZED" && (
                     <span className="hidden sm:inline"> · Tap a cell to cycle No → Yes → If need be</span>
                   )}
                   {event.status !== "FINALIZED" && (
                     <span className="sm:hidden"> · Tap an option below</span>
                   )}
+                  </span>
+                  {liveBadge}
                 </p>
               </div>
               {event.status !== "FINALIZED" && (
@@ -1936,6 +2222,11 @@ export default function EventView() {
                     className="w-full text-sm px-4 py-3.5 rounded-2xl border border-slate-200 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 min-h-[52px]"
                   />
                 </div>
+                <p className="text-[11px] text-slate-500 sm:col-span-2">
+                  {ownVote
+                    ? `You're updating your previous vote as ${ownVote.participantName}.`
+                    : "Your vote is remembered in this browser — saving again updates it. Names must be unique: if your name is taken, use e.g. \"John S.\""}
+                </p>
               </div>
             )}
 
@@ -2331,6 +2622,7 @@ export default function EventView() {
                   }}
                 >
                   <input type="hidden" name="intent" value="vote_poll" />
+                  <input type="hidden" name="clientVoteId" value={clientVoteId || ""} />
                   <input type="hidden" name="participantName" value={voterName} />
                   <input type="hidden" name="participantEmail" value={voterEmail} />
 
@@ -2355,7 +2647,7 @@ export default function EventView() {
                       disabled={isSubmitting}
                       className="w-full sm:w-auto min-h-[52px] px-7 py-3.5 bg-blue-600 hover:bg-blue-700 text-white rounded-2xl text-sm font-bold shadow-sm transition-all hover:scale-[1.02] active:scale-[0.98] disabled:opacity-50 inline-flex items-center justify-center gap-2"
                     >
-                      {isSubmitting ? "Saving..." : <>Save My Availability <ArrowRight className="w-4 h-4" /></>}
+                      {isSubmitting ? "Saving..." : <>{ownVote ? "Update My Availability" : "Save My Availability"} <ArrowRight className="w-4 h-4" /></>}
                     </button>
                   </div>
                 </Form>

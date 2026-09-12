@@ -52,10 +52,20 @@ Paste the returned `database_id` into your `wrangler.toml`.
 npx wrangler d1 migrations apply manymano-db --remote
 ```
 
-### Step 4 (Optional): Configure Email
-In your Cloudflare Pages project settings, add an environment variable:
+### Step 4 (Required): Configure branding, domain & email
+In your Cloudflare Pages project settings (Settings → Environment variables),
+set **every** variable from `.env.sample` — the app throws at request time
+when any is missing (no hardcoded fallbacks, so a fork can never silently
+serve the old defaults):
+- `SITE_URL`, `SITE_NAME`, `SITE_TAGLINE`, `SITE_DESCRIPTION`
+- `FROM_EMAIL` (e.g. `YourName <no-reply@mail.yourdomain.com>`)
+- `GITHUB_REPO_URL`, `FOOTER_CREDIT_URL`, `FOOTER_CREDIT_LABEL`
+- `SECURITY_CONTACT`, `ICS_UID_DOMAIN`, `ICS_PRODID`
+
+### Step 5 (Optional): Configure integrations
 - `RESEND_API_KEY`: Your API key from [resend.com](https://resend.com).
 *(If omitted, ManyMano continues to work smoothly using direct in-browser `.ics` calendar downloads and direct tokenized links!)*
+- `TURNSTILE_SITE_KEY` / `TURNSTILE_SECRET_KEY` / `TURNSTILE_HOSTNAMES`: Cloudflare Turnstile bot protection. If the secret is omitted, verification is skipped (handy for local dev).
 
 ---
 
@@ -65,10 +75,15 @@ In your Cloudflare Pages project settings, add an environment variable:
 # 1. Install dependencies
 pnpm install
 
-# 2. Run local D1 migrations
+# 2. Copy the env template (required — the app fail-fasts on missing vars)
+cp .env.sample .dev.vars
+# Then set SITE_URL in .dev.vars to your local URL. The dev server port
+# follows SITE_URL automatically — just run `pnpm run dev` and open it.
+
+# 3. Run local D1 migrations
 pnpm run db:migrate:local
 
-# 3. Start local development server
+# 4. Start local development server
 pnpm run dev
 ```
 

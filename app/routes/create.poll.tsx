@@ -31,23 +31,27 @@ import {
   normalizeTimezone,
 } from "~/utils/validation";
 import { pruneExpiredEvents } from "~/utils/retention";
+import { getSiteConfig } from "~/utils/site";
 import { addMinutesToTimeString, formatSlotDateLabel, formatDurationLabel } from "~/utils/calendar";
 import {
-  PAGE_META,
+  getPageMeta,
   breadcrumbJsonLd,
   mergeParentMeta,
   pageMetaOverrides,
+  rootSiteFromMatches,
 } from "~/utils/seo";
 
 export const meta: MetaFunction = ({ matches }) => {
+  const site = rootSiteFromMatches(matches);
+  const page = getPageMeta(site.siteName).createPoll;
   return mergeParentMeta(matches, [
-    ...pageMetaOverrides(PAGE_META.createPoll),
+    ...pageMetaOverrides({ ...page, siteUrl: site.siteUrl }),
     {
       "script:ld+json": breadcrumbJsonLd([
         { name: "Home", path: "/" },
         { name: "Create", path: "/create" },
         { name: "Meeting Poll", path: "/create/poll" },
-      ]),
+      ], site.siteUrl),
     },
   ]);
 };
@@ -76,10 +80,21 @@ export async function action({ request, context }: ActionFunctionArgs) {
   const env = context.cloudflare.env as {
     DB: D1Database;
     RESEND_API_KEY?: string;
-    FROM_EMAIL?: string;
+    FROM_EMAIL: string;
+    SITE_URL: string;
+    SITE_NAME: string;
+    SITE_TAGLINE: string;
+    SITE_DESCRIPTION: string;
+    GITHUB_REPO_URL: string;
+    FOOTER_CREDIT_URL: string;
+    FOOTER_CREDIT_LABEL: string;
+    SECURITY_CONTACT: string;
+    ICS_UID_DOMAIN: string;
+    ICS_PRODID: string;
     TURNSTILE_SECRET_KEY?: string;
     TURNSTILE_HOSTNAMES?: string;
   };
+  const site = getSiteConfig(env);
   const db = getDb(env.DB);
   try {
     await pruneExpiredEvents(db);
@@ -248,7 +263,7 @@ export async function action({ request, context }: ActionFunctionArgs) {
 
   await sendEmail({
     apiKey: env.RESEND_API_KEY,
-    from: env.FROM_EMAIL,
+    from: site.fromEmail,
     to: organizerEmail,
     subject: `Your meeting poll: "${title}" is live!`,
     html: `
@@ -264,7 +279,7 @@ export async function action({ request, context }: ActionFunctionArgs) {
         <ul>${proposedList}</ul>
         ${moreCount}
         <p style="font-size: 13px; color: #64748b;">Use your secret management link to see live vote tallies, lock the winning time, and generate calendar invites. You can delete it anytime from Organizer Admin Mode.</p>
-        <p style="margin-top: 24px; font-weight: 600;">— ManyMano</p>
+        <p style="margin-top: 24px; font-weight: 600;">— ${escapeHtml(site.siteName)}</p>
       </div>
     `,
   });

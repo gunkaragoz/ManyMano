@@ -1,23 +1,24 @@
 import type { LoaderFunctionArgs } from "@remix-run/cloudflare";
-import {
-  DEFAULT_SITE_URL,
-  SITE_NAME,
-  SITE_TAGLINE,
-  absoluteUrl,
-} from "~/utils/seo";
+import { absoluteUrl } from "~/utils/seo";
+import { getSiteConfig } from "~/utils/site";
 
-export async function loader({ request }: LoaderFunctionArgs) {
+export async function loader({ request, context }: LoaderFunctionArgs) {
   void request;
+  const site = getSiteConfig(context.cloudflare.env);
+  const siteUrl = site.siteUrl;
+  const siteName = site.siteName;
+  const siteTagline = site.siteTagline;
+  const githubRepoUrl = site.githubRepoUrl;
 
   const link = (label: string, path: string) =>
-    `- [${label}](${absoluteUrl(path, DEFAULT_SITE_URL)})`;
+    `- [${label}](${absoluteUrl(path, siteUrl)})`;
 
   const body = [
-    `# ${SITE_NAME}`,
+    `# ${siteName}`,
     "",
-    `> ${SITE_TAGLINE}`,
+    `> ${siteTagline}`,
     "",
-    `${SITE_NAME} is an open-source, free-forever web tool for coordinating people. Organizers create sign-up sheets (volunteer shifts, potluck lists, task sign-ups) and meeting time polls (consensus grids), then share a public link. Participants respond with just a name — no account required. Events are unlisted and excluded from search engines.`,
+    `${siteName} is an open-source, free-forever web tool for coordinating people. Organizers create sign-up sheets (volunteer shifts, potluck lists, task sign-ups) and meeting time polls (consensus grids), then share a public link. Participants respond with just a name — no account required. Events are unlisted and excluded from search engines.`,
     "",
     "## Features",
     "",
@@ -33,7 +34,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     link("Create a sign-up sheet", "/create/signup"),
     link("Create a meeting poll", "/create/poll"),
     link("How it works", "/create"),
-    "- [GitHub](https://github.com/gunkaragoz/ManyMano)",
+    `- [GitHub](${githubRepoUrl})`,
     "",
   ].join("\n");
 

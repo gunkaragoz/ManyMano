@@ -225,6 +225,8 @@ function formatDateForGoogleAllDay(date: Date): string {
  * Opens calendar.google.com with the event pre-filled — no file download,
  * works on desktop + mobile, signed-in or not (prompts sign-in as needed).
  * When no date is known the `dates` param is omitted so Google opens a draft.
+ *
+ * `fallbackTitle` is required (pass `${siteName} Event`) — no hardcoded brand.
  */
 export function buildGoogleCalendarUrl(event: {
   title: string;
@@ -234,10 +236,12 @@ export function buildGoogleCalendarUrl(event: {
   startTime?: string | null;
   endTime?: string | null;
   url?: string | null;
+  fallbackTitle: string;
 }): string {
+  if (!event.fallbackTitle) throw new Error("[config] buildGoogleCalendarUrl requires fallbackTitle.");
   const params = new URLSearchParams();
   params.set("action", "TEMPLATE");
-  params.set("text", event.title || "ManyMano Event");
+  params.set("text", event.title || event.fallbackTitle);
 
   const resolved = resolveEventDates({
     eventDate: event.eventDate,
@@ -298,7 +302,10 @@ function foldICSLine(line: string): string {
   return parts.join("\r\n");
 }
 
-export function generateICS(event: CalendarEventParams): string {
+export function generateICS(event: CalendarEventParams & { prodid: string; uidDomain: string; fallbackTitle: string }): string {
+  if (!event.prodid) throw new Error("[config] generateICS requires prodid (ICS_PRODID).");
+  if (!event.uidDomain) throw new Error("[config] generateICS requires uidDomain (ICS_UID_DOMAIN).");
+  if (!event.fallbackTitle) throw new Error("[config] generateICS requires fallbackTitle.");
   const now = new Date();
   const dtStamp = formatDateToICS(now);
 
@@ -326,7 +333,7 @@ export function generateICS(event: CalendarEventParams): string {
     }
   }
 
-  const cleanTitle = (event.title || "ManyMano Event").replace(/\r\n|\r|\n/g, " ");
+  const cleanTitle = (event.title || event.fallbackTitle).replace(/\r\n|\r|\n/g, " ");
 
   const descriptionParts: string[] = [];
   if (event.description?.trim()) descriptionParts.push(event.description.trim());
@@ -335,11 +342,11 @@ export function generateICS(event: CalendarEventParams): string {
   const rawLines: string[] = [
     "BEGIN:VCALENDAR",
     "VERSION:2.0",
-    "PRODID:-//ManyMano//Open Source Scheduling//EN",
+    event.prodid,
     "CALSCALE:GREGORIAN",
     "METHOD:PUBLISH",
     "BEGIN:VEVENT",
-    `UID:${event.uid}@manymano`,
+    `UID:${event.uid}@${event.uidDomain}`,
     `DTSTAMP:${dtStamp}`,
   ];
 

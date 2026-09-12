@@ -1,18 +1,43 @@
 import type { MetaFunction } from "@remix-run/cloudflare";
-import { Link } from "@remix-run/react";
+import { Link, useLoaderData } from "@remix-run/react";
 import { ArrowRight, CalendarDays, Check, ClipboardList } from "lucide-react";
-import { HOME_FAQ, faqPageJsonLd, mergeParentMeta } from "~/utils/seo";
+import { getHomeFaq, faqPageJsonLd, mergeParentMeta, rootSiteFromMatches } from "~/utils/seo";
+import type { FaqItem } from "~/utils/seo";
+import { getSiteConfig, toPublicSiteConfig } from "~/utils/site";
+import { json } from "@remix-run/cloudflare";
+import type { LoaderFunctionArgs } from "@remix-run/cloudflare";
+
+// Brand-specific extras live here (route-level), not in getHomeFaq(),
+// so forks with a different SITE_NAME keep a clean generic FAQ.
+function getFaqForSite(siteName: string): FaqItem[] {
+  const faq = getHomeFaq(siteName);
+  if (siteName.toLowerCase() === "manymano") {
+    faq.push({
+      question: "What does ManyMano mean?",
+      answer:
+        "Mano means hand in Spanish. ManyMano is phonetically playful and grammatically imperfect on purpose — it captures the idea of coordinating many hands in one place.",
+    });
+  }
+  return faq;
+}
+
+export async function loader({ context }: LoaderFunctionArgs) {
+  const config = getSiteConfig(context.cloudflare.env);
+  return json({ site: toPublicSiteConfig(config), faq: getFaqForSite(config.siteName) });
+}
 
 // Remix renders only the deepest `meta` export, so merge parent (root)
 // descriptors and just append the home-only FAQ JSON-LD. Without this the
 // homepage would lose its <title>, description, OG tags and canonical.
-export const meta: MetaFunction = ({ matches }) => {
+export const meta: MetaFunction<typeof loader> = ({ data, matches }) => {
+  const faq = data?.faq ?? getFaqForSite(rootSiteFromMatches(matches).siteName);
   return mergeParentMeta(matches, [
-    { "script:ld+json": faqPageJsonLd(HOME_FAQ) },
+    { "script:ld+json": faqPageJsonLd(faq) },
   ]);
 };
 
 export default function Index() {
+  const { faq, site } = useLoaderData<typeof loader>();
   return (
     <div className="space-y-16 py-4 md:py-8">
       {/* Hero Section */}
@@ -31,7 +56,7 @@ export default function Index() {
         </h1>
 
         <p className="text-base sm:text-lg text-slate-600 leading-relaxed max-w-xl mx-auto font-normal">
-          Create sign-up sheets and meeting polls in seconds.
+          {site.siteTagline}
         </p>
       </div>
 
@@ -138,7 +163,7 @@ export default function Index() {
           Frequently Asked Questions
         </h2>
         <div className="mt-8 space-y-4">
-          {HOME_FAQ.map((item) => (
+          {faq.map((item) => (
             <details
               key={item.question}
               className="group bg-white border border-slate-200/80 rounded-2xl px-6 py-4 shadow-[0_2px_12px_rgba(0,0,0,0.03)] open:border-blue-200 transition-colors"

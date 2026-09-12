@@ -4,10 +4,13 @@ import { getDb, events, eventSlots } from "~/db";
 import { generateICS, pickCalendarSlot, effectiveDateForSlot } from "~/utils/calendar";
 import { getPresentedAdminToken, secretMatches } from "~/utils/auth";
 import { isExpired, pruneExpiredEvents } from "~/utils/retention";
+import { getSiteConfig } from "~/utils/site";
 
 export async function loader({ params, request, context }: LoaderFunctionArgs) {
-  const env = context.cloudflare.env as { DB: D1Database };
-  const db = getDb(env.DB);
+  const env = context.cloudflare.env;
+  // Fail-fast: ICS_PRODID / ICS_UID_DOMAIN / SITE_NAME required — no fallback.
+  const site = getSiteConfig(env);
+  const db = getDb((env as { DB: D1Database }).DB);
   const eventId = params.id;
 
   if (!eventId) {
@@ -52,6 +55,9 @@ export async function loader({ params, request, context }: LoaderFunctionArgs) {
     organizerName: event.organizerName,
     organizerEmail: isAdmin ? event.organizerEmail : null,
     url: `${origin}/events/${eventId}`,
+    prodid: site.icsProdid,
+    uidDomain: site.icsUidDomain,
+    fallbackTitle: `${site.siteName} Event`,
   });
 
   return new Response(icsContent, {

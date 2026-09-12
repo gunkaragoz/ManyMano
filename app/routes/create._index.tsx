@@ -2,20 +2,23 @@ import type { MetaFunction } from "@remix-run/cloudflare";
 import { Link } from "@remix-run/react";
 import { ArrowRight, CalendarDays, ClipboardList } from "lucide-react";
 import {
-  PAGE_META,
+  getPageMeta,
   breadcrumbJsonLd,
   mergeParentMeta,
   pageMetaOverrides,
+  rootSiteFromMatches,
 } from "~/utils/seo";
 
 export const meta: MetaFunction = ({ matches }) => {
+  const site = rootSiteFromMatches(matches);
+  const page = getPageMeta(site.siteName).createChooser;
   return mergeParentMeta(matches, [
-    ...pageMetaOverrides(PAGE_META.createChooser),
+    ...pageMetaOverrides({ ...page, siteUrl: site.siteUrl }),
     {
       "script:ld+json": breadcrumbJsonLd([
         { name: "Home", path: "/" },
         { name: "Create", path: "/create" },
-      ]),
+      ], site.siteUrl),
     },
   ]);
 };

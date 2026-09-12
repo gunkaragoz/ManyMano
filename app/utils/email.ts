@@ -1,16 +1,15 @@
 export interface SendEmailParams {
   apiKey?: string;
-  from?: string;
+  /** Required — caller must pass the configured FROM_EMAIL. No fallback. */
+  from: string;
   to: string;
   subject: string;
   html: string;
 }
 
-export const DEFAULT_FROM = "ManyMano <no-reply@mail.manymano.com>";
-
 export async function sendEmail({
   apiKey,
-  from = DEFAULT_FROM,
+  from,
   to,
   subject,
   html,

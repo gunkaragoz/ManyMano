@@ -1,5 +1,6 @@
 import type { LoaderFunctionArgs } from "@remix-run/cloudflare";
-import { DEFAULT_SITE_URL, absoluteUrl } from "~/utils/seo";
+import { absoluteUrl } from "~/utils/seo";
+import { getSiteConfig } from "~/utils/site";
 
 type SitemapEntry = {
   path: string;
@@ -14,9 +15,9 @@ const ENTRIES: SitemapEntry[] = [
   { path: "/create/poll", changefreq: "monthly", priority: "0.9" },
 ];
 
-export async function loader({ request }: LoaderFunctionArgs) {
+export async function loader({ request, context }: LoaderFunctionArgs) {
   void request;
-  const siteUrl = DEFAULT_SITE_URL;
+  const { siteUrl } = getSiteConfig(context.cloudflare.env);
   const today = new Date().toISOString().split("T")[0];
   const urls = ENTRIES.map(
     (e) => `  <url>
