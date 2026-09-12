@@ -263,6 +263,7 @@ export async function loader({ params, request, context }: LoaderFunctionArgs) {
         pollData: null,
         pendingCancel,
         turnstileSiteKey: env.TURNSTILE_SITE_KEY ?? null,
+        origin: url.origin,
       },
       {
         headers: {
@@ -332,6 +333,7 @@ export async function loader({ params, request, context }: LoaderFunctionArgs) {
         },
         pendingCancel,
         turnstileSiteKey: env.TURNSTILE_SITE_KEY ?? null,
+        origin: url.origin,
       },
       {
         headers: {
@@ -868,7 +870,7 @@ function formatTime(t: string | null | undefined): string {
 }
 
 export default function EventView() {
-  const { event, slots, signups: initialSignups, isAdmin, adminToken, pollData, pendingCancel, turnstileSiteKey } = useLoaderData<typeof loader>();
+  const { event, slots, signups: initialSignups, isAdmin, adminToken, pollData, pendingCancel, turnstileSiteKey, origin } = useLoaderData<typeof loader>();
   const actionData = useActionData<{ success?: boolean; message?: string; error?: string }>();
   const [searchParams] = useSearchParams();
   const navigation = useNavigation();
@@ -1045,9 +1047,14 @@ export default function EventView() {
     return groups;
   }, [slots]);
 
-  // Calendar: winning slot first, else earliest timed slot. Times combine with
-  // event.eventDate inside the calendar utils. The Google link is a one-click
-  // template (no file download); the .ics download covers Apple/Outlook.
+  // SSR-safe absolute links: `origin` comes from the loader (request URL),
+  // so server and client render identical hrefs/values (no hydration
+  // mismatch). Never use window.location directly in render.
+  const publicLink = `${origin}/events/${event.id}`;
+  const adminLink = useMemo(() => {
+    const qs = searchParams.toString();
+    return `${origin}/events/${event.id}${qs ? `?${qs}` : ""}`;
+  }, [origin, searchParams, event.id]);
   const calendarSlot = useMemo(
     () => pickCalendarSlot(slots, event.winningSlotId),
     [slots, event.winningSlotId]
@@ -1057,7 +1064,6 @@ export default function EventView() {
       ? `/events/${event.id}/ics?admin=${encodeURIComponent(adminToken)}`
       : `/events/${event.id}/ics`;
   const googleCalendarHref = useMemo(() => {
-    const origin = typeof window !== "undefined" ? window.location.origin : "";
     return buildGoogleCalendarUrl({
       title: event.title,
       description: event.description,
@@ -1067,7 +1073,7 @@ export default function EventView() {
       endTime: calendarSlot?.endTime ?? null,
       url: origin ? `${origin}/events/${event.id}` : null,
     });
-  }, [event.title, event.description, event.location, event.eventDate, event.id, calendarSlot]);
+  }, [event.title, event.description, event.location, event.eventDate, event.id, calendarSlot, origin]);
 
   return (
     <div className="space-y-10 py-2">
@@ -1093,7 +1099,7 @@ export default function EventView() {
                 <input
                   type="text"
                   readOnly
-                  value={`${typeof window !== "undefined" ? window.location.origin : ""}/events/${event.id}`}
+                  value={publicLink}
                   className="w-full bg-white px-3 py-2 rounded-xl border border-slate-200 text-xs font-mono text-slate-600 select-all"
                   onClick={(e) => (e.target as HTMLInputElement).select()}
                 />
@@ -1101,7 +1107,7 @@ export default function EventView() {
                   type="button"
                   onClick={() =>
                     copyToClipboard(
-                      `${typeof window !== "undefined" ? window.location.origin : ""}/events/${event.id}`,
+                      publicLink,
                       "public"
                     )
                   }
@@ -1124,14 +1130,14 @@ export default function EventView() {
                 <input
                   type="text"
                   readOnly
-                  value={typeof window !== "undefined" ? window.location.href : ""}
+                  value={adminLink}
                   className="w-full bg-white px-3 py-2 rounded-xl border border-amber-200 text-xs font-mono text-amber-800 select-all"
                   onClick={(e) => (e.target as HTMLInputElement).select()}
                 />
                 <button
                   type="button"
                   onClick={() =>
-                    copyToClipboard(typeof window !== "undefined" ? window.location.href : "", "admin")
+                    copyToClipboard(adminLink, "admin")
                   }
                   className="px-3.5 py-2 rounded-2xl bg-slate-900 hover:bg-slate-800 text-white text-xs font-semibold shrink-0 transition-colors shadow-sm inline-flex items-center gap-1.5"
                 >
@@ -1291,7 +1297,7 @@ export default function EventView() {
             type="button"
             onClick={() =>
               copyToClipboard(
-                `${typeof window !== "undefined" ? window.location.origin : ""}/events/${event.id}`,
+                publicLink,
                 "share"
               )
             }
@@ -1956,92 +1962,90 @@ export default function EventView() {
                 const rawTitle = (s.title || "").trim();
                 const customLabel = rawTitle && rawTitle !== autoTitle ? s.title : "";
                 return (
-                  <div key={s.id} className={`p-5 space-y-4 ${isWinning ? "bg-purple-50/50" : ""}`}>
-                    <div className="flex items-start justify-between gap-3">
-                      <div className="min-w-0">
-                        <div className="text-[11px] font-bold uppercase tracking-wider text-slate-500">
+                  <div key={s.id} className={`px-3 py-2 space-y-1.5 ${isWinning ? "bg-purple-50/50" : ""}`}>
+                    <div className="min-w-0">
+                      <div className="flex items-center gap-x-1.5 gap-y-1 min-w-0 flex-wrap">
+                        <span className="text-[10px] font-bold uppercase tracking-wider text-slate-500 shrink-0">
                           {dayLabel}
-                        </div>
-                        <div className="font-extrabold text-slate-900 text-lg leading-tight mt-0.5">
+                        </span>
+                        <span className="font-bold text-slate-900 text-sm leading-tight truncate">
                           {timeLabel}
-                        </div>
-                        {customLabel && (
-                          <div className="text-xs text-slate-500 mt-0.5 truncate">{customLabel}</div>
-                        )}
-                        <div className="flex items-center gap-2 mt-2 flex-wrap">
-                          <span className="inline-flex items-center gap-1 text-xs font-bold text-green-700 bg-green-50 border border-green-200 px-2.5 py-1 rounded-full">
-                            <Check className="w-3 h-3" /> {t.yes} Yes
+                        </span>
+                        <span className="inline-flex items-center gap-0.5 text-[11px] font-bold text-green-700 bg-green-50 border border-green-200 px-1.5 py-px rounded-full shrink-0">
+                          <Check className="w-3 h-3" /> {t.yes} Yes
+                        </span>
+                        {t.maybe > 0 && (
+                          <span className="inline-flex items-center text-[10px] font-semibold text-amber-800 bg-amber-50 border border-amber-200 px-1.5 py-px rounded-full shrink-0">
+                            +{t.maybe}
                           </span>
-                          {t.maybe > 0 && (
-                            <span className="inline-flex items-center text-xs font-semibold text-amber-800 bg-amber-50 border border-amber-200 px-2.5 py-1 rounded-full">
-                              +{t.maybe} If need be
-                            </span>
-                          )}
-                          {isTop && pollData.votes.length > 0 && (
-                            <span className="inline-flex items-center gap-1 text-[11px] font-bold text-blue-700 bg-blue-50 border border-blue-200 px-2.5 py-1 rounded-full">
-                              <Star className="w-3 h-3" /> Leader
-                            </span>
-                          )}
-                          {isWinning && (
-                            <span className="inline-flex items-center gap-1 text-[11px] font-bold text-purple-800 bg-purple-100 border border-purple-200 px-2.5 py-1 rounded-full">
-                              <Trophy className="w-3 h-3" /> Final
-                            </span>
-                          )}
-                        </div>
+                        )}
+                        {isTop && pollData.votes.length > 0 && (
+                          <span className="inline-flex items-center gap-0.5 text-[10px] font-bold text-blue-700 bg-blue-50 border border-blue-200 px-1.5 py-px rounded-full shrink-0">
+                            <Star className="w-3 h-3" /> Leader
+                          </span>
+                        )}
+                        {isWinning && (
+                          <span className="inline-flex items-center gap-0.5 text-[10px] font-bold text-purple-800 bg-purple-100 border border-purple-200 px-1.5 py-px rounded-full shrink-0">
+                            <Trophy className="w-3 h-3" /> Final
+                          </span>
+                        )}
                       </div>
+                      {customLabel && (
+                        <div className="text-[11px] text-slate-500 truncate mt-0.5">{customLabel}</div>
+                      )}
                     </div>
 
                     {event.status !== "FINALIZED" ? (
                       <div
                         role="group"
                         aria-label={`Your availability for ${slotDayLabel[s.id]} ${timeLabel}`}
-                        className="grid grid-cols-3 gap-2"
+                        className="grid grid-cols-3 gap-1.5"
                       >
                         <button
                           type="button"
                           aria-pressed={cur === "YES"}
                           onClick={() => setSlotVote(s.id, "YES")}
-                          className={`min-h-[56px] rounded-2xl border-2 font-bold text-sm transition-all active:scale-[0.97] inline-flex flex-col items-center justify-center gap-0.5 ${
+                          className={`min-h-[36px] rounded-xl border font-bold text-xs transition-all active:scale-[0.97] inline-flex items-center justify-center gap-1 ${
                             cur === "YES"
-                              ? "bg-green-600 border-green-600 text-white shadow-md"
+                              ? "bg-green-600 border-green-600 text-white shadow-sm"
                               : "bg-white border-slate-200 text-slate-500 hover:border-green-400 hover:text-green-700"
                           }`}
                         >
-                          <Check className="w-5 h-5" />
+                          <Check className="w-3.5 h-3.5" />
                           Yes
                         </button>
                         <button
                           type="button"
                           aria-pressed={cur === "MAYBE"}
                           onClick={() => setSlotVote(s.id, "MAYBE")}
-                          className={`min-h-[56px] rounded-2xl border-2 font-bold text-sm transition-all active:scale-[0.97] inline-flex flex-col items-center justify-center gap-0.5 ${
+                          className={`min-h-[36px] rounded-xl border font-bold text-xs transition-all active:scale-[0.97] inline-flex items-center justify-center gap-1 ${
                             cur === "MAYBE"
-                              ? "bg-amber-400 border-amber-400 text-slate-900 shadow-md"
+                              ? "bg-amber-400 border-amber-400 text-slate-900 shadow-sm"
                               : "bg-white border-slate-200 text-slate-500 hover:border-amber-400 hover:text-amber-700"
                           }`}
                         >
-                          <span className="text-base leading-none font-extrabold">~</span>
-                          <span className="text-xs">If need be</span>
+                          <span className="text-xs leading-none font-extrabold">~</span>
+                          <span>If need be</span>
                         </button>
                         <button
                           type="button"
                           aria-pressed={cur === "NO"}
                           onClick={() => setSlotVote(s.id, "NO")}
-                          className={`min-h-[56px] rounded-2xl border-2 font-bold text-sm transition-all active:scale-[0.97] inline-flex flex-col items-center justify-center gap-0.5 ${
+                          className={`min-h-[36px] rounded-xl border font-bold text-xs transition-all active:scale-[0.97] inline-flex items-center justify-center gap-1 ${
                             cur === "NO"
-                              ? "bg-slate-800 border-slate-800 text-white shadow-md"
+                              ? "bg-slate-800 border-slate-800 text-white shadow-sm"
                               : "bg-white border-slate-200 text-slate-500 hover:border-slate-400 hover:text-slate-700"
                           }`}
                         >
-                          <X className="w-5 h-5" />
+                          <X className="w-3.5 h-3.5" />
                           No
                         </button>
                       </div>
                     ) : null}
 
                     {(yesVoters.length > 0 || maybeVoters.length > 0) && (
-                      <details className="text-xs text-slate-500">
-                        <summary className="cursor-pointer font-semibold text-slate-600 py-2 min-h-[44px] flex items-center">
+                      <details className="text-[11px] text-slate-500">
+                        <summary className="cursor-pointer font-semibold text-slate-600 py-1 flex items-center">
                           Who voted? ({yesVoters.length + maybeVoters.length})
                         </summary>
                         <div className="flex flex-wrap gap-1.5 pb-1">
