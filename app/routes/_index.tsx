@@ -110,7 +110,7 @@ export default function Index() {
             <div className="space-y-2">
               <h2 className="text-2xl font-bold text-slate-900 tracking-tight">Meeting Time Finder</h2>
               <p className="text-sm text-slate-500 leading-relaxed">
-                A clean consensus grid without ads or spam. Propose dates, let everyone vote Yes / If need be / No, and lock the winner.
+                A clean consensus grid. Propose dates, let everyone vote Yes / If need be / No, and lock the winner.
               </p>
             </div>
 
@@ -125,7 +125,7 @@ export default function Index() {
               </li>
               <li className="flex items-center gap-2.5">
                 <span className="w-4 h-4 rounded-full bg-green-100 text-green-700 flex items-center justify-center"><Check className="w-3 h-3" /></span>
-                <span>Real-time consensus star & calendar (.ics) sync</span>
+                <span>Real-time consensus star & calendar sync</span>
               </li>
             </ul>
           </div>
