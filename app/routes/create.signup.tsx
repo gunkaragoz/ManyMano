@@ -719,12 +719,8 @@ export default function CreateSignupSheet() {
         </div>
 
         {/* Submit */}
-        <div className="pt-4 border-t border-slate-100 flex flex-col sm:flex-row items-stretch sm:items-center justify-end gap-3">
-          {turnstileSiteKey && (
-            <div className="sm:mr-auto">
-              <Turnstile siteKey={turnstileSiteKey} action="create-signup" resetKey={navigation.state} />
-            </div>
-          )}
+        <div className="pt-4 border-t border-slate-100 space-y-3">
+          <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-end gap-3">
           <button
             type="button"
             onClick={startOver}
@@ -746,6 +742,12 @@ export default function CreateSignupSheet() {
               <span className="inline-flex items-center gap-2">Create Sign-Up Sheet & Get Links <ArrowRight className="w-4 h-4" /></span>
             )}
           </button>
+          </div>
+          {turnstileSiteKey && (
+            <div className="flex justify-end [&:empty]:hidden [&:has(.cf-turnstile:empty)]:hidden">
+              <Turnstile siteKey={turnstileSiteKey} action="create-signup" resetKey={navigation.state} theme="light" size="compact" />
+            </div>
+          )}
         </div>
       </Form>
     </div>

@@ -48,6 +48,11 @@ interface TurnstileProps {
    * Defaults to compact since all our placements are inline footers/modals.
    */
   size?: "normal" | "compact" | "flexible";
+  /**
+   * `light` matches our white cards — `auto` renders a dark box in dark mode
+   * which looks broken in the footer. Pass `dark` only on dark surfaces.
+   */
+  theme?: "auto" | "light" | "dark";
 }
 
 /**
@@ -55,7 +60,7 @@ interface TurnstileProps {
  * solved `cf-turnstile-response` token is submitted with the form data.
  * Tokens are single-use: after each completed submission the widget resets.
  */
-export default function Turnstile({ siteKey, action, resetKey, appearance = "interaction-only", size = "compact" }: TurnstileProps) {
+export default function Turnstile({ siteKey, action, resetKey, appearance = "interaction-only", size = "compact", theme = "light" }: TurnstileProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const widgetIdRef = useRef<string | null>(null);
   const prevResetKey = useRef(resetKey);
@@ -76,7 +81,7 @@ export default function Turnstile({ siteKey, action, resetKey, appearance = "int
         widgetIdRef.current = window.turnstile.render(containerRef.current, {
           sitekey: siteKey,
           action,
-          theme: "auto",
+          theme,
           appearance,
           size,
         });
@@ -88,7 +93,7 @@ export default function Turnstile({ siteKey, action, resetKey, appearance = "int
     return () => {
       cancelled = true;
     };
-  }, [siteKey, action, appearance, size]);
+  }, [siteKey, action, appearance, size, theme]);
 
   // Fresh single-use token for retries: reset only on transition TO idle.
   useEffect(() => {

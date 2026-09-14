@@ -878,12 +878,7 @@ export default function CreateMeetingPoll() {
           </div>
         </div>
 
-        <div className="pt-4 border-t border-slate-100 space-y-4">
-          {turnstileSiteKey && (
-            <div className="flex justify-start">
-              <Turnstile siteKey={turnstileSiteKey} action="create-poll" resetKey={navigation.state} />
-            </div>
-          )}
+        <div className="pt-4 border-t border-slate-100 space-y-3">
           <div className="flex flex-col-reverse sm:flex-row items-stretch sm:items-center justify-end gap-3">
           <button
             type="button"
@@ -907,6 +902,11 @@ export default function CreateMeetingPoll() {
             )}
           </button>
           </div>
+          {turnstileSiteKey && (
+            <div className="flex justify-end [&:empty]:hidden [&:has(.cf-turnstile:empty)]:hidden">
+              <Turnstile siteKey={turnstileSiteKey} action="create-poll" resetKey={navigation.state} theme="light" size="compact" />
+            </div>
+          )}
         </div>
       </Form>
     </div>
