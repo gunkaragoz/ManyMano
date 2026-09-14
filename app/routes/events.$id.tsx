@@ -47,7 +47,6 @@ import {
   detectLocalTimezone,
   formatInstantDateInZone,
   formatInstantTimeInZone,
-  formatTimezoneShortName,
   formatUtcOffsetLabel,
   timezoneCity,
   zonedWallTimeToUtc,
@@ -1066,8 +1065,8 @@ function organizerTzLabel(organizerTz: string, at: Date | null): string {
 }
 
 /**
- * Dual clock display: organizer wall-clock (always) + viewer-local
- * conversion (client-only, only when zones differ and conversion succeeds).
+ * Dual clock display: organizer wall-clock (always) + GMT offset & viewer-local
+ * conversion (client-only, only when organizer and viewer zones differ).
  * `date` is the organizer-local calendar day ("YYYY-MM-DD").
  */
 function DualSlotTime({
@@ -1097,9 +1096,14 @@ function DualSlotTime({
     () => (date && startTime ? zonedWallTimeToUtc(date, startTime, organizerTz) : null),
     [date, startTime, organizerTz]
   );
-  const orgAbbr = useMemo(
-    () => (orgAt ? formatTimezoneShortName(organizerTz, orgAt) : null),
-    [orgAt, organizerTz]
+  // Timezone suffixes only when organizer and viewer differ — otherwise the
+  // bare wall-clock time is unambiguous. Uses city + GMT offset
+  // ("New York · GMT-04:00") to match the header format (never abbreviations
+  // like "EDT").
+  const showTz = Boolean(viewerTz && viewerTz !== organizerTz);
+  const orgOffset = useMemo(
+    () => (showTz && orgAt ? organizerTzLabel(organizerTz, orgAt) : null),
+    [showTz, orgAt, organizerTz]
   );
 
   const viewer = useMemo(() => {
@@ -1119,7 +1123,7 @@ function DualSlotTime({
       endLabel = adjusted ? formatInstantTimeInZone(adjusted, viewerTz) : null;
     }
     const viewerDateLabel = formatInstantDateInZone(utcStart, viewerTz);
-    const viewerAbbr = formatTimezoneShortName(viewerTz, utcStart);
+    const viewerOffset = organizerTzLabel(viewerTz, utcStart);
     // Show the viewer day when the conversion lands on a different calendar
     // day than the organizer day (common across the date line).
     const orgDay = (() => {
@@ -1137,7 +1141,7 @@ function DualSlotTime({
     return {
       text: endLabel ? `${startLabel} – ${endLabel}` : startLabel,
       dateNote: viewerDateLabel && orgDay && viewerDateLabel !== orgDay ? viewerDateLabel : null,
-      abbr: viewerAbbr,
+      abbr: viewerOffset,
     };
   }, [viewerTz, organizerTz, date, startTime, endTime]);
 
@@ -1145,7 +1149,7 @@ function DualSlotTime({
     <span className={className}>
       <span>
         {orgLabel}
-        {orgAbbr ? ` ${orgAbbr}` : ""}
+        {orgOffset ? ` ${orgOffset}` : ""}
       </span>
       {viewer && (
         <span className="block text-[11px] font-medium opacity-80">
@@ -1438,14 +1442,6 @@ export default function EventView() {
     });
     return groups;
   }, [slots]);
-
-  const pollDateRange = useMemo(() => {
-    if (event.type !== "TIME_POLL" || dayGroups.length === 0) return null;
-    const dated = dayGroups.filter((g) => g.key !== "__undated__");
-    if (dated.length === 0) return null;
-    if (dated.length === 1) return dated[0].label;
-    return `${dated[0].label} – ${dated[dated.length - 1].label}`;
-  }, [event.type, dayGroups]);
 
   // slotId -> day label for mobile cards
   const slotDayLabel = useMemo(() => {
@@ -1750,9 +1746,26 @@ export default function EventView() {
 
           <div className="flex flex-wrap items-center gap-2 pt-1">
             {event.eventDate && (
-              <span className="inline-flex items-center gap-1.5 text-xs font-semibold text-slate-700 bg-slate-100/90 px-3 py-1.5 rounded-full border border-slate-200/80">
+              <span
+                title={
+                  showViewerTz
+                    ? `All times on this page are listed in the organizer's timezone (${organizerTz}).`
+                    : undefined
+                }
+                className="inline-flex items-center gap-1.5 text-xs font-semibold text-slate-700 bg-slate-100/90 px-3 py-1.5 rounded-full border border-slate-200/80"
+              >
                 <CalendarDays className="w-3.5 h-3.5 text-slate-500" />
                 {new Date(event.eventDate + "T00:00:00").toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric", year: "numeric" })}
+                {showViewerTz ? ` · ${organizerTzLabel(organizerTz, headerTzAt)}` : ""}
+              </span>
+            )}
+            {!event.eventDate && showViewerTz && viewerTz && (
+              <span
+                title={`All times on this page are listed in the organizer's timezone (${organizerTz}).`}
+                className="inline-flex items-center gap-1.5 text-xs font-semibold text-slate-700 bg-slate-100/90 px-3 py-1.5 rounded-full border border-slate-200/80"
+              >
+                <Globe className="w-3.5 h-3.5 text-slate-500" />
+                Event time: {organizerTzLabel(organizerTz, headerTzAt)}
               </span>
             )}
             {event.location && (
@@ -1771,19 +1784,6 @@ export default function EventView() {
                 {formatDurationLabel((event as { durationMinutes?: number | null }).durationMinutes)}
               </span>
             )}
-            {event.type === "TIME_POLL" && pollDateRange && (
-              <span className="inline-flex items-center gap-1.5 text-xs font-semibold text-slate-700 bg-slate-100/90 px-3 py-1.5 rounded-full border border-slate-200/80">
-                <CalendarDays className="w-3.5 h-3.5 text-slate-500" />
-                {pollDateRange} · {slots.length} option{slots.length === 1 ? "" : "s"}
-              </span>
-            )}
-            <span
-              title={`All times on this page are listed in the organizer's timezone (${organizerTz}).`}
-              className="inline-flex items-center gap-1.5 text-xs font-semibold text-slate-700 bg-slate-100/90 px-3 py-1.5 rounded-full border border-slate-200/80"
-            >
-              <Globe className="w-3.5 h-3.5 text-slate-500" />
-              Event time: {organizerTzLabel(organizerTz, headerTzAt)}
-            </span>
             {showViewerTz && viewerTz && (
               <span
                 title="Your local timezone — converted times appear under each option."
