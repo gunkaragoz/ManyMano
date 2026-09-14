@@ -30,7 +30,10 @@ import {
   TITLE_MAX,
   cleanText,
   isValidEmail,
-  normalizeTimezone,
+  isValidIsoDate,
+  isValidTime,
+  parseTimezoneInput,
+  timeToMinutes,
 } from "~/utils/validation";
 import { pruneExpiredEvents } from "~/utils/retention";
 import { getSiteConfig } from "~/utils/site";
@@ -97,11 +100,17 @@ export async function action({ request, context }: ActionFunctionArgs) {
   const location = cleanText(formData.get("location"), LOCATION_MAX) || null;
   const organizerName = cleanText(formData.get("organizerName"), ORGANIZER_NAME_MAX);
   const organizerEmail = cleanText(formData.get("organizerEmail"), EMAIL_MAX);
-  const timezone = normalizeTimezone(formData.get("timezone") as string);
+  const timezone = parseTimezoneInput(formData.get("timezone") as string);
 
   // Validation
   if (!title) {
     return json({ error: "Please enter an event title." }, { status: 400 });
+  }
+  if (eventDate && !isValidIsoDate(eventDate)) {
+    return json({ error: "Please pick a valid event date." }, { status: 400 });
+  }
+  if (!timezone) {
+    return json({ error: "Please pick a timezone from the list." }, { status: 400 });
   }
   if (!organizerName) {
     return json({ error: "Please enter your name." }, { status: 400 });
@@ -159,6 +168,17 @@ export async function action({ request, context }: ActionFunctionArgs) {
 
   if (validSlots.length === 0) {
     return json({ error: "Please add at least one task." }, { status: 400 });
+  }
+  for (const s of validSlots) {
+    if ((s.startTime && !isValidTime(s.startTime)) || (s.endTime && !isValidTime(s.endTime))) {
+      return json({ error: `"${s.title}": please pick a valid time.` }, { status: 400 });
+    }
+    if (s.startTime && s.endTime && timeToMinutes(s.endTime) <= timeToMinutes(s.startTime)) {
+      return json(
+        { error: `"${s.title}": end time must be after the start time.` },
+        { status: 400 }
+      );
+    }
   }
   if (slotTitles.length > MAX_SLOTS_PER_EVENT) {
     return json(

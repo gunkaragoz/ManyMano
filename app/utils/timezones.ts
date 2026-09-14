@@ -297,15 +297,21 @@ export function zonedWallTimeToUtc(
   const tz = timeZone && isValidTimezone(timeZone) ? timeZone : "UTC";
   const wallAsUTC = Date.UTC(parsed.year, parsed.month - 1, parsed.day, parsed.hours, parsed.minutes, 0);
   if (tz === "UTC") return new Date(wallAsUTC);
-  let utc = wallAsUTC;
-  for (let i = 0; i < 3; i++) {
-    const offset = getOffsetMinutes(tz, new Date(utc));
-    if (offset === null) return new Date(wallAsUTC);
-    const next = wallAsUTC - offset * 60_000;
-    if (next === utc) break;
-    utc = next;
+  // The real instant is within UTC-12..UTC+14 of the wall-as-UTC value, so
+  // offsets 36h either side bracket any DST transition around it.
+  const span = 36 * 60 * 60 * 1000;
+  const before = getOffsetMinutes(tz, new Date(wallAsUTC - span));
+  const after = getOffsetMinutes(tz, new Date(wallAsUTC + span));
+  if (before === null || after === null) return new Date(wallAsUTC);
+  // Earlier offset first: a repeated wall time (fall back) resolves to its
+  // first occurrence.
+  const candidates = [wallAsUTC - before * 60_000, wallAsUTC - after * 60_000];
+  for (const c of candidates) {
+    if (getOffsetMinutes(tz, new Date(c)) === (wallAsUTC - c) / 60_000) return new Date(c);
   }
-  return new Date(utc);
+  // Wall time skipped by spring-forward: shift forward by the gap
+  // (02:30 → 03:30), the same direction in every zone.
+  return new Date(candidates[0]);
 }
 
 /** "h:MM AM" clock time of an instant in a zone, e.g. "9:00 AM". Null when unknown. */

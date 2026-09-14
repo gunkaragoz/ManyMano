@@ -1,7 +1,7 @@
 import type { LoaderFunctionArgs } from "@remix-run/cloudflare";
 import { eq, and, inArray } from "drizzle-orm";
 import { getDb, events, eventSlots, signups, pollVotes, pollVoteEntries } from "~/db";
-import { getPresentedAdminToken, secretMatches, checkAdminRateLimit } from "~/utils/auth";
+import { getPresentedAdminToken, verifyAdminToken } from "~/utils/auth";
 import { isExpired, pruneExpiredEvents } from "~/utils/retention";
 
 export async function loader({ params, request, context }: LoaderFunctionArgs) {
@@ -28,10 +28,7 @@ export async function loader({ params, request, context }: LoaderFunctionArgs) {
   // CSV contains emails/notes — organizer only.
   const presented = getPresentedAdminToken(request, eventId);
   const clientIp = request.headers.get("cf-connecting-ip") || "unknown";
-  const allowed =
-    presented &&
-    checkAdminRateLimit(`export:${clientIp}:${eventId}`) &&
-    (await secretMatches(presented, event.adminToken));
+  const allowed = await verifyAdminToken(presented, event.adminToken, `export:${clientIp}:${eventId}`);
   if (!allowed) {
     throw new Response("Unauthorized. This roster export requires the organizer link.", {
       status: 403,

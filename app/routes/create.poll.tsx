@@ -29,8 +29,10 @@ import {
   SLOT_TITLE_MAX,
   TITLE_MAX,
   cleanText,
+  isPastIsoDate,
   isValidEmail,
-  normalizeTimezone,
+  isValidIsoDate,
+  parseTimezoneInput,
 } from "~/utils/validation";
 import { pruneExpiredEvents } from "~/utils/retention";
 import { getSiteConfig } from "~/utils/site";
@@ -108,10 +110,13 @@ export async function action({ request, context }: ActionFunctionArgs) {
   const location = cleanText(formData.get("location"), LOCATION_MAX) || null;
   const organizerName = cleanText(formData.get("organizerName"), ORGANIZER_NAME_MAX);
   const organizerEmail = cleanText(formData.get("organizerEmail"), EMAIL_MAX);
-  const timezone = normalizeTimezone(formData.get("timezone") as string);
+  const timezone = parseTimezoneInput(formData.get("timezone") as string);
 
   if (!title) {
     return json({ error: "Please enter a meeting title." }, { status: 400 });
+  }
+  if (!timezone) {
+    return json({ error: "Please pick a timezone from the list." }, { status: 400 });
   }
   if (!organizerName) {
     return json({ error: "Please enter your name." }, { status: 400 });
@@ -165,13 +170,22 @@ export async function action({ request, context }: ActionFunctionArgs) {
     );
   }
 
+  const seenOptions = new Set<string>();
   for (let idx = 0; idx < slotDates.length; idx++) {
     if (validSlots.length >= MAX_SLOTS_PER_EVENT) break;
     const date = (slotDates[idx] || "").trim();
     if (!date) continue;
-    if (!DATE_RE.test(date)) {
+    if (!DATE_RE.test(date) || !isValidIsoDate(date)) {
       return json({ error: `Row ${idx + 1}: please pick a valid day.` }, { status: 400 });
     }
+    if (isPastIsoDate(date)) {
+      return json({ error: `Row ${idx + 1}: that day has already passed.` }, { status: 400 });
+    }
+    const optionKey = `${date}|${durationMinutes === null ? "" : (slotStartTimes[idx] || "").trim()}`;
+    if (seenOptions.has(optionKey)) {
+      return json({ error: `Row ${idx + 1}: this day and time is already in the poll.` }, { status: 400 });
+    }
+    seenOptions.add(optionKey);
     const label = cleanText(slotLabels[idx], SLOT_TITLE_MAX);
     if (durationMinutes === null) {
       validSlots.push({
@@ -187,11 +201,9 @@ export async function action({ request, context }: ActionFunctionArgs) {
     if (!TIME_RE.test(start)) {
       return json({ error: `Row ${idx + 1}: please pick a start time.` }, { status: 400 });
     }
-    const explicitEnd = (slotEndTimes[idx] || "").trim();
-    const end =
-      explicitEnd && TIME_RE.test(explicitEnd)
-        ? explicitEnd
-        : addMinutesToTimeString(start, durationMinutes);
+    // One duration for the whole poll: the end is always derived from it, so
+    // a posted end time can't contradict the start (overnight wrap is fine).
+    const end = addMinutesToTimeString(start, durationMinutes);
     validSlots.push({
       slotDate: date,
       startTime: start,

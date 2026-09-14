@@ -32,10 +32,10 @@ import { escapeHtml } from "~/utils/sanitize";
 import {
   buildAdminCookie,
   buildExpiredAdminCookie,
-  checkAdminRateLimit,
   getPresentedAdminToken,
   hashSecretForStorage,
   secretMatches,
+  verifyAdminToken,
 } from "~/utils/auth";
 import { expiryDateFor, isExpired, pruneExpiredEvents, RETENTION_DAYS } from "~/utils/retention";
 import { verifyTurnstile, turnstileFailure, hasTurnstileToken } from "~/utils/turnstile";
@@ -71,6 +71,9 @@ import {
   TITLE_MAX,
   cleanText,
   isValidEmail,
+  isValidIsoDate,
+  isValidTime,
+  timeToMinutes,
 } from "~/utils/validation";
 
 // Events are unlisted (robots.txt disallows /events/). Keep them out of
@@ -233,19 +236,13 @@ export async function loader({ params, request, context }: LoaderFunctionArgs) {
 
   // Check admin access: HttpOnly cookie preferred, ?admin= supported for bookmarks.
   const presented = getPresentedAdminToken(request, eventId);
-  let isAdmin = false;
-  if (presented) {
-    const clientIp = request.headers.get("cf-connecting-ip") || "unknown";
-    if (checkAdminRateLimit(`${clientIp}:${eventId}`)) {
-      isAdmin = await secretMatches(presented, event.adminToken);
-    }
-  }
+  const clientIp = request.headers.get("cf-connecting-ip") || "unknown";
+  const isAdmin = await verifyAdminToken(presented, event.adminToken, `${clientIp}:${eventId}`);
 
-  // If a valid ?admin= token was just presented via URL, upgrade to a
-  // cookie and redirect to the clean URL so the secret leaves history/logs.
+  // If a valid ?admin= token was presented via URL, (re)issue the cookie and
+  // redirect to the clean URL so the secret leaves history/logs.
   const adminQuery = url.searchParams.get("admin");
-  const hasAdminCookie = (request.headers.get("cookie") || "").includes(`mm_admin_${eventId}=`);
-  if (isAdmin && adminQuery && !hasAdminCookie) {
+  if (isAdmin && adminQuery) {
     const clean = new URL(request.url);
     clean.searchParams.delete("admin");
     const headers = new Headers();
@@ -437,14 +434,19 @@ export async function action({ request, params, context }: ActionFunctionArgs) {
   const presentedAdmin =
     (formData.get("adminToken") as string) || getPresentedAdminToken(request, eventId);
   const requireAdmin = async () => {
-    if (!presentedAdmin) return false;
     const clientIp = request.headers.get("cf-connecting-ip") || "unknown";
-    if (!checkAdminRateLimit(`action:${clientIp}:${eventId}`)) return false;
-    return secretMatches(presentedAdmin, event.adminToken);
+    return verifyAdminToken(presentedAdmin, event.adminToken, `action:${clientIp}:${eventId}`);
   };
+  const isPoll = event.type === "TIME_POLL";
+  const isFinalized = event.status === "FINALIZED";
+  const finalizedError = () =>
+    json({ error: "This poll is finalized. Reopen it by deleting it or creating a new poll." }, { status: 409 });
 
   // 1. Sign-Up Slot Claim (transactional capacity guard)
   if (intent === "signup") {
+    if (event.type !== "SIGNUP_SHEET") {
+      return json({ error: "This event doesn't take sign-ups." }, { status: 400 });
+    }
     const slotId = cleanText(formData.get("slotId"), 32);
     const participantName = cleanText(formData.get("participantName"), PARTICIPANT_NAME_MAX);
     const rawEmail = cleanText(formData.get("participantEmail"), EMAIL_MAX);
@@ -627,6 +629,12 @@ export async function action({ request, params, context }: ActionFunctionArgs) {
 
   // 3. Meeting Poll Vote
   if (intent === "vote_poll") {
+    if (!isPoll) {
+      return json({ error: "This event isn't a poll." }, { status: 400 });
+    }
+    if (isFinalized) {
+      return json({ error: "Voting is closed — the organizer has picked a time." }, { status: 409 });
+    }
     const participantName = cleanText(formData.get("participantName"), PARTICIPANT_NAME_MAX);
     const rawVoteEmail = cleanText(formData.get("participantEmail"), EMAIL_MAX);
     const participantEmail = rawVoteEmail || null;
@@ -672,12 +680,14 @@ export async function action({ request, params, context }: ActionFunctionArgs) {
 
     const voteSlots = await db.select().from(eventSlots).where(eq(eventSlots.eventId, eventId));
     const clientVoteId = cleanText(formData.get("clientVoteId"), 32) || null;
+    const clientVoteToken = cleanText(formData.get("clientVoteToken"), 128) || null;
 
-    // Identity: the browser remembers its own vote id (localStorage) and sends
-    // it back. Display names must be unique per event so two different "John"s
-    // (no email) can't silently overwrite each other. Same browser updates its
-    // own vote; same name + same non-empty email reclaims it (e.g. new device
-    // or cleared storage); otherwise a 409 tells the voter to pick another name.
+    // Identity: the browser remembers its own vote id + private vote token
+    // (localStorage) and sends both back; the id alone proves nothing. Display
+    // names must be unique per event so two different "John"s (no email) can't
+    // silently overwrite each other. Same browser updates its own vote; same
+    // name + same non-empty email reclaims it (e.g. new device or cleared
+    // storage, issuing a fresh token); otherwise a 409 asks for another name.
     const normName = participantName.trim().toLowerCase();
     const normEmail = (participantEmail || "").trim().toLowerCase();
     const existingVotes = await db.select().from(pollVotes).where(eq(pollVotes.eventId, eventId));
@@ -699,8 +709,10 @@ export async function action({ request, params, context }: ActionFunctionArgs) {
     const takenMessage =
       "That name already voted. If that's you, please vote from your original browser or device (or enter the same email address). Otherwise pick a different name, e.g. \"John S.\"";
 
-    if (clientVoteId) {
-      const ownVote = existingVotes.find((v) => v.id === clientVoteId);
+    if (clientVoteId && clientVoteToken) {
+      const candidate = existingVotes.find((v) => v.id === clientVoteId);
+      const ownVote =
+        candidate && (await secretMatches(clientVoteToken, candidate.editToken)) ? candidate : null;
       if (ownVote) {
         const renamedIntoTaken = existingVotes.some(
           (v) => v.id !== ownVote.id && (v.participantName || "").trim().toLowerCase() === normName
@@ -719,9 +731,10 @@ export async function action({ request, params, context }: ActionFunctionArgs) {
           success: true,
           message: `Availability updated for ${participantName}!`,
           voteId: ownVote.id,
+          voteToken: clientVoteToken,
         });
       }
-      // Unknown/stale id (e.g. vote deleted by admin): fall through to name checks.
+      // Unknown/stale id or wrong token: fall through to name checks.
     }
 
     const nameCollision = existingVotes.find(
@@ -732,9 +745,15 @@ export async function action({ request, params, context }: ActionFunctionArgs) {
         normEmail !== "" &&
         (nameCollision.participantEmail || "").trim().toLowerCase() === normEmail;
       if (reclaimable) {
+        const reclaimToken = generateSecretToken();
         await db
           .update(pollVotes)
-          .set({ participantName, participantEmail, updatedAt: now })
+          .set({
+            participantName,
+            participantEmail,
+            editToken: await hashSecretForStorage(reclaimToken),
+            updatedAt: now,
+          })
           .where(eq(pollVotes.id, nameCollision.id));
         await db.delete(pollVoteEntries).where(eq(pollVoteEntries.pollVoteId, nameCollision.id));
         await saveEntries(nameCollision.id);
@@ -743,6 +762,7 @@ export async function action({ request, params, context }: ActionFunctionArgs) {
           success: true,
           message: `Availability updated for ${participantName}!`,
           voteId: nameCollision.id,
+          voteToken: reclaimToken,
         });
       }
       return json({ error: takenMessage }, { status: 409 });
@@ -780,7 +800,12 @@ export async function action({ request, params, context }: ActionFunctionArgs) {
       });
     }
 
-    return json({ success: true, message: `Availability recorded for ${participantName}!`, voteId });
+    return json({
+      success: true,
+      message: `Availability recorded for ${participantName}!`,
+      voteId,
+      voteToken: editTokenPlain,
+    });
   }
 
   // 3b. Delete poll vote (admin, or owner via emailed edit token)
@@ -805,6 +830,9 @@ export async function action({ request, params, context }: ActionFunctionArgs) {
   if (intent === "finalize_poll") {
     if (!(await requireAdmin())) {
       return json({ error: "Unauthorized." }, { status: 403 });
+    }
+    if (!isPoll) {
+      return json({ error: "Only polls can be finalized." }, { status: 400 });
     }
     const winningSlotId = cleanText(formData.get("winningSlotId"), 32);
     if (!winningSlotId) {
@@ -850,6 +878,9 @@ export async function action({ request, params, context }: ActionFunctionArgs) {
     if (!organizerName) {
       return json({ error: "Organizer name is required." }, { status: 400 });
     }
+    if (eventDate && !isValidIsoDate(eventDate)) {
+      return json({ error: "Please pick a valid event date." }, { status: 400 });
+    }
 
     await db
       .update(events)
@@ -872,9 +903,12 @@ export async function action({ request, params, context }: ActionFunctionArgs) {
     const startTime = cleanText(formData.get("slotStartTime"), 16) || null;
     const endTime = cleanText(formData.get("slotEndTime"), 16) || null;
     const capacityRaw = cleanText(formData.get("slotCapacity"), 8) || "1";
+    if (isPoll && isFinalized) return finalizedError();
     if (!title && !startTime && !shiftName && !slotDate) {
       return json({ error: "Give the new option a title, day or time." }, { status: 400 });
     }
+    const slotError = validateSlotFields(slotDateRaw, startTime, endTime);
+    if (slotError) return json({ error: slotError }, { status: 400 });
 
     const existingSlots = await db.select().from(eventSlots).where(eq(eventSlots.eventId, eventId));
     if (existingSlots.length >= MAX_SLOTS_PER_EVENT) {
@@ -929,6 +963,9 @@ export async function action({ request, params, context }: ActionFunctionArgs) {
     if (!title) {
       return json({ error: "Slot title is required." }, { status: 400 });
     }
+    if (isPoll && isFinalized) return finalizedError();
+    const slotError = validateSlotFields(slotDateRaw, startTime, endTime);
+    if (slotError) return json({ error: slotError }, { status: 400 });
     const parsedCap = capacityRaw ? parseInt(capacityRaw, 10) : NaN;
 
     await db
@@ -963,6 +1000,7 @@ export async function action({ request, params, context }: ActionFunctionArgs) {
     if (!target || target.eventId !== eventId) {
       return json({ error: "Slot not found." }, { status: 404 });
     }
+    if (isPoll && isFinalized) return finalizedError();
 
     // Remove dependent rows first (D1/cascade safety)
     await db.delete(signups).where(eq(signups.slotId, slotId));
@@ -1028,6 +1066,22 @@ export async function action({ request, params, context }: ActionFunctionArgs) {
   }
 
   return json({ error: "Unknown intent" }, { status: 400 });
+}
+
+/** Shared day/time checks for organizer add/update option. Null when valid. */
+function validateSlotFields(
+  slotDateRaw: string,
+  startTime: string | null,
+  endTime: string | null
+): string | null {
+  if (slotDateRaw && !isValidIsoDate(slotDateRaw)) return "Please pick a valid day.";
+  if ((startTime && !isValidTime(startTime)) || (endTime && !isValidTime(endTime))) {
+    return "Please pick a valid time.";
+  }
+  if (startTime && endTime && timeToMinutes(endTime) <= timeToMinutes(startTime)) {
+    return "End time must be after the start time.";
+  }
+  return null;
 }
 
 function formatTime(t: string | null | undefined): string {
@@ -1175,7 +1229,7 @@ export default function EventView() {
     origin,
     siteName,
   } = useLoaderData<typeof loader>();
-  const actionData = useActionData<{ success?: boolean; message?: string; error?: string; voteId?: string; needsVerification?: boolean }>();
+  const actionData = useActionData<{ success?: boolean; message?: string; error?: string; voteId?: string; voteToken?: string; needsVerification?: boolean }>();
   const [searchParams] = useSearchParams();
   const navigation = useNavigation();
   const isSubmitting = navigation.state === "submitting";
@@ -1296,16 +1350,22 @@ export default function EventView() {
   const [voterEmail, setVoterEmail] = useState("");
   const [showAllVotesMobile, setShowAllVotesMobile] = useState(false);
 
-  // The browser remembers its own vote id so repeat saves update it instead
-  // of creating duplicates or clobbering a different person with the same name.
+  // The browser remembers its own vote id + private vote token so repeat saves
+  // update it instead of creating duplicates. Stored as JSON {id, token}; a
+  // legacy bare id (no token) is ignored — that voter reclaims via email.
   // Read in an effect (not the initializer) to avoid a hydration mismatch.
   const voteStorageKey = `mm_poll_vote_${event.id}`;
   const [clientVoteId, setClientVoteId] = useState<string | null>(null);
+  const [clientVoteToken, setClientVoteToken] = useState<string | null>(null);
   useEffect(() => {
     try {
-      const stored = window.localStorage.getItem(voteStorageKey);
-      if (!stored) return;
+      const raw = window.localStorage.getItem(voteStorageKey);
+      if (!raw || !raw.startsWith("{")) return;
+      const parsed = JSON.parse(raw) as { id?: string; token?: string };
+      if (!parsed.id || !parsed.token) return;
+      const stored = parsed.id;
       setClientVoteId(stored);
+      setClientVoteToken(parsed.token);
       const own = pollData?.votes.find((v) => v.id === stored);
       if (own) {
         setVoterName((prev) => prev || own.participantName);
@@ -1323,13 +1383,17 @@ export default function EventView() {
 
   // Remember our vote id after a successful save.
   useEffect(() => {
-    if (actionData?.success && actionData?.voteId) {
+    if (actionData?.success && actionData?.voteId && actionData?.voteToken) {
       try {
-        window.localStorage.setItem(voteStorageKey, actionData.voteId);
+        window.localStorage.setItem(
+          voteStorageKey,
+          JSON.stringify({ id: actionData.voteId, token: actionData.voteToken })
+        );
       } catch {
         // ignore storage failures
       }
       setClientVoteId(actionData.voteId);
+      setClientVoteToken(actionData.voteToken);
     }
   }, [actionData, voteStorageKey]);
 
@@ -2893,6 +2957,7 @@ export default function EventView() {
                 >
                   <input type="hidden" name="intent" value="vote_poll" />
                   <input type="hidden" name="clientVoteId" value={clientVoteId || ""} />
+                  <input type="hidden" name="clientVoteToken" value={clientVoteToken || ""} />
                   <input type="hidden" name="participantName" value={voterName} />
                   <input type="hidden" name="participantEmail" value={voterEmail} />
                   <input type="hidden" name="formStartedAt" value={pageLoadedAt} />

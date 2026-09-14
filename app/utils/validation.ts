@@ -44,6 +44,46 @@ export function isValidEmail(email: string): boolean {
   return EMAIL_RE.test(email);
 }
 
+/** "YYYY-MM-DD" that names a real calendar day (rejects 2026-02-30). */
+export function isValidIsoDate(value: string | null | undefined): boolean {
+  const m = (value || "").match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!m) return false;
+  const y = Number(m[1]);
+  const mo = Number(m[2]);
+  const d = Number(m[3]);
+  const dt = new Date(Date.UTC(y, mo - 1, d));
+  return dt.getUTCFullYear() === y && dt.getUTCMonth() === mo - 1 && dt.getUTCDate() === d;
+}
+
+/** True when the day is before yesterday (UTC) — covers every timezone's "today". */
+export function isPastIsoDate(value: string): boolean {
+  const yesterday = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+  return value < yesterday;
+}
+
+const TIME_24H_RE = /^([01]\d|2[0-3]):([0-5]\d)$/;
+
+/** 24h "HH:MM". */
+export function isValidTime(value: string | null | undefined): boolean {
+  return TIME_24H_RE.test(value || "");
+}
+
+export function timeToMinutes(value: string): number {
+  const [h, m] = value.split(":").map(Number);
+  return h * 60 + m;
+}
+
+/**
+ * Strict variant of normalizeTimezone for create forms: empty → UTC,
+ * unknown zone → null so the caller can show an error instead of guessing.
+ */
+export function parseTimezoneInput(tz: string | null | undefined): string | null {
+  const t = (tz || "").trim();
+  if (!t) return "UTC";
+  if (t.length > TIMEZONE_MAX || !isValidTimezone(t)) return null;
+  return t;
+}
+
 export function normalizeTimezone(tz: string | null | undefined): string {
   const t = (tz || "").trim().slice(0, TIMEZONE_MAX);
   // Inclusive: accept any valid IANA zone (full list in the picker),

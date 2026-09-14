@@ -91,7 +91,37 @@ export function buildExpiredAdminCookie(eventId: string): string {
 const attempts = new Map<string, { count: number; resetAt: number }>();
 const RATE_LIMIT_MAX_KEYS = 5000;
 
-export function checkAdminRateLimit(key: string, limit = 20, windowMs = 10 * 60 * 1000): boolean {
+const ADMIN_FAILURE_LIMIT = 20;
+const ADMIN_FAILURE_WINDOW_MS = 10 * 60 * 1000;
+
+/** True while this key has used up its failed-token budget. */
+export function isAdminRateLimited(key: string, limit = ADMIN_FAILURE_LIMIT): boolean {
+  const entry = attempts.get(key);
+  if (!entry) return false;
+  if (Date.now() > entry.resetAt) {
+    attempts.delete(key);
+    return false;
+  }
+  return entry.count >= limit;
+}
+
+/**
+ * Check a presented admin token. Only mismatches count toward the limit, so
+ * an organizer using the correct token is never throttled by their own work.
+ */
+export async function verifyAdminToken(
+  presented: string | null | undefined,
+  stored: string | null | undefined,
+  key: string
+): Promise<boolean> {
+  if (!presented) return false;
+  if (isAdminRateLimited(key)) return false;
+  const ok = await secretMatches(presented, stored);
+  if (!ok) recordAdminFailure(key);
+  return ok;
+}
+
+export function recordAdminFailure(key: string, windowMs = ADMIN_FAILURE_WINDOW_MS): void {
   const now = Date.now();
   const entry = attempts.get(key);
   if (!entry || now > entry.resetAt) {
@@ -108,8 +138,7 @@ export function checkAdminRateLimit(key: string, limit = 20, windowMs = 10 * 60 
       }
     }
     attempts.set(key, { count: 1, resetAt: now + windowMs });
-    return true;
+    return;
   }
   entry.count += 1;
-  return entry.count <= limit;
 }
