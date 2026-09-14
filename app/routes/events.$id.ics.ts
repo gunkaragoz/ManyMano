@@ -53,6 +53,7 @@ export async function loader({ params, request, context }: LoaderFunctionArgs) {
     eventDate: picked ? effectiveDateForSlot(picked, event.eventDate) : event.eventDate,
     startTime: picked?.startTime ?? null,
     endTime: picked?.endTime ?? null,
+    timeZone: event.timezone,
     organizerName: event.organizerName,
     organizerEmail: isAdmin ? event.organizerEmail : null,
     url: `${origin}/events/${eventId}`,

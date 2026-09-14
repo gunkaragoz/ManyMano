@@ -217,3 +217,127 @@ export function formatTimeInTimezone(timeZone: string, at: Date = new Date()): s
     return null;
   }
 }
+
+/** Short zone name at an instant, e.g. "EDT", "CEST", "GMT+5:30". Null when unknown. */
+export function formatTimezoneShortName(timeZone: string, at: Date = new Date()): string | null {
+  try {
+    const parts = new Intl.DateTimeFormat("en-US", {
+      timeZone,
+      timeZoneName: "short",
+    }).formatToParts(at);
+    const tzPart = parts.find((p) => p.type === "timeZoneName")?.value;
+    return tzPart || null;
+  } catch {
+    return null;
+  }
+}
+
+function parseWallDateTime(
+  dateStr: string | null | undefined,
+  timeStr: string | null | undefined
+): { year: number; month: number; day: number; hours: number; minutes: number } | null {
+  if (!dateStr) return null;
+  const dm = dateStr.trim().match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (!dm) return null;
+  const year = parseInt(dm[1], 10);
+  const month = parseInt(dm[2], 10);
+  const day = parseInt(dm[3], 10);
+  if (month < 1 || month > 12 || day < 1 || day > 31) return null;
+  if (!timeStr) return null;
+  const t = timeStr.trim();
+  if (!t) return null;
+  // Reuse the same accepted formats as calendar.parseTimeString (duplicated
+  // here to keep this module dependency-free).
+  const iso = t.match(/^\d{4}-\d{2}-\d{2}[T ](\d{1,2}):(\d{2})(?::(\d{2}))?/);
+  if (iso) {
+    const h = parseInt(iso[1], 10);
+    const m = parseInt(iso[2], 10);
+    if (h >= 0 && h <= 23 && m >= 0 && m <= 59) return { year, month, day, hours: h, minutes: m };
+    return null;
+  }
+  const ampm = t.match(/^(\d{1,2})(?::(\d{2}))?\s*([AaPp])\.?\s?[Mm]\.?$/);
+  if (ampm) {
+    let h = parseInt(ampm[1], 10);
+    const m = ampm[2] ? parseInt(ampm[2], 10) : 0;
+    const isPM = ampm[3].toLowerCase() === "p";
+    if (h < 1 || h > 12 || m > 59) return null;
+    h = h % 12;
+    if (isPM) h += 12;
+    return { year, month, day, hours: h, minutes: m };
+  }
+  const h24 = t.match(/^(\d{1,2}):(\d{2})(?::\d{2})?$/);
+  if (h24) {
+    const h = parseInt(h24[1], 10);
+    const m = parseInt(h24[2], 10);
+    if (h >= 0 && h <= 23 && m >= 0 && m <= 59) return { year, month, day, hours: h, minutes: m };
+    return null;
+  }
+  const bare = t.match(/^(\d{1,2})$/);
+  if (bare) {
+    const h = parseInt(bare[1], 10);
+    if (h >= 0 && h <= 23) return { year, month, day, hours: h, minutes: 0 };
+  }
+  return null;
+}
+
+/**
+ * Convert a wall-clock time in `timeZone` ("YYYY-MM-DD" + "HH:MM" / "h:MM AM")
+ * to the corresponding UTC instant. Returns null when the date/time can't be
+ * parsed. Unknown zones fall back to UTC (matching resolveEventDates).
+ *
+ * Offset depends on the instant itself (DST), so refine iteratively.
+ */
+export function zonedWallTimeToUtc(
+  dateStr: string | null | undefined,
+  timeStr: string | null | undefined,
+  timeZone: string | null | undefined
+): Date | null {
+  const parsed = parseWallDateTime(dateStr, timeStr);
+  if (!parsed) return null;
+  const tz = timeZone && isValidTimezone(timeZone) ? timeZone : "UTC";
+  const wallAsUTC = Date.UTC(parsed.year, parsed.month - 1, parsed.day, parsed.hours, parsed.minutes, 0);
+  if (tz === "UTC") return new Date(wallAsUTC);
+  let utc = wallAsUTC;
+  for (let i = 0; i < 3; i++) {
+    const offset = getOffsetMinutes(tz, new Date(utc));
+    if (offset === null) return new Date(wallAsUTC);
+    const next = wallAsUTC - offset * 60_000;
+    if (next === utc) break;
+    utc = next;
+  }
+  return new Date(utc);
+}
+
+/** "h:MM AM" clock time of an instant in a zone, e.g. "9:00 AM". Null when unknown. */
+export function formatInstantTimeInZone(date: Date, timeZone: string): string | null {
+  try {
+    const parts = new Intl.DateTimeFormat("en-US", {
+      timeZone,
+      hour: "numeric",
+      minute: "2-digit",
+      hour12: true,
+    }).formatToParts(date);
+    const get = (t: string) => parts.find((p) => p.type === t)?.value ?? "";
+    const hour = get("hour");
+    const minute = get("minute");
+    const dayPeriod = get("dayPeriod");
+    if (!hour || !minute) return null;
+    return dayPeriod ? `${hour}:${minute} ${dayPeriod.toUpperCase()}` : `${hour}:${minute}`;
+  } catch {
+    return null;
+  }
+}
+
+/** Short date of an instant in a zone, e.g. "Mon, Sep 14". Null when unknown. */
+export function formatInstantDateInZone(date: Date, timeZone: string): string | null {
+  try {
+    return new Intl.DateTimeFormat("en-US", {
+      timeZone,
+      weekday: "short",
+      month: "short",
+      day: "numeric",
+    }).format(date);
+  } catch {
+    return null;
+  }
+}

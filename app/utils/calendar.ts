@@ -1,3 +1,5 @@
+import { zonedWallTimeToUtc } from "./timezones";
+
 export interface CalendarEventParams {
   uid: string;
   title: string;
@@ -8,6 +10,8 @@ export interface CalendarEventParams {
   /** Slot-level times, e.g. '08:00' from <input type="time"> or '9:00 AM'. */
   startTime?: string | null; // ISO string OR "HH:MM" OR "h:MM AM/PM"
   endTime?: string | null; // ISO string OR "HH:MM" OR "h:MM AM/PM"
+  /** Organizer-selected IANA zone the wall-clock times are expressed in. */
+  timeZone?: string | null;
   organizerName?: string | null;
   organizerEmail?: string | null;
   /** Absolute URL back to the event page (added to description + URL field). */
@@ -96,14 +100,15 @@ function parseEventDate(input: string | null | undefined): { year: number; month
  * - date only            -> all-day event
  * - time only / nothing  -> null (caller falls back to a draft / now)
  *
- * NOTE: times are interpreted as UTC. The app currently stores everything in
- * UTC (timezone column defaults to "UTC" and the create forms don't collect a
- * zone yet). If per-event timezones are added later, convert here to UTC.
+ * Wall-clock times are interpreted in `timeZone` (the organizer-selected
+ * IANA zone, e.g. "America/New_York") and converted to UTC. Unknown/missing
+ * zones fall back to UTC for backwards compatibility with older events.
  */
 export function resolveEventDates(args: {
   eventDate?: string | null;
   startTime?: string | null;
   endTime?: string | null;
+  timeZone?: string | null;
 }): ResolvedDates | null {
   const date = parseEventDate(args.eventDate);
   if (!date) return null;
@@ -116,6 +121,30 @@ export function resolveEventDates(args: {
       end: new Date(Date.UTC(date.year, date.month - 1, date.day + 1, 0, 0, 0)),
       allDay: true,
     };
+  }
+  // Timezone-aware path: interpret the wall-clock in the organizer zone.
+  const tz = (args.timeZone || "").trim() || "UTC";
+  if (tz && tz !== "UTC") {
+    try {
+      const utcStart = zonedWallTimeToUtc(args.eventDate, args.startTime, tz);
+      const utcEndRaw = args.endTime ? zonedWallTimeToUtc(args.eventDate, args.endTime, tz) : null;
+      if (utcStart) {
+        let utcEnd: Date;
+        if (utcEndRaw) {
+          utcEnd = utcEndRaw;
+          // Overnight shift (e.g. 22:00 – 02:00) rolls to the next day.
+          if (utcEnd.getTime() <= utcStart.getTime()) {
+            utcEnd = new Date(utcEnd.getTime() + 24 * 60 * 60 * 1000);
+          }
+        } else {
+          utcEnd = new Date(utcStart.getTime() + 60 * 60 * 1000);
+        }
+        return { start: utcStart, end: utcEnd, allDay: false };
+      }
+      // fall through to UTC interpretation when conversion fails
+    } catch {
+      // fall through to UTC interpretation
+    }
   }
   const end = parseTimeString(args.endTime);
   const startDate = new Date(Date.UTC(date.year, date.month - 1, date.day, start.hours, start.minutes, 0));
@@ -235,6 +264,7 @@ export function buildGoogleCalendarUrl(event: {
   eventDate?: string | null;
   startTime?: string | null;
   endTime?: string | null;
+  timeZone?: string | null;
   url?: string | null;
   fallbackTitle: string;
 }): string {
@@ -247,6 +277,7 @@ export function buildGoogleCalendarUrl(event: {
     eventDate: event.eventDate,
     startTime: event.startTime,
     endTime: event.endTime,
+    timeZone: event.timeZone,
   });
   if (resolved) {
     if (resolved.allDay) {
@@ -313,6 +344,7 @@ export function generateICS(event: CalendarEventParams & { prodid: string; uidDo
     eventDate: event.eventDate,
     startTime: event.startTime,
     endTime: event.endTime,
+    timeZone: event.timeZone,
   });
 
   // Legacy callers passed full ISO datetimes in startTime/endTime — still honor those.
