@@ -5,6 +5,8 @@ import { useEffect, useRef } from "react";
 import { ArrowLeft, ArrowRight, ClipboardList, TriangleAlert, X } from "lucide-react";
 import { usePersistentState } from "~/utils/usePersistentState";
 import DatePicker from "~/components/DatePicker";
+import TimezoneSelect from "~/components/TimezoneSelect";
+import { detectLocalTimezone } from "~/utils/timezones";
 import { useCreateStickyHeader } from "~/utils/useCreateStickyHeader";
 import { getDb, events, eventSlots } from "~/db";
 import { eq } from "drizzle-orm";
@@ -245,6 +247,7 @@ type SignupDetails = {
   location: string;
   organizerName: string;
   organizerEmail: string;
+  timezone: string;
 };
 
 type Shift = {
@@ -255,7 +258,7 @@ type Shift = {
   tasks: Array<{ id: number; title: string; capacity: number }>;
 };
 
-const SIGNUP_DETAILS_KEY = "manymano:create-signup:details:v1";
+const SIGNUP_DETAILS_KEY = "manymano:create-signup:details:v2";
 const SIGNUP_SHIFTS_KEY = "manymano:create-signup:shifts:v1";
 
 const defaultSignupShifts: Shift[] = [
@@ -294,6 +297,7 @@ export default function CreateSignupSheet() {
       location: "",
       organizerName: "",
       organizerEmail: "",
+      timezone: "UTC",
     })
   );
   const [shifts, setShifts, clearShifts] = usePersistentState<Shift[]>(
@@ -304,6 +308,18 @@ export default function CreateSignupSheet() {
   const wasSubmitting = useRef(false);
   const titleSentinelRef = useRef<HTMLDivElement>(null);
   useCreateStickyHeader(details.title, details.eventDate, titleSentinelRef);
+
+  // Auto-detect browser timezone once (client only, never clobbers a saved draft).
+  useEffect(() => {
+    const detected = detectLocalTimezone();
+    if (detected && (details.timezone === "UTC" || !details.timezone)) {
+      setDetails((prev) =>
+        prev.timezone === "UTC" || !prev.timezone ? { ...prev, timezone: detected } : prev
+      );
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   useEffect(() => {
     if (navigation.state === "submitting") {
       wasSubmitting.current = true;
@@ -475,6 +491,19 @@ export default function CreateSignupSheet() {
                   className="w-full px-4 py-3 rounded-xl border border-slate-200/90 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all placeholder:text-slate-400"
                 />
               </div>
+            </div>
+
+            <div>
+              <label htmlFor="signup-timezone" className="block text-xs font-semibold text-slate-700 mb-1.5">
+                Timezone
+              </label>
+              <TimezoneSelect
+                id="signup-timezone"
+                name="timezone"
+                value={details.timezone || "UTC"}
+                onChange={(timezone) => updateDetails({ timezone })}
+                accent="blue"
+              />
             </div>
 
             {/* Sentinel: show title+date in nav header once Title/Date scrolled out of view */}

@@ -18,6 +18,9 @@ export const MAX_SLOTS_PER_EVENT = 31;
 /** Max votes/signups listed per event write path (abuse cap). */
 export const MAX_VOTES_PER_EVENT = 1000;
 
+import { isValidTimezone } from "./timezones";
+
+/** Historical preset list (kept for backwards compat — not a restriction). */
 export const ALLOWED_TIMEZONES = [
   "UTC",
   "Europe/Istanbul",
@@ -43,7 +46,9 @@ export function isValidEmail(email: string): boolean {
 
 export function normalizeTimezone(tz: string | null | undefined): string {
   const t = (tz || "").trim().slice(0, TIMEZONE_MAX);
-  if ((ALLOWED_TIMEZONES as readonly string[]).includes(t)) return t;
+  // Inclusive: accept any valid IANA zone (full list in the picker),
+  // not just the historical preset above.
+  if (t && isValidTimezone(t)) return t;
   return "UTC";
 }
 

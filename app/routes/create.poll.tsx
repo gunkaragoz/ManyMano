@@ -2,9 +2,11 @@ import type { ActionFunctionArgs, LoaderFunctionArgs, MetaFunction } from "@remi
 import { json, redirect } from "@remix-run/cloudflare";
 import { Form, useActionData, useLoaderData, useNavigation, Link } from "@remix-run/react";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { ArrowLeft, ArrowRight, CalendarDays, ChevronDown, TriangleAlert, X } from "lucide-react";
+import { ArrowLeft, ArrowRight, CalendarDays, TriangleAlert, X } from "lucide-react";
 import { usePersistentState } from "~/utils/usePersistentState";
 import DatePicker from "~/components/DatePicker";
+import TimezoneSelect from "~/components/TimezoneSelect";
+import { detectLocalTimezone } from "~/utils/timezones";
 import { useCreateStickyHeader } from "~/utils/useCreateStickyHeader";
 import { getDb, events, eventSlots } from "~/db";
 import { eq } from "drizzle-orm";
@@ -316,75 +318,8 @@ const PRESET_DURATIONS = [
   { minutes: 120, label: "2 hrs" },
 ];
 
-const TIMEZONES = [
-  "UTC",
-  "Europe/Istanbul",
-  "Europe/London",
-  "Europe/Berlin",
-  "Europe/Paris",
-  "America/New_York",
-  "America/Chicago",
-  "America/Denver",
-  "America/Los_Angeles",
-  "Asia/Dubai",
-  "Asia/Kolkata",
-  "Asia/Singapore",
-  "Australia/Sydney",
-];
-
 function toISODate(d: Date): string {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
-}
-
-/** Offset of an IANA timezone in minutes east of UTC. Null when unknown. */
-function getOffsetMinutes(timeZone: string, at: Date): number | null {
-  try {
-    const dtf = new Intl.DateTimeFormat("en-US", {
-      timeZone,
-      hour12: false,
-      year: "numeric",
-      month: "2-digit",
-      day: "2-digit",
-      hour: "2-digit",
-      minute: "2-digit",
-      second: "2-digit",
-    });
-    const parts: Record<string, string> = {};
-    for (const p of dtf.formatToParts(at)) parts[p.type] = p.value;
-    const asUTC = Date.UTC(
-      Number(parts.year),
-      Number(parts.month) - 1,
-      Number(parts.day),
-      Number(parts.hour) % 24,
-      Number(parts.minute),
-      Number(parts.second)
-    );
-    return Math.round((asUTC - at.getTime()) / 60000);
-  } catch {
-    return null;
-  }
-}
-
-/** Current UTC offset of an IANA timezone, e.g. "UTC+03:00". Null when unknown. */
-function formatUtcOffsetLabel(timeZone: string, at: Date = new Date()): string | null {
-  const minutes = getOffsetMinutes(timeZone, at);
-  if (minutes === null) return null;
-  const sign = minutes < 0 ? "-" : "+";
-  const abs = Math.abs(minutes);
-  const hh = String(Math.floor(abs / 60)).padStart(2, "0");
-  const mm = String(abs % 60).padStart(2, "0");
-  return `UTC${sign}${hh}:${mm}`;
-}
-
-/** Short offset form, e.g. "UTC-4" or "UTC+5:30". Null when unknown. */
-function formatUtcOffsetShort(timeZone: string, at: Date = new Date()): string | null {
-  const minutes = getOffsetMinutes(timeZone, at);
-  if (minutes === null) return null;
-  const sign = minutes < 0 ? "-" : "+";
-  const abs = Math.abs(minutes);
-  const h = Math.floor(abs / 60);
-  const m = abs % 60;
-  return m === 0 ? `UTC${sign}${h}` : `UTC${sign}${h}:${String(m).padStart(2, "0")}`;
 }
 
 function defaultDays(): DayRow[] {
@@ -426,12 +361,10 @@ export default function CreateMeetingPoll() {
   // Also normalizes any legacy "All day" draft to the 1 hr default.
   useEffect(() => {
     if (durationMinutes === null) setDurationMinutes(60);
-    try {
-      const detected = Intl.DateTimeFormat().resolvedOptions().timeZone;
-      if (detected && details.timezone === "UTC") {
-        setDetails((prev) => (prev.timezone === "UTC" ? { ...prev, timezone: detected } : prev));
-      }
-    } catch {}
+    const detected = detectLocalTimezone();
+    if (detected && details.timezone === "UTC") {
+      setDetails((prev) => (prev.timezone === "UTC" ? { ...prev, timezone: detected } : prev));
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -441,46 +374,6 @@ export default function CreateMeetingPoll() {
     () => [...days].map((d) => d.date).filter(Boolean).sort()[0] || "",
     [days]
   );
-  // Keep a saved/detected timezone visible even if it isn't in the preset list.
-  const timezoneOptions = useMemo(
-    () =>
-      details.timezone && !TIMEZONES.includes(details.timezone)
-        ? [details.timezone, ...TIMEZONES]
-        : TIMEZONES,
-    [details.timezone]
-  );
-  // e.g. "Europe/Istanbul (UTC+03:00)". Offsets are for right now (DST-aware).
-  const timezoneLabels = useMemo(() => {
-    const now = new Date();
-    return new Map<string, string>(
-      timezoneOptions.map((tz) => {
-        const offset = formatUtcOffsetLabel(tz, now);
-        const name = tz.replace(/_/g, " ");
-        return [tz, offset ? `${name} (${offset})` : name];
-      })
-    );
-  }, [timezoneOptions]);
-  // Live "now" clock for the selected timezone, shown next to the label.
-  const [nowTick, setNowTick] = useState(() => Date.now());
-  useEffect(() => {
-    const id = setInterval(() => setNowTick(Date.now()), 10000);
-    return () => clearInterval(id);
-  }, []);
-  const nowInSelectedTz = useMemo(() => {
-    try {
-      const at = new Date(nowTick);
-      const time = new Intl.DateTimeFormat("en-US", {
-        hour: "numeric",
-        minute: "2-digit",
-        hourCycle: "h23",
-        timeZone: details.timezone,
-      }).format(at);
-      const offset = formatUtcOffsetShort(details.timezone, at);
-      return offset ? `${time} (${offset})` : time;
-    } catch {
-      return null;
-    }
-  }, [details.timezone, nowTick]);
   useCreateStickyHeader(details.title, firstDate, titleSentinelRef);
   useEffect(() => {
     if (navigation.state === "submitting") {
@@ -667,35 +560,16 @@ export default function CreateMeetingPoll() {
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div>
-                  <div className="flex items-baseline justify-between gap-2 mb-1.5">
-                    <label htmlFor="poll-timezone" className="block text-xs font-semibold text-slate-700">
-                      Timezone
-                    </label>
-                    {nowInSelectedTz && (
-                      <span
-                        className="text-[11px] tabular-nums text-slate-500 shrink-0"
-                        title={`Current time in ${details.timezone}`}
-                      >
-                        {nowInSelectedTz}
-                      </span>
-                    )}
-                  </div>
-                  <div className="relative">
-                    <select
-                      id="poll-timezone"
-                      name="timezone"
-                      value={timezoneOptions.includes(details.timezone) ? details.timezone : "UTC"}
-                      onChange={(e) => updateDetails({ timezone: e.target.value })}
-                      className="w-full appearance-none truncate pl-4 pr-10 py-3 rounded-xl border border-slate-200/90 text-sm font-medium focus:outline-none focus:ring-2 focus:ring-green-500/20 focus:border-green-500 transition-all text-slate-800 bg-white cursor-pointer"
-                    >
-                      {timezoneOptions.map((tz) => (
-                        <option key={tz} value={tz}>
-                          {timezoneLabels.get(tz) ?? tz.replace(/_/g, " ")}
-                        </option>
-                      ))}
-                    </select>
-                    <ChevronDown className="w-4 h-4 text-slate-400 pointer-events-none absolute right-3.5 top-1/2 -translate-y-1/2 shrink-0" aria-hidden="true" />
-                  </div>
+                  <label htmlFor="poll-timezone" className="block text-xs font-semibold text-slate-700 mb-1.5">
+                    Timezone
+                  </label>
+                  <TimezoneSelect
+                    id="poll-timezone"
+                    name="timezone"
+                    value={details.timezone || "UTC"}
+                    onChange={(timezone) => updateDetails({ timezone })}
+                    accent="green"
+                  />
                 </div>
 
                 <div>
