@@ -42,7 +42,8 @@ import { verifyTurnstile, turnstileFailure, hasTurnstileToken } from "~/utils/tu
 import { assessGuestRequest, needsVerification } from "~/utils/bot-protection";
 import Turnstile from "~/components/Turnstile";
 import DatePicker from "~/components/DatePicker";
-import { buildGoogleCalendarUrl, pickCalendarSlot, effectiveDateForSlot, formatSlotDateLabel, formatDurationLabel } from "~/utils/calendar";
+import TimezoneSelect from "~/components/TimezoneSelect";
+import { buildGoogleCalendarUrl, pickCalendarSlot, effectiveDateForSlot, formatSlotDateLabel, formatDurationLabel, addMinutesToTimeString, parseTimeString } from "~/utils/calendar";
 import {
   detectLocalTimezone,
   formatInstantDateInZone,
@@ -74,6 +75,7 @@ import {
   isValidIsoDate,
   isValidTime,
   timeToMinutes,
+  normalizeTimezone,
 } from "~/utils/validation";
 
 // Events are unlisted (robots.txt disallows /events/). Keep them out of
@@ -868,9 +870,13 @@ export async function action({ request, params, context }: ActionFunctionArgs) {
 
     const title = cleanText(formData.get("title"), TITLE_MAX);
     const description = cleanText(formData.get("description"), DESCRIPTION_MAX) || null;
-    const eventDate = cleanText(formData.get("eventDate"), 32) || null;
+    // TIME_POLL has no top-level date (days live on the options, like create)
+    // — keep the stored one instead of wiping it.
+    const eventDate =
+      event.type === "TIME_POLL" ? event.eventDate : cleanText(formData.get("eventDate"), 32) || null;
     const location = cleanText(formData.get("location"), LOCATION_MAX) || null;
     const organizerName = cleanText(formData.get("organizerName"), ORGANIZER_NAME_MAX);
+    const timezone = normalizeTimezone(formData.get("timezone") as string | null);
 
     if (!title) {
       return json({ error: "Event title is required." }, { status: 400 });
@@ -884,7 +890,7 @@ export async function action({ request, params, context }: ActionFunctionArgs) {
 
     await db
       .update(events)
-      .set({ title, description, eventDate, location, organizerName, updatedAt: now })
+      .set({ title, description, eventDate, location, organizerName, timezone, updatedAt: now })
       .where(eq(events.id, eventId));
 
     return json({ success: true, message: "Event details updated." });
@@ -904,7 +910,15 @@ export async function action({ request, params, context }: ActionFunctionArgs) {
     const endTime = cleanText(formData.get("slotEndTime"), 16) || null;
     const capacityRaw = cleanText(formData.get("slotCapacity"), 8) || "1";
     if (isPoll && isFinalized) return finalizedError();
-    if (!title && !startTime && !shiftName && !slotDate) {
+    if (event.type === "TIME_POLL") {
+      if (!slotDate) {
+        return json({ error: "Please pick a day for the new option." }, { status: 400 });
+      }
+      const pollDuration = (event as { durationMinutes?: number | null }).durationMinutes ?? null;
+      if (pollDuration !== null && !startTime) {
+        return json({ error: "Please pick a start time for the new option." }, { status: 400 });
+      }
+    } else if (!title && !startTime && !shiftName && !slotDate) {
       return json({ error: "Give the new option a title, day or time." }, { status: 400 });
     }
     const slotError = validateSlotFields(slotDateRaw, startTime, endTime);
@@ -929,7 +943,7 @@ export async function action({ request, params, context }: ActionFunctionArgs) {
     await db.insert(eventSlots).values({
       id: generateInternalId(),
       eventId,
-      title: (title || shiftName || (endTime ? `${startTime} – ${endTime}` : (startTime as string)) || slotDate || "New option").slice(0, SLOT_TITLE_MAX),
+      title: (title || autoPollTitle(title, slotDate, startTime, endTime) || shiftName || (endTime ? `${startTime} – ${endTime}` : (startTime as string)) || slotDate || "New option").slice(0, SLOT_TITLE_MAX),
       shiftName,
       slotDate,
       capacity,
@@ -948,7 +962,7 @@ export async function action({ request, params, context }: ActionFunctionArgs) {
     }
 
     const slotId = cleanText(formData.get("slotId"), 32);
-    const title = cleanText(formData.get("slotTitle"), SLOT_TITLE_MAX);
+    const titleRaw = cleanText(formData.get("slotTitle"), SLOT_TITLE_MAX);
     const shiftName = cleanText(formData.get("slotShiftName"), SHIFT_NAME_MAX) || null;
     const slotDateRaw = cleanText(formData.get("slotDate"), 10);
     const slotDate = slotDateRaw === "" ? null : (/^\d{4}-\d{2}-\d{2}$/.test(slotDateRaw) ? slotDateRaw : null);
@@ -960,10 +974,28 @@ export async function action({ request, params, context }: ActionFunctionArgs) {
     if (!target || target.eventId !== eventId) {
       return json({ error: "Slot not found." }, { status: 404 });
     }
+    if (isPoll && isFinalized) return finalizedError();
+    let title = titleRaw;
+    if (event.type === "TIME_POLL") {
+      // Same rules as create/poll: day is required, label is optional
+      // (auto-generated "Day · time" when empty).
+      if (slotDateRaw !== "" && !slotDate) {
+        return json({ error: "Please pick a valid day." }, { status: 400 });
+      }
+      if (!slotDate) {
+        return json({ error: "Day is required." }, { status: 400 });
+      }
+      const pollDuration = (event as { durationMinutes?: number | null }).durationMinutes ?? null;
+      if (pollDuration !== null && !startTime) {
+        return json({ error: "Start time is required." }, { status: 400 });
+      }
+      if (!title) {
+        title = autoPollTitle(titleRaw, slotDate, startTime, endTime) || target.title;
+      }
+    }
     if (!title) {
       return json({ error: "Slot title is required." }, { status: 400 });
     }
-    if (isPoll && isFinalized) return finalizedError();
     const slotError = validateSlotFields(slotDateRaw, startTime, endTime);
     if (slotError) return json({ error: slotError }, { status: 400 });
     const parsedCap = capacityRaw ? parseInt(capacityRaw, 10) : NaN;
@@ -1093,6 +1125,231 @@ function formatTime(t: string | null | undefined): string {
   const ampm = h >= 12 ? "PM" : "AM";
   h = h % 12 || 12;
   return `${h}:${min} ${ampm}`;
+}
+
+/** Auto title for TIME_POLL options with an empty label — same format as create/poll. */
+function autoPollTitle(
+  _label: string,
+  slotDate: string | null,
+  startTime: string | null,
+  endTime: string | null
+): string | null {
+  if (!slotDate) return startTime || null;
+  const day = formatSlotDateLabel(slotDate);
+  if (!startTime) return day ? `${day} · All day` : null;
+  const start = formatTime(startTime);
+  const end = endTime ? formatTime(endTime) : "";
+  return end ? `${day} · ${start} – ${end}` : `${day} · ${start}`;
+}
+
+const EDIT_TIME_RE = /^([01]\d|2[0-3]):([0-5]\d)$/;
+
+/** Normalize legacy stored times ("10:00 AM", "9:00", ISO) to "HH:MM" for <input type="time">. */
+function normalizeToTimeInput(t: string | null | undefined): string {
+  const parsed = parseTimeString(t);
+  if (!parsed) return "";
+  return `${String(parsed.hours).padStart(2, "0")}:${String(parsed.minutes).padStart(2, "0")}`;
+}
+
+function endForDuration(start: string, durationMinutes: number | null | undefined): string {
+  if (durationMinutes === null || durationMinutes === undefined) return "";
+  if (!EDIT_TIME_RE.test(start)) return "";
+  return addMinutesToTimeString(start, durationMinutes);
+}
+
+/**
+ * Timezone field for the edit-details form — same TimezoneSelect as create.
+ * Local state seeds from the stored value; the edit panel remounts on open.
+ */
+function EditTimezoneField({ initial }: { initial: string }) {
+  const [tz, setTz] = useState(initial || "UTC");
+  return (
+    <TimezoneSelect
+      id="edit-timezone"
+      name="timezone"
+      value={tz}
+      onChange={setTz}
+      accent="green"
+    />
+  );
+}
+
+/**
+ * TIME_POLL option row — mirrors create/poll's "Add your times" layout:
+ * Day * | Start * | Ends (auto) | Label, with Save/Delete actions.
+ */
+function PollTimeOptionRow({
+  slot,
+  durationMinutes,
+  adminToken,
+  isSubmitting,
+}: {
+  slot: { id: string; title: string; slotDate?: string | null; startTime?: string | null; endTime?: string | null };
+  durationMinutes: number | null;
+  adminToken: string | null;
+  isSubmitting: boolean;
+}) {
+  const isAllDay = durationMinutes === null;
+  const [date, setDate] = useState(slot.slotDate || "");
+  const [start, setStart] = useState(() => normalizeToTimeInput(slot.startTime));
+  const [label, setLabel] = useState(() => {
+    const s = slot.title || "";
+    // Hide auto-generated "Day · time" titles so the Label field looks
+    // optional like on create; custom labels are preserved.
+    if (!s) return "";
+    if (/^[A-Z][a-z]{2}, [A-Z][a-z]{2} \d{1,2} · /.test(s)) return "";
+    return s;
+  });
+  const end = endForDuration(start, durationMinutes);
+
+  return (
+    <Form
+      method="post"
+      className={`flex items-center gap-2 p-2 bg-slate-50/70 rounded-xl border border-slate-200/80 transition-all hover:border-slate-300 sm:grid ${isAllDay ? "sm:grid-cols-[minmax(0,1.45fr)_minmax(0,1fr)_148px]" : "sm:grid-cols-[minmax(0,1.45fr)_132px_104px_minmax(0,1fr)_148px]"} sm:gap-3 sm:px-3 sm:py-2.5`}
+    >
+      <input type="hidden" name="intent" value="update_slot" />
+      <input type="hidden" name="adminToken" value={adminToken || ""} />
+      <input type="hidden" name="slotId" value={slot.id} />
+      <input type="hidden" name="slotEndTime" value={isAllDay ? "" : end} />
+      <div className="flex-1 min-w-0 grid grid-cols-2 gap-2 sm:contents">
+        <span className="sr-only">Option</span>
+        <DatePicker
+          name="slotDate"
+          value={date}
+          onChange={setDate}
+          className="col-span-2 sm:col-span-1 min-w-0"
+        />
+        {!isAllDay && (
+          <input
+            type="time"
+            required
+            aria-label="Start time"
+            name="slotStartTime"
+            value={start}
+            onChange={(e) => setStart(e.target.value)}
+            className="w-full h-10 px-3 text-sm rounded-xl border border-slate-200 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 min-w-0"
+          />
+        )}
+        {!isAllDay && (
+          <span
+            title={end ? `Ends ${formatTime(end)}` : "End time"}
+            className="flex items-center h-10 text-xs font-semibold text-slate-500 whitespace-nowrap tabular-nums truncate min-w-0"
+          >
+            → {end ? formatTime(end) : "—"}
+          </span>
+        )}
+        <input
+          type="text"
+          name="slotTitle"
+          placeholder="Label (optional)"
+          aria-label="Label (optional)"
+          value={label}
+          onChange={(e) => setLabel(e.target.value)}
+          className="col-span-2 w-full h-10 px-3 text-sm rounded-xl border border-slate-200 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 placeholder:text-slate-400 min-w-0 sm:col-span-1"
+        />
+      </div>
+      <div className="flex shrink-0 items-center justify-end gap-2 sm:w-[148px]">
+        <button
+          type="submit"
+          disabled={isSubmitting}
+          className="px-4 py-2 rounded-2xl bg-white border border-slate-200 hover:border-slate-300 text-slate-700 text-xs font-semibold shadow-sm transition-all disabled:opacity-50"
+        >
+          Save
+        </button>
+        <button
+          type="submit"
+          name="intent"
+          value="delete_slot"
+          formMethod="post"
+          onClick={(e) => {
+            if (!window.confirm(`Delete "${slot.title}"? Existing signups/votes for it will be removed.`)) {
+              e.preventDefault();
+            }
+          }}
+          className="px-4 py-2 rounded-2xl bg-white border border-rose-200 hover:border-rose-300 text-rose-600 hover:bg-rose-50 text-xs font-semibold shadow-sm transition-all"
+        >
+          Delete
+        </button>
+      </div>
+    </Form>
+  );
+}
+
+/**
+ * TIME_POLL "add option" row — same Day | Start | Ends | Label order
+ * as create/poll's "Add your times" step.
+ */
+function PollTimeNewOptionRow({
+  durationMinutes,
+  adminToken,
+  isSubmitting,
+}: {
+  durationMinutes: number | null;
+  adminToken: string | null;
+  isSubmitting: boolean;
+}) {
+  const isAllDay = durationMinutes === null;
+  const [date, setDate] = useState("");
+  const [start, setStart] = useState("10:00");
+  const [label, setLabel] = useState("");
+  const end = endForDuration(start, durationMinutes);
+
+  return (
+    <Form
+      method="post"
+      className={`flex items-center gap-2 p-2 bg-slate-50/70 rounded-xl border border-slate-200/80 transition-all hover:border-slate-300 sm:grid ${isAllDay ? "sm:grid-cols-[minmax(0,1.45fr)_minmax(0,1fr)_148px]" : "sm:grid-cols-[minmax(0,1.45fr)_132px_104px_minmax(0,1fr)_148px]"} sm:gap-3 sm:px-3 sm:py-2.5`}
+    >
+      <input type="hidden" name="intent" value="add_slot" />
+      <input type="hidden" name="adminToken" value={adminToken || ""} />
+      <input type="hidden" name="slotEndTime" value={isAllDay ? "" : end} />
+      <div className="flex-1 min-w-0 grid grid-cols-2 gap-2 sm:contents">
+        <span className="sr-only">New option</span>
+        <DatePicker
+          name="slotDate"
+          value={date}
+          onChange={setDate}
+          placeholder="Pick a day"
+          className="col-span-2 sm:col-span-1 min-w-0"
+        />
+        {!isAllDay && (
+          <input
+            type="time"
+            aria-label="Start time for new option"
+            name="slotStartTime"
+            value={start}
+            onChange={(e) => setStart(e.target.value)}
+            className="w-full h-10 px-3 text-sm rounded-xl border border-slate-200 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 min-w-0"
+          />
+        )}
+        {!isAllDay && (
+          <span
+            title={end ? `Ends ${formatTime(end)}` : "End time"}
+            className="flex items-center h-10 text-xs font-semibold text-slate-500 whitespace-nowrap tabular-nums truncate min-w-0"
+          >
+            → {end ? formatTime(end) : "—"}
+          </span>
+        )}
+        <input
+          type="text"
+          name="slotTitle"
+          placeholder="Label (optional)"
+          aria-label="Label for new option (optional)"
+          value={label}
+          onChange={(e) => setLabel(e.target.value)}
+          className="col-span-2 w-full h-10 px-3 text-sm rounded-xl border border-slate-200 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 placeholder:text-slate-400 min-w-0 sm:col-span-1"
+        />
+      </div>
+      <div className="flex shrink-0 items-center justify-end sm:w-[148px]">
+        <button
+          type="submit"
+          disabled={isSubmitting}
+          className="w-full px-5 py-2.5 rounded-2xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold shadow-sm transition-all hover:scale-[1.02] active:scale-[0.98] disabled:opacity-50"
+        >
+          + Add Option
+        </button>
+      </div>
+    </Form>
+  );
 }
 
 // Viewer timezone is client-only (detectLocalTimezone reads Intl). Initial
@@ -1965,13 +2222,20 @@ export default function EventView() {
                   className="w-full px-4 py-3 rounded-xl border border-slate-200/90 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all placeholder:text-slate-400"
                 />
               </div>
-              <div>
-                <label className="block text-xs font-semibold text-slate-700 mb-1.5">Date</label>
-                <DatePicker
-                  name="eventDate"
-                  defaultValue={event.eventDate || ""}
-                />
-              </div>
+              {event.type === "TIME_POLL" ? (
+                <div>
+                  <label htmlFor="edit-timezone" className="block text-xs font-semibold text-slate-700 mb-1.5">Timezone</label>
+                  <EditTimezoneField initial={(event as { timezone?: string | null }).timezone || "UTC"} />
+                </div>
+              ) : (
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 mb-1.5">Date</label>
+                  <DatePicker
+                    name="eventDate"
+                    defaultValue={event.eventDate || ""}
+                  />
+                </div>
+              )}
               <div>
                 <label className="block text-xs font-semibold text-slate-700 mb-1.5">Location</label>
                 <input
@@ -2016,6 +2280,35 @@ export default function EventView() {
             <h3 className="text-sm font-bold text-slate-900 tracking-tight">
               {event.type === "SIGNUP_SHEET" ? "Manage Shifts / Tasks" : "Manage Time Options"}
             </h3>
+            {event.type === "TIME_POLL" ? (
+              <div className="space-y-2">
+                {/* Header shares the row grid template so Day/Start/Ends/Label line up — same as create/poll. */}
+                {(event as { durationMinutes?: number | null }).durationMinutes === null ? (
+                  <div className="hidden sm:grid sm:grid-cols-[minmax(0,1.45fr)_minmax(0,1fr)_148px] sm:gap-3 sm:px-3 text-[10px] uppercase font-bold tracking-wide text-slate-400">
+                    <span>Day *</span>
+                    <span>Label</span>
+                    <span />
+                  </div>
+                ) : (
+                  <div className="hidden sm:grid sm:grid-cols-[minmax(0,1.45fr)_132px_104px_minmax(0,1fr)_148px] sm:gap-3 sm:px-3 text-[10px] uppercase font-bold tracking-wide text-slate-400">
+                    <span>Day *</span>
+                    <span>Start *</span>
+                    <span>Ends</span>
+                    <span>Label</span>
+                    <span />
+                  </div>
+                )}
+                {slots.map((s) => (
+                  <PollTimeOptionRow
+                    key={s.id}
+                    slot={s as { id: string; title: string; slotDate?: string | null; startTime?: string | null; endTime?: string | null }}
+                    durationMinutes={(event as { durationMinutes?: number | null }).durationMinutes ?? null}
+                    adminToken={adminToken}
+                    isSubmitting={isSubmitting}
+                  />
+                ))}
+              </div>
+            ) : (
             <div className="space-y-3.5">
               {slots.map((s) => (
                 <Form
@@ -2027,8 +2320,7 @@ export default function EventView() {
                   <input type="hidden" name="adminToken" value={adminToken || ""} />
                   <input type="hidden" name="slotId" value={s.id} />
                   <div className="flex-1 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-12 gap-2.5">
-                    {event.type === "SIGNUP_SHEET" && (
-                      <div className="sm:col-span-2 lg:col-span-3">
+                    <div className="sm:col-span-2 lg:col-span-3">
                         <label className="block text-[10px] uppercase font-bold text-slate-400 mb-1">Shift (opt.)</label>
                         <input
                           type="text"
@@ -2038,9 +2330,8 @@ export default function EventView() {
                           className="w-full px-3 py-2 rounded-xl border border-slate-200 text-xs bg-white focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all placeholder:text-slate-400"
                         />
                       </div>
-                    )}
                     <div className="sm:col-span-2 lg:col-span-3">
-                      <label className="block text-[10px] uppercase font-bold text-slate-400 mb-1">{event.type === "SIGNUP_SHEET" ? "Task *" : "Title *"}</label>
+                      <label className="block text-[10px] uppercase font-bold text-slate-400 mb-1">Task *</label>
                       <input
                         type="text"
                         name="slotTitle"
@@ -2049,15 +2340,6 @@ export default function EventView() {
                         className="w-full px-3 py-2 rounded-xl border border-slate-200 text-xs bg-white focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all"
                       />
                     </div>
-                    {event.type === "TIME_POLL" && (
-                      <div className="lg:col-span-2">
-                        <label className="block text-[10px] uppercase font-bold text-slate-400 mb-1">Day</label>
-                        <DatePicker
-                          name="slotDate"
-                          defaultValue={(s as { slotDate?: string | null }).slotDate || ""}
-                        />
-                      </div>
-                    )}
                     <div className="lg:col-span-2">
                       <label className="block text-[10px] uppercase font-bold text-slate-400 mb-1">Start</label>
                       <input
@@ -2078,8 +2360,7 @@ export default function EventView() {
                         className="w-full px-3 py-2 rounded-xl border border-slate-200 text-xs bg-white focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all placeholder:text-slate-400"
                       />
                     </div>
-                    {event.type === "SIGNUP_SHEET" && (
-                      <div className="lg:col-span-2">
+                    <div className="lg:col-span-2">
                         <label className="block text-[10px] uppercase font-bold text-slate-400 mb-1">Capacity</label>
                         <input
                           type="number"
@@ -2089,7 +2370,6 @@ export default function EventView() {
                           className="w-full px-3 py-2 rounded-xl border border-slate-200 text-xs bg-white focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all"
                         />
                       </div>
-                    )}
                   </div>
                   <div className="flex gap-2 shrink-0">
                     <button
@@ -2117,8 +2397,16 @@ export default function EventView() {
                 </Form>
               ))}
             </div>
+            )}
 
             {/* Add new slot */}
+            {event.type === "TIME_POLL" ? (
+              <PollTimeNewOptionRow
+                durationMinutes={(event as { durationMinutes?: number | null }).durationMinutes ?? null}
+                adminToken={adminToken}
+                isSubmitting={isSubmitting}
+              />
+            ) : (
             <Form
               method="post"
               className="flex flex-col lg:flex-row gap-2.5 items-stretch lg:items-end bg-slate-50/70 border border-slate-200/80 rounded-2xl p-4 transition-all"
@@ -2126,8 +2414,7 @@ export default function EventView() {
               <input type="hidden" name="intent" value="add_slot" />
               <input type="hidden" name="adminToken" value={adminToken || ""} />
               <div className="flex-1 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-12 gap-2.5">
-                {event.type === "SIGNUP_SHEET" && (
-                  <div className="sm:col-span-2 lg:col-span-3">
+                <div className="sm:col-span-2 lg:col-span-3">
                     <label className="block text-[10px] uppercase font-bold text-slate-400 mb-1">Shift (opt.)</label>
                     <input
                       type="text"
@@ -2136,13 +2423,12 @@ export default function EventView() {
                       className="w-full px-3 py-2 rounded-xl border border-slate-200 text-xs bg-white focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all placeholder:text-slate-400"
                     />
                   </div>
-                )}
                 <div className="sm:col-span-2 lg:col-span-3">
-                  <label className="block text-[10px] uppercase font-bold text-slate-400 mb-1">{event.type === "SIGNUP_SHEET" ? "New task" : "New option title"}</label>
+                  <label className="block text-[10px] uppercase font-bold text-slate-400 mb-1">New task</label>
                   <input
                     type="text"
                     name="slotTitle"
-                    placeholder={event.type === "SIGNUP_SHEET" ? "e.g. Setup crew" : "e.g. Mon 10am – 11am"}
+                    placeholder="e.g. Setup crew"
                     className="w-full px-3 py-2 rounded-xl border border-slate-200 text-xs bg-white focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all placeholder:text-slate-400"
                   />
                 </div>
@@ -2164,16 +2450,7 @@ export default function EventView() {
                     className="w-full px-3 py-2 rounded-xl border border-slate-200 text-xs bg-white focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all placeholder:text-slate-400"
                   />
                 </div>
-                {event.type === "TIME_POLL" && (
-                  <div className="lg:col-span-2">
-                    <label className="block text-[10px] uppercase font-bold text-slate-400 mb-1">Day</label>
-                    <DatePicker
-                      name="slotDate"
-                    />
-                  </div>
-                )}
-                {event.type === "SIGNUP_SHEET" && (
-                  <div className="lg:col-span-2">
+                <div className="lg:col-span-2">
                     <label className="block text-[10px] uppercase font-bold text-slate-400 mb-1">Capacity</label>
                     <input
                       type="number"
@@ -2183,7 +2460,6 @@ export default function EventView() {
                       className="w-full px-3 py-2 rounded-xl border border-slate-200 text-xs bg-white focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all"
                     />
                   </div>
-                )}
               </div>
               <button
                 type="submit"
@@ -2193,6 +2469,7 @@ export default function EventView() {
                 + Add Option
               </button>
             </Form>
+            )}
             <p className="text-[11px] text-slate-500">
               Deleting a task also removes its signups / votes. If it was the finalized winning time, the event reopens.
             </p>
