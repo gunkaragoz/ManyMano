@@ -1553,10 +1553,11 @@ export default function EventView() {
   // so server and client render identical hrefs/values (no hydration
   // mismatch). Never use window.location directly in render.
   const publicLink = `${origin}/events/${event.id}`;
-  const adminLink = useMemo(() => {
-    const qs = searchParams.toString();
-    return `${origin}/events/${event.id}${qs ? `?${qs}` : ""}`;
-  }, [origin, searchParams, event.id]);
+  // Built from the verified token (loader), never the address bar: the loader
+  // strips ?admin= from the URL, so copying the current URL would lose it.
+  const adminLink = adminToken
+    ? `${origin}/events/${event.id}?admin=${encodeURIComponent(adminToken)}`
+    : publicLink;
   const calendarSlot = useMemo(
     () => pickCalendarSlot(slots, event.winningSlotId),
     [slots, event.winningSlotId]
