@@ -2,7 +2,7 @@ import type { ActionFunctionArgs, LoaderFunctionArgs, MetaFunction } from "@remi
 import { json, redirect } from "@remix-run/cloudflare";
 import { Form, useActionData, useLoaderData, useNavigation, Link } from "@remix-run/react";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { ArrowLeft, ArrowRight, CalendarDays, TriangleAlert, X } from "lucide-react";
+import { ArrowLeft, ArrowRight, CalendarDays, ChevronDown, TriangleAlert, X } from "lucide-react";
 import { usePersistentState } from "~/utils/usePersistentState";
 import DatePicker from "~/components/DatePicker";
 import { useCreateStickyHeader } from "~/utils/useCreateStickyHeader";
@@ -336,6 +336,57 @@ function toISODate(d: Date): string {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 }
 
+/** Offset of an IANA timezone in minutes east of UTC. Null when unknown. */
+function getOffsetMinutes(timeZone: string, at: Date): number | null {
+  try {
+    const dtf = new Intl.DateTimeFormat("en-US", {
+      timeZone,
+      hour12: false,
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit",
+    });
+    const parts: Record<string, string> = {};
+    for (const p of dtf.formatToParts(at)) parts[p.type] = p.value;
+    const asUTC = Date.UTC(
+      Number(parts.year),
+      Number(parts.month) - 1,
+      Number(parts.day),
+      Number(parts.hour) % 24,
+      Number(parts.minute),
+      Number(parts.second)
+    );
+    return Math.round((asUTC - at.getTime()) / 60000);
+  } catch {
+    return null;
+  }
+}
+
+/** Current UTC offset of an IANA timezone, e.g. "UTC+03:00". Null when unknown. */
+function formatUtcOffsetLabel(timeZone: string, at: Date = new Date()): string | null {
+  const minutes = getOffsetMinutes(timeZone, at);
+  if (minutes === null) return null;
+  const sign = minutes < 0 ? "-" : "+";
+  const abs = Math.abs(minutes);
+  const hh = String(Math.floor(abs / 60)).padStart(2, "0");
+  const mm = String(abs % 60).padStart(2, "0");
+  return `UTC${sign}${hh}:${mm}`;
+}
+
+/** Short offset form, e.g. "UTC-4" or "UTC+5:30". Null when unknown. */
+function formatUtcOffsetShort(timeZone: string, at: Date = new Date()): string | null {
+  const minutes = getOffsetMinutes(timeZone, at);
+  if (minutes === null) return null;
+  const sign = minutes < 0 ? "-" : "+";
+  const abs = Math.abs(minutes);
+  const h = Math.floor(abs / 60);
+  const m = abs % 60;
+  return m === 0 ? `UTC${sign}${h}` : `UTC${sign}${h}:${String(m).padStart(2, "0")}`;
+}
+
 function defaultDays(): DayRow[] {
   const today = new Date();
   const tomorrow = new Date(today);
@@ -377,7 +428,7 @@ export default function CreateMeetingPoll() {
     if (durationMinutes === null) setDurationMinutes(60);
     try {
       const detected = Intl.DateTimeFormat().resolvedOptions().timeZone;
-      if (detected && details.timezone === "UTC" && (TIMEZONES as string[]).includes(detected)) {
+      if (detected && details.timezone === "UTC") {
         setDetails((prev) => (prev.timezone === "UTC" ? { ...prev, timezone: detected } : prev));
       }
     } catch {}
@@ -390,6 +441,46 @@ export default function CreateMeetingPoll() {
     () => [...days].map((d) => d.date).filter(Boolean).sort()[0] || "",
     [days]
   );
+  // Keep a saved/detected timezone visible even if it isn't in the preset list.
+  const timezoneOptions = useMemo(
+    () =>
+      details.timezone && !TIMEZONES.includes(details.timezone)
+        ? [details.timezone, ...TIMEZONES]
+        : TIMEZONES,
+    [details.timezone]
+  );
+  // e.g. "Europe/Istanbul (UTC+03:00)". Offsets are for right now (DST-aware).
+  const timezoneLabels = useMemo(() => {
+    const now = new Date();
+    return new Map<string, string>(
+      timezoneOptions.map((tz) => {
+        const offset = formatUtcOffsetLabel(tz, now);
+        const name = tz.replace(/_/g, " ");
+        return [tz, offset ? `${name} (${offset})` : name];
+      })
+    );
+  }, [timezoneOptions]);
+  // Live "now" clock for the selected timezone, shown next to the label.
+  const [nowTick, setNowTick] = useState(() => Date.now());
+  useEffect(() => {
+    const id = setInterval(() => setNowTick(Date.now()), 10000);
+    return () => clearInterval(id);
+  }, []);
+  const nowInSelectedTz = useMemo(() => {
+    try {
+      const at = new Date(nowTick);
+      const time = new Intl.DateTimeFormat("en-US", {
+        hour: "numeric",
+        minute: "2-digit",
+        hourCycle: "h23",
+        timeZone: details.timezone,
+      }).format(at);
+      const offset = formatUtcOffsetShort(details.timezone, at);
+      return offset ? `${time} (${offset})` : time;
+    } catch {
+      return null;
+    }
+  }, [details.timezone, nowTick]);
   useCreateStickyHeader(details.title, firstDate, titleSentinelRef);
   useEffect(() => {
     if (navigation.state === "submitting") {
@@ -510,7 +601,7 @@ export default function CreateMeetingPoll() {
     durationMinutes === null || !TIME_RE.test(start) ? "" : addMinutesToTimeString(start, durationMinutes);
 
   return (
-    <div className="max-w-2xl mx-auto space-y-8 py-4">
+    <div className="w-full max-w-4xl mx-auto space-y-8 py-4">
       <div className="space-y-2">
         <Link to="/" className="text-xs font-semibold text-slate-500 hover:text-slate-800 flex items-center gap-1.5 transition-colors">
           <ArrowLeft className="w-3.5 h-3.5" />
@@ -570,27 +661,41 @@ export default function CreateMeetingPoll() {
                   value={details.title}
                   onChange={(e) => updateDetails({ title: e.target.value })}
                   placeholder="e.g., Q4 Product Roadmap & Sprint Planning"
-                  className="w-full px-4 py-3 rounded-xl border border-slate-200/90 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all placeholder:text-slate-400"
+                  className="w-full px-4 py-3 rounded-xl border border-slate-200/90 text-sm focus:outline-none focus:ring-2 focus:ring-green-500/20 focus:border-green-500 transition-all placeholder:text-slate-400"
                 />
               </div>
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div>
-                  <label className="block text-xs font-semibold text-slate-700 mb-1.5">
-                    Timezone
-                  </label>
-                  <select
-                    name="timezone"
-                    value={TIMEZONES.includes(details.timezone) ? details.timezone : "UTC"}
-                    onChange={(e) => updateDetails({ timezone: e.target.value })}
-                    className="w-full px-4 py-3 rounded-xl border border-slate-200/90 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all text-slate-800 bg-white"
-                  >
-                    {TIMEZONES.map((tz) => (
-                      <option key={tz} value={tz}>
-                        {tz}
-                      </option>
-                    ))}
-                  </select>
+                  <div className="flex items-baseline justify-between gap-2 mb-1.5">
+                    <label htmlFor="poll-timezone" className="block text-xs font-semibold text-slate-700">
+                      Timezone
+                    </label>
+                    {nowInSelectedTz && (
+                      <span
+                        className="text-[11px] tabular-nums text-slate-500 shrink-0"
+                        title={`Current time in ${details.timezone}`}
+                      >
+                        {nowInSelectedTz}
+                      </span>
+                    )}
+                  </div>
+                  <div className="relative">
+                    <select
+                      id="poll-timezone"
+                      name="timezone"
+                      value={timezoneOptions.includes(details.timezone) ? details.timezone : "UTC"}
+                      onChange={(e) => updateDetails({ timezone: e.target.value })}
+                      className="w-full appearance-none truncate pl-4 pr-10 py-3 rounded-xl border border-slate-200/90 text-sm font-medium focus:outline-none focus:ring-2 focus:ring-green-500/20 focus:border-green-500 transition-all text-slate-800 bg-white cursor-pointer"
+                    >
+                      {timezoneOptions.map((tz) => (
+                        <option key={tz} value={tz}>
+                          {timezoneLabels.get(tz) ?? tz.replace(/_/g, " ")}
+                        </option>
+                      ))}
+                    </select>
+                    <ChevronDown className="w-4 h-4 text-slate-400 pointer-events-none absolute right-3.5 top-1/2 -translate-y-1/2 shrink-0" aria-hidden="true" />
+                  </div>
                 </div>
 
                 <div>
@@ -603,7 +708,7 @@ export default function CreateMeetingPoll() {
                     value={details.location}
                     onChange={(e) => updateDetails({ location: e.target.value })}
                     placeholder="e.g., https://meet.google.com/xyz or Room 302"
-                    className="w-full px-4 py-3 rounded-xl border border-slate-200/90 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all placeholder:text-slate-400"
+                    className="w-full px-4 py-3 rounded-xl border border-slate-200/90 text-sm focus:outline-none focus:ring-2 focus:ring-green-500/20 focus:border-green-500 transition-all placeholder:text-slate-400"
                   />
                 </div>
               </div>
@@ -620,7 +725,7 @@ export default function CreateMeetingPoll() {
                   value={details.description}
                   onChange={(e) => updateDetails({ description: e.target.value })}
                   placeholder="Topics to discuss, preparation materials, or meeting objectives..."
-                  className="w-full px-4 py-3 rounded-xl border border-slate-200/90 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all placeholder:text-slate-400 leading-relaxed"
+                  className="w-full px-4 py-3 rounded-xl border border-slate-200/90 text-sm focus:outline-none focus:ring-2 focus:ring-green-500/20 focus:border-green-500 transition-all placeholder:text-slate-400 leading-relaxed"
                 />
               </div>
 
@@ -636,7 +741,7 @@ export default function CreateMeetingPoll() {
                     value={details.organizerName}
                     onChange={(e) => updateDetails({ organizerName: e.target.value })}
                     placeholder="e.g., David Kim"
-                    className="w-full px-4 py-3 rounded-xl border border-slate-200/90 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all placeholder:text-slate-400"
+                    className="w-full px-4 py-3 rounded-xl border border-slate-200/90 text-sm focus:outline-none focus:ring-2 focus:ring-green-500/20 focus:border-green-500 transition-all placeholder:text-slate-400"
                   />
                 </div>
 
@@ -651,7 +756,7 @@ export default function CreateMeetingPoll() {
                     value={details.organizerEmail}
                     onChange={(e) => updateDetails({ organizerEmail: e.target.value })}
                     placeholder="david@example.com"
-                    className="w-full px-4 py-3 rounded-xl border border-slate-200/90 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all placeholder:text-slate-400"
+                    className="w-full px-4 py-3 rounded-xl border border-slate-200/90 text-sm focus:outline-none focus:ring-2 focus:ring-green-500/20 focus:border-green-500 transition-all placeholder:text-slate-400"
                   />
                   <span className="text-[11px] text-slate-500 mt-1 block">
                     We'll email your private admin link here to finalize the meeting.
@@ -682,8 +787,8 @@ export default function CreateMeetingPoll() {
                   }}
                   className={`px-4 py-2 rounded-lg border text-sm font-semibold transition-all ${
                     durationMinutes === p.minutes
-                      ? "bg-blue-800 text-white border-blue-800"
-                      : "bg-white text-slate-800 border-slate-200 hover:border-blue-400"
+                      ? "bg-green-600 text-white border-green-600"
+                      : "bg-white text-slate-800 border-slate-200 hover:border-green-500"
                   }`}
                 >
                   {p.label}
@@ -691,11 +796,23 @@ export default function CreateMeetingPoll() {
               ))}
               <button
                 type="button"
-                onClick={() => setShowCustom((v) => !v)}
+                onClick={() => {
+                  if (showCustom) {
+                    setShowCustom(false);
+                  } else {
+                    setCustomMinutes(
+                      durationMinutes !== null &&
+                        !PRESET_DURATIONS.some((p) => p.minutes === durationMinutes)
+                        ? String(durationMinutes)
+                        : ""
+                    );
+                    setShowCustom(true);
+                  }
+                }}
                 className={`px-4 py-2 rounded-lg border text-sm font-semibold transition-all inline-flex items-center gap-1.5 ${
                   showCustom || (durationMinutes !== null && !PRESET_DURATIONS.some((p) => p.minutes === durationMinutes))
-                    ? "border-blue-700 text-blue-700"
-                    : "bg-white text-blue-700 border-blue-600 hover:bg-blue-50"
+                    ? "border-green-700 text-green-700 bg-green-50"
+                    : "bg-white text-green-700 border-green-600 hover:bg-green-50"
                 }`}
               >
                 <span className="text-base leading-none">+</span> Custom duration
@@ -704,50 +821,50 @@ export default function CreateMeetingPoll() {
                 )}
               </button>
             </div>
-            {(showCustom || (durationMinutes !== null && !PRESET_DURATIONS.some((p) => p.minutes === durationMinutes))) && (
+            {showCustom && (
               <div className="flex items-center gap-2 flex-wrap">
                 <input
                   type="number"
                   min={5}
                   max={1440}
-                  value={
-                    durationMinutes !== null && !PRESET_DURATIONS.some((p) => p.minutes === durationMinutes)
-                      ? String(durationMinutes)
-                      : customMinutes
-                  }
-                  onChange={(e) => {
-                    setCustomMinutes(e.target.value);
-                    const parsed = parseInt(e.target.value, 10);
-                    if (!Number.isNaN(parsed) && parsed >= 5 && parsed <= 1440) {
-                      setDurationMinutes(parsed);
+                  value={customMinutes}
+                  onChange={(e) => setCustomMinutes(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") {
+                      e.preventDefault();
+                      applyCustom();
                     }
                   }}
                   placeholder="e.g., 45"
-                  className="w-32 px-3 py-2 text-sm rounded-xl border border-slate-200 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500"
+                  className="w-32 px-3 py-2 text-sm rounded-xl border border-slate-200 bg-white focus:outline-none focus:ring-2 focus:ring-green-500/20 focus:border-green-500"
                 />
                 <span className="text-xs text-slate-500">minutes (5–1440)</span>
                 {(() => {
-                  const parsed = parseInt(
-                    durationMinutes !== null && !PRESET_DURATIONS.some((p) => p.minutes === durationMinutes)
-                      ? String(durationMinutes)
-                      : customMinutes,
-                    10
-                  );
-                  return !Number.isNaN(parsed) && parsed >= 5 && parsed <= 1440 ? (
-                    <span className="text-xs font-bold text-blue-700 bg-blue-50 border border-blue-200 px-2.5 py-1 rounded-full">
-                      = {formatDurationLabel(parsed)}
+                  const parsed = parseInt(customMinutes, 10);
+                  if (!Number.isNaN(parsed) && parsed >= 5 && parsed <= 1440) {
+                    return (
+                      <span className="text-xs font-bold text-green-700 bg-green-50 border border-green-200 px-2.5 py-1 rounded-full">
+                        = {formatDurationLabel(parsed)}
+                      </span>
+                    );
+                  }
+                  return customMinutes.trim() !== "" ? (
+                    <span className="text-xs font-semibold text-rose-600">
+                      Enter a value between 5 and 1440
                     </span>
                   ) : null;
                 })()}
-                {showCustom && (
-                  <button
-                    type="button"
-                    onClick={applyCustom}
-                    className="px-3 py-2 text-xs font-bold rounded-xl bg-blue-600 text-white hover:bg-blue-700"
-                  >
-                    Apply
-                  </button>
-                )}
+                <button
+                  type="button"
+                  onClick={applyCustom}
+                  disabled={(() => {
+                    const parsed = parseInt(customMinutes, 10);
+                    return Number.isNaN(parsed) || parsed < 5 || parsed > 1440;
+                  })()}
+                  className="px-3 py-2 text-xs font-bold rounded-xl bg-green-600 text-white hover:bg-green-700 disabled:opacity-40 disabled:cursor-not-allowed"
+                >
+                  Apply
+                </button>
               </div>
             )}
           </div>
@@ -790,8 +907,8 @@ export default function CreateMeetingPoll() {
             </div>
 
             <div className="space-y-2">
-              {/* Single header row — no per-option duplication */}
-              <div className="hidden sm:grid grid-cols-[24px_minmax(0,1.35fr)_104px_86px_minmax(0,1fr)_52px] gap-2 px-2 text-[10px] uppercase font-bold tracking-wide text-slate-400">
+              {/* Header and rows share the same sm: grid template so columns line up. */}
+              <div className="hidden sm:grid sm:grid-cols-[24px_minmax(0,1.45fr)_132px_104px_minmax(0,1fr)_84px] sm:gap-3 sm:px-3 text-[10px] uppercase font-bold tracking-wide text-slate-400">
                 <span>#</span>
                 <span>Day *</span>
                 <span>Start *</span>
@@ -804,7 +921,7 @@ export default function CreateMeetingPoll() {
                 return (
                   <div
                     key={day.id}
-                    className="flex items-center gap-2 p-2 bg-slate-50/70 rounded-xl border border-slate-200/80 transition-all hover:border-slate-300"
+                    className="flex items-center gap-2 p-2 bg-slate-50/70 rounded-xl border border-slate-200/80 transition-all hover:border-slate-300 sm:grid sm:grid-cols-[24px_minmax(0,1.45fr)_132px_104px_minmax(0,1fr)_84px] sm:gap-3 sm:px-3 sm:py-2.5"
                   >
                     <input type="hidden" name="slotDate" value={day.date} />
                     <input type="hidden" name="slotStartTime" value={isAllDay ? "" : day.startTime} />
@@ -816,12 +933,15 @@ export default function CreateMeetingPoll() {
                       {index + 1}
                     </span>
 
-                    <div className="flex-1 min-w-0 grid grid-cols-2 sm:flex sm:items-center gap-2">
+                    {/* On sm+ this wrapper disappears (contents) so Day/Start/Ends/Label
+                        become direct grid items aligned with the header above. */}
+                    <div className="flex-1 min-w-0 grid grid-cols-2 gap-2 sm:contents">
                       <span className="sr-only">Option {index + 1}</span>
                       <DatePicker
                         value={day.date}
                         onChange={(iso) => updateDay(day.id, { date: iso })}
-                        className="col-span-2 sm:col-span-1 sm:w-[168px] sm:shrink-0"
+                        accent="green"
+                        className="col-span-2 sm:col-span-1 min-w-0"
                       />
 
                       {!isAllDay && (
@@ -831,14 +951,14 @@ export default function CreateMeetingPoll() {
                           aria-label={`Start time for option ${index + 1}`}
                           value={day.startTime}
                           onChange={(e) => updateDay(day.id, { startTime: e.target.value })}
-                          className="w-full sm:w-[104px] sm:shrink-0 px-2.5 py-2 text-xs rounded-xl border border-slate-200 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500"
+                          className="w-full h-10 px-3 text-sm rounded-xl border border-slate-200 bg-white focus:outline-none focus:ring-2 focus:ring-green-500/20 focus:border-green-500 min-w-0"
                         />
                       )}
 
                       {!isAllDay && (
                         <span
                           title={end ? `Ends ${formatTimeDisplay(end)}` : "End time"}
-                          className="self-center text-[11px] font-semibold text-slate-500 whitespace-nowrap tabular-nums sm:w-[86px] sm:shrink-0"
+                          className="flex items-center h-10 text-xs font-semibold text-slate-500 whitespace-nowrap tabular-nums truncate min-w-0"
                         >
                           → {end ? formatTimeDisplay(end) : "—"}
                         </span>
@@ -851,11 +971,11 @@ export default function CreateMeetingPoll() {
                         aria-label={`Label for option ${index + 1} (optional)`}
                         value={day.label}
                         onChange={(e) => updateDay(day.id, { label: e.target.value })}
-                        className="col-span-2 sm:col-span-1 px-2.5 py-2 text-xs rounded-xl border border-slate-200 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 placeholder:text-slate-400 sm:flex-1 sm:min-w-0"
+                        className={`col-span-2 w-full h-10 px-3 text-sm rounded-xl border border-slate-200 bg-white focus:outline-none focus:ring-2 focus:ring-green-500/20 focus:border-green-500 placeholder:text-slate-400 min-w-0 ${isAllDay ? "sm:col-span-3" : "sm:col-span-1"}`}
                       />
                     </div>
 
-                    <div className="flex shrink-0 items-center gap-0.5">
+                    <div className="flex shrink-0 items-center justify-end gap-0.5 sm:w-[84px]">
                       {!isAllDay && (
                         <button
                           type="button"
@@ -884,12 +1004,13 @@ export default function CreateMeetingPoll() {
           </div>
         </div>
 
-        <div className="pt-4 border-t border-slate-100 flex flex-col sm:flex-row items-stretch sm:items-center justify-end gap-3">
+        <div className="pt-4 border-t border-slate-100 space-y-4">
           {turnstileSiteKey && (
-            <div className="sm:mr-auto">
+            <div className="flex justify-start">
               <Turnstile siteKey={turnstileSiteKey} action="create-poll" resetKey={navigation.state} />
             </div>
           )}
+          <div className="flex flex-col-reverse sm:flex-row items-stretch sm:items-center justify-end gap-3">
           <button
             type="button"
             onClick={startOver}
@@ -911,6 +1032,7 @@ export default function CreateMeetingPoll() {
               <span className="inline-flex items-center gap-2">Create Meeting Poll & Get Links <ArrowRight className="w-4 h-4" /></span>
             )}
           </button>
+          </div>
         </div>
       </Form>
     </div>

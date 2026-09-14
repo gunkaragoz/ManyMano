@@ -5,7 +5,7 @@ import { useEffect, useRef } from "react";
 import { ArrowLeft, ArrowRight, ClipboardList, TriangleAlert, X } from "lucide-react";
 import { usePersistentState } from "~/utils/usePersistentState";
 import DatePicker from "~/components/DatePicker";
-import { useCreateStickyHeader, formatStickyDate } from "~/utils/useCreateStickyHeader";
+import { useCreateStickyHeader } from "~/utils/useCreateStickyHeader";
 import { getDb, events, eventSlots } from "~/db";
 import { eq } from "drizzle-orm";
 import {
@@ -385,7 +385,7 @@ export default function CreateSignupSheet() {
   };
 
   return (
-    <div className="max-w-2xl mx-auto space-y-8 py-4">
+    <div className="w-full max-w-4xl mx-auto space-y-8 py-4">
       {/* Header & Back Link */}
       <div className="space-y-2">
         <Link to="/" className="text-xs font-semibold text-slate-500 hover:text-slate-800 flex items-center gap-1.5 transition-colors">
@@ -460,11 +460,6 @@ export default function CreateSignupSheet() {
                   value={details.eventDate || todayStr}
                   onChange={(iso) => updateDetails({ eventDate: iso })}
                 />
-                {(details.eventDate || todayStr) && (
-                  <span className="text-[11px] text-slate-500 mt-1 block">
-                    {formatStickyDate(details.eventDate || todayStr)}
-                  </span>
-                )}
               </div>
 
               <div>

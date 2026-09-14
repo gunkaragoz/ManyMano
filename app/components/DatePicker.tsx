@@ -9,6 +9,8 @@ interface DatePickerProps {
   required?: boolean;
   placeholder?: string;
   className?: string;
+  /** Accent color for selected day, focus ring, and Today affordances. Defaults to blue. */
+  accent?: "blue" | "green";
 }
 
 function parseISO(v: string | undefined): { y: number; m: number; d: number } | null {
@@ -49,6 +51,7 @@ export default function DatePicker({
   required,
   placeholder = "Pick a day",
   className = "",
+  accent = "blue",
 }: DatePickerProps) {
   const controlled = value !== undefined;
   const [internal, setInternal] = useState(defaultValue || "");
@@ -133,6 +136,25 @@ export default function DatePicker({
   const selectedKey = parsed ? toISO(parsed.y, parsed.m, parsed.d) : "";
   const todayKey = toISO(today.getFullYear(), today.getMonth() + 1, today.getDate());
 
+  const accentStyles =
+    accent === "green"
+      ? {
+          triggerFocus: "focus:ring-green-500/20 focus:border-green-500",
+          selectedDay: "bg-green-600 text-white font-bold shadow-sm",
+          dayHover: "text-slate-700 hover:bg-green-50 hover:text-green-700 font-medium",
+          todayRing: "ring-1 ring-green-500 font-bold",
+          todayDot: "w-2 h-2 rounded-full bg-slate-300 hover:bg-green-500 transition-colors",
+          todayButton: "text-[11px] font-bold text-green-600 hover:text-green-700",
+        }
+      : {
+          triggerFocus: "focus:ring-blue-500/20 focus:border-blue-500",
+          selectedDay: "bg-blue-600 text-white font-bold shadow-sm",
+          dayHover: "text-slate-700 hover:bg-blue-50 hover:text-blue-700 font-medium",
+          todayRing: "ring-1 ring-blue-500 font-bold",
+          todayDot: "w-2 h-2 rounded-full bg-slate-300 hover:bg-blue-500 transition-colors",
+          todayButton: "text-[11px] font-bold text-blue-600 hover:text-blue-700",
+        };
+
   return (
     <div ref={wrapRef} className={`relative ${className}`}>
       {name && <input type="hidden" name={name} value={current} required={required} />}
@@ -141,7 +163,7 @@ export default function DatePicker({
         onClick={() => setOpen((v) => !v)}
         aria-haspopup="dialog"
         aria-expanded={open}
-        className="w-full px-3 py-2 text-xs sm:text-sm rounded-xl border border-slate-200 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all flex items-center gap-2 text-left text-slate-800 hover:border-slate-300 min-w-0"
+        className={`w-full h-10 px-3 text-sm rounded-xl border border-slate-200 bg-white focus:outline-none focus:ring-2 ${accentStyles.triggerFocus} transition-all flex items-center gap-2 text-left text-slate-800 hover:border-slate-300 min-w-0`}
       >
         <CalendarDays className="w-4 h-4 text-slate-400 shrink-0" />
         <span className={`${current ? "font-semibold" : "text-slate-400"} truncate whitespace-nowrap min-w-0 flex-1`}>
@@ -174,7 +196,7 @@ export default function DatePicker({
                 }}
                 aria-label="Go to today"
                 title="Go to today"
-                className="w-2 h-2 rounded-full bg-slate-300 hover:bg-blue-500 transition-colors"
+                className={accentStyles.todayDot}
               />
               <button
                 type="button"
@@ -210,11 +232,11 @@ export default function DatePicker({
                   className={[
                     "h-8 w-8 mx-auto rounded-full text-xs flex items-center justify-center transition-all",
                     isSelected
-                      ? "bg-blue-600 text-white font-bold shadow-sm"
+                      ? accentStyles.selectedDay
                       : c.inMonth
-                        ? "text-slate-700 hover:bg-blue-50 hover:text-blue-700 font-medium"
+                        ? accentStyles.dayHover
                         : "text-slate-300 hover:bg-slate-50",
-                    !isSelected && isToday ? "ring-1 ring-blue-500 font-bold" : "",
+                    !isSelected && isToday ? accentStyles.todayRing : "",
                   ].join(" ")}
                 >
                   {c.d}
@@ -230,7 +252,7 @@ export default function DatePicker({
                 const t = new Date();
                 commit(toISO(t.getFullYear(), t.getMonth() + 1, t.getDate()));
               }}
-              className="text-[11px] font-bold text-blue-600 hover:text-blue-700"
+              className={accentStyles.todayButton}
             >
               Today
             </button>
