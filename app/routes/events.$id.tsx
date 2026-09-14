@@ -1950,6 +1950,8 @@ export default function EventView() {
   // so server and client render identical hrefs/values (no hydration
   // mismatch). Never use window.location directly in render.
   const publicLink = `${origin}/events/${event.id}`;
+  // QR image for the header (raw PNG). The bare /qr URL is a titled page.
+  const qrSrc = `/events/${event.id}/qr?format=png`;
   // Built from the verified token (loader), never the address bar: the loader
   // strips ?admin= from the URL, so copying the current URL would lose it.
   const adminLink = adminToken
@@ -2161,6 +2163,22 @@ export default function EventView() {
 
       {/* Event Header Card */}
       <div className="bg-white border border-slate-200/80 rounded-3xl p-6 sm:p-8 shadow-[0_2px_12px_rgba(0,0,0,0.03)] space-y-5">
+        <div className="min-w-0 flow-root">
+          <a
+            href={`/events/${event.id}/qr`}
+            title="Open QR code"
+            className="float-right ml-3 mb-3"
+          >
+            <img
+              src={qrSrc}
+              alt={`QR code for ${event.title} — scan to open this event`}
+              title="Scan to open this event"
+              width={104}
+              height={104}
+              loading="lazy"
+              className="block w-[88px] h-[88px] sm:w-[104px] sm:h-[104px] rounded-2xl border border-slate-200 bg-white p-1 shadow-sm"
+            />
+          </a>
         <div className="space-y-3 min-w-0">
           <div className="flex items-center gap-2 flex-wrap">
             <span className="text-[11px] font-bold uppercase tracking-wider px-3 py-1 rounded-full bg-blue-50 text-blue-700 border border-blue-100">
@@ -2259,6 +2277,7 @@ export default function EventView() {
           <p className="text-xs text-slate-400 pt-0.5">
             Anyone with the link can see names/notes. Organizer can delete anytime below.
           </p>
+        </div>
         </div>
 
         {/* Quick Action Buttons — 2-column grid to avoid sidebar blank space */}

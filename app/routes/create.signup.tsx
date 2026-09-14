@@ -234,6 +234,9 @@ export async function action({ request, context }: ActionFunctionArgs) {
   const url = new URL(request.url);
   const adminUrl = `${url.origin}/events/${eventId}?admin=${adminToken}`;
   const publicUrl = `${url.origin}/events/${eventId}`;
+  // Auto-generated QR code (PNG) encoding the public link — organizers can
+  // print it on flyers or show it at the door; scanning opens the event page.
+  const qrUrl = `${publicUrl}/qr?format=png`;
 
   await sendEmail({
     apiKey: env.RESEND_API_KEY,
@@ -248,6 +251,11 @@ export async function action({ request, context }: ActionFunctionArgs) {
         <div style="background: #f8fafc; border: 1px solid #e2e8f0; padding: 18px; border-radius: 12px; margin: 20px 0;">
           <p style="margin: 0 0 12px 0;"><strong>Public Link for Participants:</strong><br><a href="${escapeHtml(publicUrl)}" style="color: #2563eb;">${escapeHtml(publicUrl)}</a></p>
           <p style="margin: 0;"><strong>Secret Management Link (Keep Private!):</strong><br><a href="${escapeHtml(adminUrl)}" style="color: #2563eb;">${escapeHtml(adminUrl)}</a></p>
+        </div>
+        <div style="text-align: center; margin: 20px 0;">
+          <p style="margin: 0 0 8px 0;"><strong>QR code for your event page:</strong></p>
+          <a href="${escapeHtml(publicUrl)}"><img src="${escapeHtml(qrUrl)}" alt="QR code linking to your event page" width="180" height="180" style="width: 180px; height: 180px; border: 1px solid #e2e8f0; border-radius: 12px; padding: 6px; background: #ffffff;" /></a>
+          <p style="margin: 8px 0 0 0; font-size: 13px; color: #64748b;">Scan to open the event page — print it on flyers or show it at the door.</p>
         </div>
         ${eventDate ? `<p><strong>Date:</strong> ${escapeHtml(formatLongDateLabel(eventDate))}</p>` : ""}
         ${description ? `<p><strong>Description:</strong><br>${escapeHtml(description).replace(/\r?\n/g, "<br>")}</p>` : ""}
