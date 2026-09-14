@@ -37,7 +37,8 @@ import {
   secretMatches,
 } from "~/utils/auth";
 import { expiryDateFor, isExpired, pruneExpiredEvents, RETENTION_DAYS } from "~/utils/retention";
-import { verifyTurnstile, turnstileFailure } from "~/utils/turnstile";
+import { verifyTurnstile, turnstileFailure, hasTurnstileToken } from "~/utils/turnstile";
+import { assessGuestRequest, needsVerification } from "~/utils/bot-protection";
 import Turnstile from "~/components/Turnstile";
 import DatePicker from "~/components/DatePicker";
 import { buildGoogleCalendarUrl, pickCalendarSlot, effectiveDateForSlot, formatSlotDateLabel, formatDurationLabel } from "~/utils/calendar";
@@ -448,16 +449,41 @@ export async function action({ request, params, context }: ActionFunctionArgs) {
       return json({ error: "Please enter a valid email address." }, { status: 400 });
     }
 
-    // Bot protection before any DB work.
-    const turnstileSignup = await verifyTurnstile({
-      token: formData.get("cf-turnstile-response") as string | null,
-      expectedAction: "event-signup",
-      env,
-      remoteIp: request.headers.get("cf-connecting-ip"),
+    // Progressive bot protection: frictionless for humans, Turnstile only
+    // when honeypot/time-trap/rate-limit says suspicious. No widget is
+    // rendered upfront — the client mounts it only on needsVerification.
+    const guestCheck = assessGuestRequest(formData, {
+      ip: request.headers.get("cf-connecting-ip") || "unknown",
+      eventId,
     });
-    if (!turnstileSignup.ok) {
-      const f = turnstileFailure();
-      return json(f.body, { status: f.status });
+    if (guestCheck.verdict === "bot") {
+      // Silent fake-success: don't tip bots that the honeypot caught them.
+      return json({ success: true, message: `Thank you ${participantName}! Your spot has been confirmed.` });
+    }
+    if (guestCheck.verdict === "challenge") {
+      const turnstileSignup = await verifyTurnstile({
+        token: formData.get("cf-turnstile-response") as string | null,
+        expectedAction: "event-signup",
+        env,
+        remoteIp: request.headers.get("cf-connecting-ip"),
+      });
+      if (!turnstileSignup.ok) {
+        const f = needsVerification(guestCheck);
+        return json(f.body, { status: f.status });
+      }
+    } else if (hasTurnstileToken(formData)) {
+      // Low-risk retry carrying a token (e.g. after a prior challenge):
+      // verify opportunistically so a solved token is consumed correctly.
+      const turnstileSignup = await verifyTurnstile({
+        token: formData.get("cf-turnstile-response") as string | null,
+        expectedAction: "event-signup",
+        env,
+        remoteIp: request.headers.get("cf-connecting-ip"),
+      });
+      if (!turnstileSignup.ok) {
+        const f = turnstileFailure(false);
+        return json(f.body, { status: f.status });
+      }
     }
 
     const [targetSlot] = await db.select().from(eventSlots).where(eq(eventSlots.id, slotId)).limit(1);
@@ -602,16 +628,36 @@ export async function action({ request, params, context }: ActionFunctionArgs) {
       return json({ error: "Please enter a valid email address." }, { status: 400 });
     }
 
-    // Bot protection before any DB writes.
-    const turnstileVote = await verifyTurnstile({
-      token: formData.get("cf-turnstile-response") as string | null,
-      expectedAction: "poll-vote",
-      env,
-      remoteIp: request.headers.get("cf-connecting-ip"),
+    // Progressive bot protection (same as signup): no upfront widget.
+    const guestVoteCheck = assessGuestRequest(formData, {
+      ip: request.headers.get("cf-connecting-ip") || "unknown",
+      eventId,
     });
-    if (!turnstileVote.ok) {
-      const f = turnstileFailure();
-      return json(f.body, { status: f.status });
+    if (guestVoteCheck.verdict === "bot") {
+      return json({ success: true, message: `Availability recorded for ${participantName}!` });
+    }
+    if (guestVoteCheck.verdict === "challenge") {
+      const turnstileVote = await verifyTurnstile({
+        token: formData.get("cf-turnstile-response") as string | null,
+        expectedAction: "poll-vote",
+        env,
+        remoteIp: request.headers.get("cf-connecting-ip"),
+      });
+      if (!turnstileVote.ok) {
+        const f = needsVerification(guestVoteCheck);
+        return json(f.body, { status: f.status });
+      }
+    } else if (hasTurnstileToken(formData)) {
+      const turnstileVote = await verifyTurnstile({
+        token: formData.get("cf-turnstile-response") as string | null,
+        expectedAction: "poll-vote",
+        env,
+        remoteIp: request.headers.get("cf-connecting-ip"),
+      });
+      if (!turnstileVote.ok) {
+        const f = turnstileFailure(false);
+        return json(f.body, { status: f.status });
+      }
     }
 
     const voteSlots = await db.select().from(eventSlots).where(eq(eventSlots.eventId, eventId));
@@ -998,11 +1044,17 @@ export default function EventView() {
     origin,
     siteName,
   } = useLoaderData<typeof loader>();
-  const actionData = useActionData<{ success?: boolean; message?: string; error?: string; voteId?: string }>();
+  const actionData = useActionData<{ success?: boolean; message?: string; error?: string; voteId?: string; needsVerification?: boolean }>();
   const [searchParams] = useSearchParams();
   const navigation = useNavigation();
   const isSubmitting = navigation.state === "submitting";
   const cancelTokenParam = searchParams.get("cancel_token");
+  // Time-trap baseline: set once per page view. Submitted as formStartedAt so
+  // the server can tell a 300ms bot replay from a human who read the page.
+  const [pageLoadedAt] = useState(() => Date.now());
+  // Only mount Turnstile when the server actually challenged us — this is
+  // what keeps guests frictionless 99% of the time.
+  const needsHumanCheck = Boolean(actionData?.needsVerification);
 
   // ------------------------------------------------------------------
   // Real-time sync (polling): re-run the event loader in the background
@@ -1098,6 +1150,12 @@ export default function EventView() {
   const justCancelled = Boolean(searchParams.get("cancelled"));
   const cancelError = Boolean(searchParams.get("cancel_error"));
   const [selectedSlotForSignup, setSelectedSlotForSignup] = useState<{ id: string; title: string } | null>(null);
+  // Close the signup modal on success; keep it open on error/challenge so
+  // the on-demand Turnstile stays visible for a retry.
+  useEffect(() => {
+    if (actionData?.success && selectedSlotForSignup) setSelectedSlotForSignup(null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [actionData]);
   const [copiedLink, setCopiedLink] = useState<string | null>(null);
   const [showEdit, setShowEdit] = useState(false);
 
@@ -2625,6 +2683,14 @@ export default function EventView() {
                   <input type="hidden" name="clientVoteId" value={clientVoteId || ""} />
                   <input type="hidden" name="participantName" value={voterName} />
                   <input type="hidden" name="participantEmail" value={voterEmail} />
+                  <input type="hidden" name="formStartedAt" value={pageLoadedAt} />
+                  {/* Honeypot: humans never see it, bots autofill it. */}
+                  <div className="absolute -left-[9999px] top-auto w-px h-px overflow-hidden" aria-hidden="true">
+                    <label>
+                      Company website (leave blank)
+                      <input type="text" name="company_website" autoComplete="off" tabIndex={-1} />
+                    </label>
+                  </div>
 
                   {slots.map((s) => (
                     <input
@@ -2635,8 +2701,13 @@ export default function EventView() {
                     />
                   ))}
 
+                  {needsHumanCheck && (
+                    <p className="text-xs font-medium text-amber-700 bg-amber-50 border border-amber-200 rounded-xl px-3 py-2 text-right">
+                      Lots of activity from your network — one quick check, then you&apos;re through.
+                    </p>
+                  )}
                   <div className="flex flex-col sm:flex-row sm:items-center justify-end gap-3">
-                    {turnstileSiteKey && (
+                    {needsHumanCheck && turnstileSiteKey && (
                       <div className="flex justify-end sm:items-center [&:empty]:hidden [&:has(.cf-turnstile:empty)]:hidden">
                         <Turnstile siteKey={turnstileSiteKey} action="poll-vote" resetKey={navigation.state} />
                       </div>
@@ -2677,9 +2748,17 @@ export default function EventView() {
               <span className="text-blue-700">at {event.title}</span>
             </div>
 
-            <Form method="post" onSubmit={() => setSelectedSlotForSignup(null)} className="space-y-4 text-xs">
+            <Form method="post" className="space-y-4 text-xs">
               <input type="hidden" name="intent" value="signup" />
               <input type="hidden" name="slotId" value={selectedSlotForSignup.id} />
+              <input type="hidden" name="formStartedAt" value={pageLoadedAt} />
+              {/* Honeypot: humans never see it, bots autofill it. */}
+              <div className="absolute -left-[9999px] top-auto w-px h-px overflow-hidden" aria-hidden="true">
+                <label>
+                  Company website (leave blank)
+                  <input type="text" name="company_website" autoComplete="off" tabIndex={-1} />
+                </label>
+              </div>
 
               <div>
                 <label className="font-semibold block text-slate-700 mb-1.5">Your Full Name *</label>
@@ -2716,7 +2795,12 @@ export default function EventView() {
                 />
               </div>
 
-              {turnstileSiteKey && (
+              {needsHumanCheck && actionData?.error && (
+                <p className="text-xs font-medium text-amber-700 bg-amber-50 border border-amber-200 rounded-xl px-3 py-2">
+                  {actionData.error}
+                </p>
+              )}
+              {needsHumanCheck && turnstileSiteKey && (
                 <Turnstile siteKey={turnstileSiteKey} action="event-signup" resetKey={navigation.state} />
               )}
 

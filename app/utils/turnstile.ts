@@ -76,9 +76,20 @@ export async function verifyTurnstile(opts: {
   return { ok: true };
 }
 
-export function turnstileFailure() {
+export function turnstileFailure(needsVerification = false) {
   return {
-    body: { error: "Bot verification failed. Please complete the challenge and try again." },
+    body: {
+      error: needsVerification
+        ? "One quick human check is needed — please complete the challenge and try again."
+        : "Bot verification failed. Please complete the challenge and try again.",
+      needsVerification: needsVerification as boolean,
+    },
     status: 403 as const,
   };
+}
+
+/** True when the client actually submitted a (possibly stale) token. */
+export function hasTurnstileToken(formData: FormData): boolean {
+  const token = ((formData.get("cf-turnstile-response") as string | null) ?? "").trim();
+  return token.length > 0;
 }
