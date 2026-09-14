@@ -15,7 +15,7 @@ import {
   generateSecretToken,
   generateUniquePublicId,
 } from "~/utils/ids";
-import { sendEmail } from "~/utils/email";
+import { sendEmail, emailFooter } from "~/utils/email";
 import { escapeHtml } from "~/utils/sanitize";
 import { buildAdminCookie, hashSecretForStorage } from "~/utils/auth";
 import { verifyTurnstile, turnstileFailure } from "~/utils/turnstile";
@@ -36,7 +36,7 @@ import {
 } from "~/utils/validation";
 import { pruneExpiredEvents } from "~/utils/retention";
 import { getSiteConfig } from "~/utils/site";
-import { addMinutesToTimeString, formatSlotDateLabel, formatDurationLabel } from "~/utils/calendar";
+import { addMinutesToTimeString, formatSlotDateLabel, formatLongDateLabel, formatDurationLabel } from "~/utils/calendar";
 import {
   getPageMeta,
   breadcrumbJsonLd,
@@ -270,7 +270,13 @@ export async function action({ request, context }: ActionFunctionArgs) {
   const proposedList = [...validSlots]
     .sort((a, b) => (a.slotDate + (a.startTime || "")).localeCompare(b.slotDate + (b.startTime || "")))
     .slice(0, 8)
-    .map((s) => `<li>${escapeHtml(s.title)}</li>`)
+    .map((s) => {
+      const dayLabel = formatLongDateLabel(s.slotDate);
+      const timeLabel = s.startTime
+        ? `${formatTimeDisplay(s.startTime)}${s.endTime ? ` – ${formatTimeDisplay(s.endTime)}` : ""}`
+        : "All day";
+      return `<li>${escapeHtml(dayLabel)} · ${escapeHtml(timeLabel)}</li>`;
+    })
     .join("");
   const moreCount = validSlots.length > 8 ? `<p>…and ${validSlots.length - 8} more option(s).</p>` : "";
   const durationLabel = formatDurationLabel(durationMinutes);
@@ -290,10 +296,11 @@ export async function action({ request, context }: ActionFunctionArgs) {
           <p style="margin: 0;"><strong>Secret Management Link (Keep Private!):</strong><br><a href="${escapeHtml(adminUrl)}" style="color: #2563eb;">${escapeHtml(adminUrl)}</a></p>
         </div>
         <p><strong>Duration:</strong> ${escapeHtml(durationLabel)} &nbsp;·&nbsp; <strong>Days:</strong> ${validSlots.length}</p>
+        ${description ? `<p><strong>Description:</strong><br>${escapeHtml(description).replace(/\r?\n/g, "<br>")}</p>` : ""}
         <ul>${proposedList}</ul>
         ${moreCount}
         <p style="font-size: 13px; color: #64748b;">Use your secret management link to see live vote tallies, lock the winning time, and generate calendar invites. You can delete it anytime from Organizer Admin Mode.</p>
-        <p style="margin-top: 24px; font-weight: 600;">— ${escapeHtml(site.siteName)}</p>
+        ${emailFooter(site)}
       </div>
     `,
   });

@@ -15,7 +15,8 @@ import {
   generateSecretToken,
   generateUniquePublicId,
 } from "~/utils/ids";
-import { sendEmail } from "~/utils/email";
+import { sendEmail, emailFooter } from "~/utils/email";
+import { formatLongDateLabel } from "~/utils/calendar";
 import { escapeHtml } from "~/utils/sanitize";
 import { buildAdminCookie, hashSecretForStorage } from "~/utils/auth";
 import {
@@ -248,9 +249,10 @@ export async function action({ request, context }: ActionFunctionArgs) {
           <p style="margin: 0 0 12px 0;"><strong>Public Link for Participants:</strong><br><a href="${escapeHtml(publicUrl)}" style="color: #2563eb;">${escapeHtml(publicUrl)}</a></p>
           <p style="margin: 0;"><strong>Secret Management Link (Keep Private!):</strong><br><a href="${escapeHtml(adminUrl)}" style="color: #2563eb;">${escapeHtml(adminUrl)}</a></p>
         </div>
-        ${eventDate ? `<p><strong>Date:</strong> ${escapeHtml(eventDate)}</p>` : ""}
+        ${eventDate ? `<p><strong>Date:</strong> ${escapeHtml(formatLongDateLabel(eventDate))}</p>` : ""}
+        ${description ? `<p><strong>Description:</strong><br>${escapeHtml(description).replace(/\r?\n/g, "<br>")}</p>` : ""}
         <p style="font-size: 13px; color: #64748b;">Use the secret management link to view RSVPs, download CSV spreadsheets, and manage sign-ups. You can delete it anytime from Organizer Admin Mode.</p>
-        <p style="margin-top: 24px; font-weight: 600;">— ${escapeHtml(site.siteName)}</p>
+        ${emailFooter(site)}
       </div>
     `,
   });

@@ -237,6 +237,33 @@ export function formatSlotDateLabel(dateStr: string | null | undefined): string 
   });
 }
 
+function ordinalSuffix(day: number): string {
+  if (day >= 11 && day <= 13) return "th";
+  switch (day % 10) {
+    case 1:
+      return "st";
+    case 2:
+      return "nd";
+    case 3:
+      return "rd";
+    default:
+      return "th";
+  }
+}
+
+/** Long date label for a "YYYY-MM-DD" date, e.g. "Saturday, September 20th, 2026". Falls back to input. */
+export function formatLongDateLabel(dateStr: string | null | undefined): string {
+  if (!dateStr) return "";
+  const m = dateStr.trim().match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (!m) return dateStr;
+  const d = new Date(Date.UTC(parseInt(m[1], 10), parseInt(m[2], 10) - 1, parseInt(m[3], 10)));
+  if (isNaN(d.getTime())) return dateStr;
+  const weekday = d.toLocaleDateString("en-US", { weekday: "long", timeZone: "UTC" });
+  const month = d.toLocaleDateString("en-US", { month: "long", timeZone: "UTC" });
+  const day = parseInt(m[3], 10);
+  return `${weekday}, ${month} ${day}${ordinalSuffix(day)}, ${m[1]}`;
+}
+
 /** "20261017T140000Z" — the format Google Calendar's template endpoint wants. */
 export function formatDateForGoogle(date: Date): string {
   return (

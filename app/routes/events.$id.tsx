@@ -27,7 +27,7 @@ import {
 } from "lucide-react";
 import { getDb, events, eventSlots, signups, pollVotes, pollVoteEntries } from "~/db";
 import { generateInternalId, generateSecretToken } from "~/utils/ids";
-import { sendEmail } from "~/utils/email";
+import { sendEmail, emailFooter } from "~/utils/email";
 import { escapeHtml } from "~/utils/sanitize";
 import {
   buildAdminCookie,
@@ -43,7 +43,7 @@ import { assessGuestRequest, needsVerification } from "~/utils/bot-protection";
 import Turnstile from "~/components/Turnstile";
 import DatePicker from "~/components/DatePicker";
 import TimezoneSelect from "~/components/TimezoneSelect";
-import { buildGoogleCalendarUrl, pickCalendarSlot, effectiveDateForSlot, formatSlotDateLabel, formatDurationLabel, addMinutesToTimeString, parseTimeString } from "~/utils/calendar";
+import { buildGoogleCalendarUrl, pickCalendarSlot, effectiveDateForSlot, formatSlotDateLabel, formatLongDateLabel, formatDurationLabel, addMinutesToTimeString, parseTimeString } from "~/utils/calendar";
 import {
   detectLocalTimezone,
   formatInstantDateInZone,
@@ -566,8 +566,29 @@ export async function action({ request, params, context }: ActionFunctionArgs) {
     // Send confirmation email to participant if email provided
     if (participantEmail) {
       const cancelUrl = `${url.origin}/events/${eventId}?cancel_token=${encodeURIComponent(editTokenPlain)}`;
+      const eventUrl = `${url.origin}/events/${eventId}`;
       const shiftPrefix = ((targetSlot as { shiftName?: string | null }).shiftName || "").trim();
       const taskLabel = shiftPrefix ? `${shiftPrefix} – ${targetSlot.title}` : targetSlot.title;
+      const whenDatePart = event.eventDate ? formatLongDateLabel(event.eventDate) : "";
+      const whenTimePart = targetSlot.startTime
+        ? `${formatTime(targetSlot.startTime)}${targetSlot.endTime ? ` – ${formatTime(targetSlot.endTime)}` : ""}`
+        : targetSlot.endTime
+          ? formatTime(targetSlot.endTime)
+          : "";
+      // Same "City · GMT±HH:MM" format as the UI header (never raw IANA or
+      // abbreviations like "EDT"). Offset is taken at the event instant (DST-aware).
+      const organizerTz = (event.timezone || "").trim() || "UTC";
+      const orgAt =
+        event.eventDate && targetSlot.startTime
+          ? zonedWallTimeToUtc(event.eventDate, targetSlot.startTime, organizerTz)
+          : null;
+      const whenTzPart = (() => {
+        const city = timezoneCity(organizerTz);
+        const offset = formatUtcOffsetLabel(organizerTz, orgAt ?? new Date());
+        return offset ? `${city} · ${offset}` : city;
+      })();
+      const whenBase = [whenDatePart, whenTimePart].filter(Boolean).join(" · ");
+      const whenLine = whenBase ? (whenTzPart ? `${whenBase} (${whenTzPart})` : whenBase) : whenTzPart;
       const googleCalendarUrl = buildGoogleCalendarUrl({
         title: `${taskLabel} — ${event.title}`,
         description: event.description,
@@ -589,7 +610,10 @@ export async function action({ request, params, context }: ActionFunctionArgs) {
             <h2 style="color: #0f172a; margin-top: 0;">You're signed up!</h2>
             <p>Hi ${escapeHtml(participantName)},</p>
             <p>You have secured your spot for <strong>${escapeHtml(taskLabel)}</strong> at <strong>${escapeHtml(event.title)}</strong>.</p>
+            ${whenLine ? `<p><strong>When:</strong> ${escapeHtml(whenLine)}</p>` : ""}
             ${event.location ? `<p><strong>Location:</strong> ${escapeHtml(event.location)}</p>` : ""}
+            ${event.description ? `<p><strong>Description:</strong><br>${escapeHtml(event.description).replace(/\r?\n/g, "<br>")}</p>` : ""}
+            <p><strong>Event page:</strong> <a href="${escapeHtml(eventUrl)}" style="color: #2563eb;">${escapeHtml(eventUrl)}</a></p>
             <p>
               <a href="${escapeHtml(googleCalendarUrl)}" style="color: #2563eb;">Add to Google Calendar</a>
               &nbsp;·&nbsp;
@@ -599,7 +623,7 @@ export async function action({ request, params, context }: ActionFunctionArgs) {
               <p style="margin: 0 0 10px 0; font-size: 13px;"><strong>Need to cancel?</strong></p>
               <a href="${escapeHtml(cancelUrl)}" style="color: #dc2626; font-size: 13px;">Cancel this sign-up</a>
             </div>
-            <p style="margin-top: 24px; font-weight: 600;">— ${escapeHtml(site.siteName)}</p>
+            ${emailFooter(site)}
           </div>
         `,
       });
@@ -785,8 +809,46 @@ export async function action({ request, params, context }: ActionFunctionArgs) {
 
     await saveEntries(voteId);
 
+    // Current consensus: frontrunner option by YES count (MAYBE breaks ties),
+    // computed over all votes including the one just saved.
+    let consensusLine = "";
+    if (voteSlots.length > 0) {
+      const slotIds = voteSlots.map((s) => s.id);
+      const allEntries = await db
+        .select({ slotId: pollVoteEntries.slotId, response: pollVoteEntries.response })
+        .from(pollVoteEntries)
+        .where(inArray(pollVoteEntries.slotId, slotIds));
+      const yesCount = new Map<string, number>();
+      const maybeCount = new Map<string, number>();
+      for (const e of allEntries) {
+        if (e.response === "YES") yesCount.set(e.slotId, (yesCount.get(e.slotId) ?? 0) + 1);
+        else if (e.response === "MAYBE") maybeCount.set(e.slotId, (maybeCount.get(e.slotId) ?? 0) + 1);
+      }
+      const ranked = [...voteSlots].sort(
+        (a, b) =>
+          (yesCount.get(b.id) ?? 0) - (yesCount.get(a.id) ?? 0) ||
+          (maybeCount.get(b.id) ?? 0) - (maybeCount.get(a.id) ?? 0)
+      );
+      const top = ranked[0];
+      const topYes = yesCount.get(top.id) ?? 0;
+      const topMaybe = maybeCount.get(top.id) ?? 0;
+      if (topYes > 0 || topMaybe > 0) {
+        const topDate = top.slotDate ?? event.eventDate;
+        const topTime = top.startTime
+          ? `${formatTime(top.startTime)}${top.endTime ? ` – ${formatTime(top.endTime)}` : ""}`
+          : top.endTime
+            ? formatTime(top.endTime)
+            : "";
+        const topWhen = [topDate ? formatLongDateLabel(topDate) : "", topTime]
+          .filter(Boolean)
+          .join(" · ");
+        consensusLine = `${topWhen || top.title} (${topYes} yes${topMaybe ? `, ${topMaybe} maybe` : ""})`;
+      }
+    }
+
     if (participantEmail) {
       const manageUrl = `${url.origin}/events/${eventId}?cancel_token=${encodeURIComponent(editTokenPlain)}`;
+      const eventUrl = `${url.origin}/events/${eventId}`;
       await sendEmail({
         apiKey: env.RESEND_API_KEY,
         from: site.fromEmail,
@@ -796,7 +858,11 @@ export async function action({ request, params, context }: ActionFunctionArgs) {
           <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto; padding: 24px; color: #1e293b;">
             <p>Hi ${escapeHtml(participantName)},</p>
             <p>Your availability for <strong>${escapeHtml(event.title)}</strong> is recorded.</p>
+            ${event.description ? `<p><strong>Description:</strong><br>${escapeHtml(event.description).replace(/\r?\n/g, "<br>")}</p>` : ""}
+            ${consensusLine ? `<p><strong>Leading option so far:</strong> ${escapeHtml(consensusLine)}</p>` : ""}
+            <p><strong>Event page:</strong> <a href="${escapeHtml(eventUrl)}" style="color: #2563eb;">${escapeHtml(eventUrl)}</a></p>
             <p><a href="${escapeHtml(manageUrl)}" style="color: #dc2626;">Remove my vote</a></p>
+            ${emailFooter(site)}
           </div>
         `,
       });
@@ -842,7 +908,14 @@ export async function action({ request, params, context }: ActionFunctionArgs) {
     }
     // Validate the winning slot belongs to this event (no arbitrary IDs).
     const [winningSlot] = await db
-      .select({ id: eventSlots.id, eventId: eventSlots.eventId })
+      .select({
+        id: eventSlots.id,
+        eventId: eventSlots.eventId,
+        title: eventSlots.title,
+        slotDate: eventSlots.slotDate,
+        startTime: eventSlots.startTime,
+        endTime: eventSlots.endTime,
+      })
       .from(eventSlots)
       .where(eq(eventSlots.id, winningSlotId))
       .limit(1);
@@ -858,6 +931,73 @@ export async function action({ request, params, context }: ActionFunctionArgs) {
         updatedAt: now,
       })
       .where(eq(events.id, eventId));
+
+    // Notify every voter that left an email address. Emails are best-effort:
+    // a failed send never fails the finalize itself (sendEmail never throws).
+    const eventUrl = `${url.origin}/events/${eventId}`;
+    const lockedDate = effectiveDateForSlot(winningSlot, event.eventDate);
+    const lockedTimePart = winningSlot.startTime
+      ? `${formatTime(winningSlot.startTime)}${winningSlot.endTime ? ` – ${formatTime(winningSlot.endTime)}` : ""}`
+      : winningSlot.endTime
+        ? formatTime(winningSlot.endTime)
+        : "";
+    const lockedTz = (event.timezone || "").trim() || "UTC";
+    const lockedAt =
+      lockedDate && winningSlot.startTime
+        ? zonedWallTimeToUtc(lockedDate, winningSlot.startTime, lockedTz)
+        : null;
+    const lockedTzPart = (() => {
+      const city = timezoneCity(lockedTz);
+      const offset = formatUtcOffsetLabel(lockedTz, lockedAt ?? new Date());
+      return offset ? `${city} · ${offset}` : city;
+    })();
+    const lockedBase = [lockedDate ? formatLongDateLabel(lockedDate) : "", lockedTimePart]
+      .filter(Boolean)
+      .join(" · ");
+    const lockedWhen = lockedBase ? (lockedTzPart ? `${lockedBase} (${lockedTzPart})` : lockedBase) : lockedTzPart;
+    const lockedCalendarUrl = buildGoogleCalendarUrl({
+      title: event.title,
+      description: event.description,
+      location: event.location,
+      eventDate: lockedDate,
+      startTime: winningSlot.startTime,
+      endTime: winningSlot.endTime,
+      timeZone: event.timezone,
+      url: eventUrl,
+      fallbackTitle: `${site.siteName} Event`,
+    });
+    const voters = await db.select().from(pollVotes).where(eq(pollVotes.eventId, eventId));
+    const notified = new Set<string>();
+    for (const v of voters) {
+      const voterEmail = (v.participantEmail || "").trim();
+      if (!voterEmail || !isValidEmail(voterEmail)) continue;
+      const key = voterEmail.toLowerCase();
+      if (notified.has(key)) continue;
+      notified.add(key);
+      await sendEmail({
+        apiKey: env.RESEND_API_KEY,
+        from: site.fromEmail,
+        to: voterEmail,
+        subject: `Locked in: "${event.title}" — ${lockedBase || winningSlot.title}`,
+        html: `
+          <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto; padding: 24px; color: #1e293b;">
+            <h2 style="color: #0f172a; margin-top: 0;">Meeting time locked in!</h2>
+            <p>Hi ${escapeHtml(v.participantName)},</p>
+            <p>The time for <strong>${escapeHtml(event.title)}</strong> has been decided:</p>
+            ${lockedWhen ? `<p><strong>When:</strong> ${escapeHtml(lockedWhen)}</p>` : ""}
+            ${event.location ? `<p><strong>Location:</strong> ${escapeHtml(event.location)}</p>` : ""}
+            ${event.description ? `<p><strong>Description:</strong><br>${escapeHtml(event.description).replace(/\r?\n/g, "<br>")}</p>` : ""}
+            <p><strong>Event page:</strong> <a href="${escapeHtml(eventUrl)}" style="color: #2563eb;">${escapeHtml(eventUrl)}</a></p>
+            <p>
+              <a href="${escapeHtml(lockedCalendarUrl)}" style="color: #2563eb;">Add to Google Calendar</a>
+              &nbsp;·&nbsp;
+              <a href="${escapeHtml(url.origin)}/events/${escapeHtml(eventId)}/ics" style="color: #2563eb;">Download .ics (Apple/Outlook)</a>
+            </p>
+            ${emailFooter(site)}
+          </div>
+        `,
+      });
+    }
 
     return json({ success: true, message: "Meeting has been officially locked and finalized!" });
   }
