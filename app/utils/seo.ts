@@ -105,7 +105,7 @@ export function getHomeFaq(siteName: string): FaqItem[] {
     },
     {
       question: "How does the meeting poll work?",
-      answer: `Propose candidate time slots, attendees vote Yes, If need be, or No, and ${siteName} highlights the top consensus slot. The organizer can then lock the winning time.`,
+      answer: `Propose candidate time slots, attendees vote Yes, Maybe, or No, and ${siteName} highlights the top consensus slot. The organizer can then lock the winning time.`,
     },
   ];
 }
@@ -253,7 +253,7 @@ export function getPageMeta(siteName: string): Record<"createChooser" | "createS
     createPoll: {
       title: `Create a Free Meeting Poll — Find a Time Fast | ${siteName}`,
       description:
-        "Free meeting polls with Yes / If need be / No voting and calendar sync. No accounts, no ads — create and share in seconds.",
+        "Free meeting polls with Yes / Maybe / No voting and calendar sync. No accounts, no ads — create and share in seconds.",
       path: "/create/poll",
     },
   };

@@ -21,7 +21,7 @@
 
 ### 📅 2. Meeting Time Finder
 - **Consensus Matrix Grid**: Multi-candidate date and time options displayed in a responsive grid.
-- **Three-State Voting**: Available (`✔`), If need be (`(✔)`), or Unavailable (`–`).
+- **Three-State Voting**: Available (`✔`), Maybe (`(✔)`), or Unavailable (`–`).
 - **Real-Time Consensus Highlighting**: Automatically identifies and badges the top-voted meeting slot.
 - **Time Zone Smart**: View slots in local or event time zones.
 - **1-Click Finalization**: Lock the winning meeting slot and trigger calendar invitations.

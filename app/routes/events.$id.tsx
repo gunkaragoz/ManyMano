@@ -2188,7 +2188,7 @@ export default function EventView() {
                   </div>
                 )}
                 <div className="text-xs text-slate-600">
-                  {topSlot.tally.yes} available • {topSlot.tally.maybe} if need be
+                  {topSlot.tally.yes} available • {topSlot.tally.maybe} maybe
                 </div>
               </div>
 
@@ -2220,7 +2220,7 @@ export default function EventView() {
                   <span>
                     {pollData.votes.length} {pollData.votes.length === 1 ? "response" : "responses"} so far
                   {event.status !== "FINALIZED" && (
-                    <span className="hidden sm:inline"> · Tap a cell to cycle No → Yes → If need be</span>
+                    <span className="hidden sm:inline"> · Tap a cell to cycle No → Yes → Maybe</span>
                   )}
                   {event.status !== "FINALIZED" && (
                     <span className="sm:hidden"> · Tap an option below</span>
@@ -2374,7 +2374,7 @@ export default function EventView() {
                           }`}
                         >
                           <span className="text-xs leading-none font-extrabold">~</span>
-                          <span>If need be</span>
+                          <span>Maybe</span>
                         </button>
                         <button
                           type="button"
@@ -2437,7 +2437,7 @@ export default function EventView() {
                             <span className="font-bold text-slate-800 truncate">
                               {v.participantName}
                               <span className="block font-normal text-slate-500">
-                                {vYes} Yes · {Object.values(v.responses).filter((r) => r === "MAYBE").length} If need be
+                                {vYes} Yes · {Object.values(v.responses).filter((r) => r === "MAYBE").length} Maybe
                               </span>
                             </span>
                             {isAdmin && (
@@ -2575,14 +2575,14 @@ export default function EventView() {
                         </div>
                         <div className="text-[11px] text-blue-700/80 mt-0.5">
                           {yesCount > 0 || maybeCount > 0
-                            ? `${yesCount} Yes${maybeCount ? ` · ${maybeCount} If need be` : ""}`
+                            ? `${yesCount} Yes${maybeCount ? ` · ${maybeCount} Maybe` : ""}`
                             : "Tap a cell to vote"}
                         </div>
                       </td>
 
                       {slots.map((s) => {
                         const cur = userVotes[s.id] || "NO";
-                        const label = cur === "YES" ? "Yes" : cur === "MAYBE" ? "If need be" : "No";
+                        const label = cur === "YES" ? "Yes" : cur === "MAYBE" ? "Maybe" : "No";
                         return (
                           <td key={s.id} className="p-2.5 text-center border-r border-slate-200/80">
                             <button
@@ -2618,7 +2618,7 @@ export default function EventView() {
                 <tfoot>
                   <tr className="bg-slate-100/70 border-t border-slate-300/80 font-bold text-slate-800">
                     <td className="p-4 sm:p-5 sticky left-0 bg-slate-100 border-r border-slate-300/80">
-                      Total Yes / (If need be)
+                      Total Yes / (Maybe)
                     </td>
                     {slots.map((s) => {
                       const t = pollData.tallies[s.id] || { yes: 0, maybe: 0 };
@@ -2655,7 +2655,7 @@ export default function EventView() {
                   </span>
                   <span className="flex items-center gap-1.5">
                     <span className="w-4 h-4 rounded-lg bg-amber-400 text-slate-900 inline-flex items-center justify-center"><Check className="w-3 h-3" /></span>
-                    <span>If need be</span>
+                    <span>Maybe</span>
                   </span>
                   <span className="flex items-center gap-1.5">
                     <span className="w-4 h-4 rounded-lg border border-slate-300 bg-slate-800 text-white inline-flex items-center justify-center"><X className="w-3 h-3" /></span>
@@ -2663,7 +2663,7 @@ export default function EventView() {
                   </span>
                   {(yesCount > 0 || maybeCount > 0) && (
                     <span className="font-bold text-slate-700">
-                      You: {yesCount} Yes{maybeCount ? ` · ${maybeCount} If need be` : ""}
+                      You: {yesCount} Yes{maybeCount ? ` · ${maybeCount} Maybe` : ""}
                     </span>
                   )}
                 </div>

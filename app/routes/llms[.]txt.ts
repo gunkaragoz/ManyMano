@@ -32,7 +32,7 @@ export async function loader({ request, context }: LoaderFunctionArgs) {
     "## Features",
     "",
     "- Sign-up sheets with per-slot capacity limits, overbooking protection, custom attendee notes, and CSV roster export.",
-    "- Meeting polls with a consensus matrix (Yes / If need be / No), automatic top-slot highlighting, and time-zone aware display.",
+    "- Meeting polls with a consensus matrix (Yes / Maybe / No), automatic top-slot highlighting, and time-zone aware display.",
     "- Instant calendar invites via one-click Google Calendar links and RFC 5545 .ics downloads (Apple Calendar, Outlook).",
     "- No accounts or passwords; events are created and shared in seconds.",
     "- Organizer admin mode via a secret link; participants get cancel links when they leave an email.",
