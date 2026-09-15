@@ -1,6 +1,7 @@
 import type { MetaFunction } from "@remix-run/cloudflare";
-import { Link, useLoaderData } from "@remix-run/react";
-import { ArrowRight, CalendarDays, Check, ClipboardList } from "lucide-react";
+import { Link, useLoaderData, useSearchParams } from "@remix-run/react";
+import { useEffect, useState } from "react";
+import { ArrowRight, CalendarDays, Check, CircleCheck, ClipboardList, X } from "lucide-react";
 import { getHomeFaq, faqPageJsonLd, mergeParentMeta, rootSiteFromMatches } from "~/utils/seo";
 import type { FaqItem } from "~/utils/seo";
 import { getSiteConfig, toPublicSiteConfig } from "~/utils/site";
@@ -38,8 +39,43 @@ export const meta: MetaFunction<typeof loader> = ({ data, matches }) => {
 
 export default function Index() {
   const { faq } = useLoaderData<typeof loader>();
+  const [searchParams] = useSearchParams();
+  // `delete_event` redirects here with `?deleted=1` — surface it as a
+  // floating toast (always visible) instead of an inline banner, and clean
+  // the param so a refresh doesn't re-show it. Initialized false + set in an
+  // effect to avoid a hydration mismatch (server never sees the param).
+  const [showDeletedToast, setShowDeletedToast] = useState(false);
+  useEffect(() => {
+    if (searchParams.get("deleted") === "1") {
+      setShowDeletedToast(true);
+      window.history.replaceState(null, "", "/");
+    }
+  }, [searchParams]);
+  useEffect(() => {
+    if (!showDeletedToast) return;
+    const t = window.setTimeout(() => setShowDeletedToast(false), 6000);
+    return () => window.clearTimeout(t);
+  }, [showDeletedToast]);
   return (
     <div className="space-y-16 py-4 md:py-8">
+      {showDeletedToast && (
+        <div
+          role="status"
+          aria-live="polite"
+          className="fixed bottom-6 left-1/2 z-[60] w-[calc(100%-2rem)] max-w-md p-4 rounded-2xl border shadow-lg flex items-center gap-2.5 text-sm font-semibold animate-toast-in bg-green-50 border-green-200/80 text-green-800"
+        >
+          <CircleCheck className="w-4 h-4 shrink-0" />
+          <span className="flex-1">Your event was deleted.</span>
+          <button
+            type="button"
+            onClick={() => setShowDeletedToast(false)}
+            aria-label="Dismiss notification"
+            className="p-1 rounded-lg hover:bg-black/5 transition-colors shrink-0"
+          >
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+      )}
       {/* Hero Section */}
       <div className="text-center space-y-5 max-w-2xl mx-auto">
         <div className="inline-flex items-center gap-2 px-3.5 py-1 rounded-full bg-slate-100/80 border border-slate-200/80 text-slate-600 text-xs font-medium tracking-wide">

@@ -1739,6 +1739,24 @@ export default function EventView() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [actionData]);
   const [copiedLink, setCopiedLink] = useState<string | null>(null);
+  // Floating toast for action feedback (success/error). The old inline banner
+  // at the top of the page was off-screen after submitting a form further
+  // down, so confirmations like "Your spot has been confirmed" were missed.
+  // A fixed-viewport toast is always visible regardless of scroll position.
+  const [toast, setToast] = useState<{ kind: "success" | "error"; text: string; key: number } | null>(null);
+  useEffect(() => {
+    if (actionData?.message) {
+      setToast({ kind: "success", text: actionData.message, key: Date.now() });
+    } else if (actionData?.error && !actionData?.needsVerification) {
+      setToast({ kind: "error", text: actionData.error, key: Date.now() });
+    }
+  }, [actionData]);
+  // Auto-dismiss the toast after 6s; manual close via the X button.
+  useEffect(() => {
+    if (!toast) return;
+    const t = window.setTimeout(() => setToast(null), 6000);
+    return () => window.clearTimeout(t);
+  }, [toast]);
   const [showEdit, setShowEdit] = useState(false);
   // QR is derived on demand from the event URL, so older events need no
   // backfill. If the image fails to load (unknown/expired event, generation
@@ -2158,13 +2176,38 @@ export default function EventView() {
           </Form>
         </div>
       )}
-      {actionData?.message && (
-        <div className="p-4 rounded-2xl bg-green-50 border border-green-200/80 text-green-800 text-sm font-semibold flex items-center gap-2.5 animate-fade-in">
-          <CircleCheck className="w-4 h-4 shrink-0" />
-          <span>{actionData.message}</span>
+      {/* Floating toast notification — always visible regardless of scroll.
+          Success confirmations (e.g. "Your spot has been confirmed") and
+          errors from any form action surface here; inline errors below are
+          kept as a persistent fallback. */}
+      {toast && (
+        <div
+          key={toast.key}
+          role={toast.kind === "error" ? "alert" : "status"}
+          aria-live="polite"
+          className={`fixed bottom-6 left-1/2 z-[60] w-[calc(100%-2rem)] max-w-md p-4 rounded-2xl border shadow-lg flex items-center gap-2.5 text-sm font-semibold animate-toast-in ${
+            toast.kind === "error"
+              ? "bg-rose-50 border-rose-200/80 text-rose-800"
+              : "bg-green-50 border-green-200/80 text-green-800"
+          }`}
+        >
+          {toast.kind === "error" ? (
+            <TriangleAlert className="w-4 h-4 shrink-0" />
+          ) : (
+            <CircleCheck className="w-4 h-4 shrink-0" />
+          )}
+          <span className="flex-1">{toast.text}</span>
+          <button
+            type="button"
+            onClick={() => setToast(null)}
+            aria-label="Dismiss notification"
+            className="p-1 rounded-lg hover:bg-black/5 transition-colors shrink-0"
+          >
+            <X className="w-4 h-4" />
+          </button>
         </div>
       )}
-      {actionData?.error && (
+      {actionData?.error && !needsHumanCheck && (
         <div className="p-4 rounded-2xl bg-rose-50 border border-rose-200/80 text-rose-800 text-sm font-semibold flex items-center gap-2.5 animate-fade-in">
           <TriangleAlert className="w-4 h-4 shrink-0" />
           <span>{actionData.error}</span>
@@ -3441,14 +3484,7 @@ export default function EventView() {
                       {actionData.error}
                     </p>
                   )}
-                  {actionData?.success && actionData?.message && (
-                    <p
-                      role="status"
-                      className="text-xs font-semibold text-green-700 bg-green-50 border border-green-200 rounded-xl px-3 py-2 sm:max-w-sm sm:text-right"
-                    >
-                      {actionData.message}
-                    </p>
-                  )}
+                  {/* Success confirmations surface via the floating toast (always visible). */}
                   <div className="flex flex-col sm:flex-row sm:items-center justify-end gap-3">
                     {needsHumanCheck && turnstileSiteKey && (
                       <div className="flex justify-end sm:items-center [&:empty]:hidden [&:has(.cf-turnstile:empty)]:hidden">
