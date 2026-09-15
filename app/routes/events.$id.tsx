@@ -1,6 +1,6 @@
 import type { ActionFunctionArgs, HeadersFunction, LoaderFunctionArgs, MetaFunction } from "@remix-run/cloudflare";
 import { json, redirect } from "@remix-run/cloudflare";
-import { useLoaderData, useActionData, useNavigation, useSearchParams, useFetcher, Form } from "@remix-run/react";
+import { useLoaderData, useActionData, useNavigation, useSearchParams, useFetcher, Form, isRouteErrorResponse, useRouteError } from "@remix-run/react";
 import { eq, and, inArray } from "drizzle-orm";
 import { useState, useMemo, useEffect, useRef } from "react";
 import {
@@ -42,6 +42,7 @@ import { expiryDateFor, isExpired, pruneExpiredEvents, RETENTION_DAYS } from "~/
 import { verifyTurnstile, turnstileFailure, hasTurnstileToken } from "~/utils/turnstile";
 import { assessGuestRequest, needsVerification } from "~/utils/bot-protection";
 import Turnstile from "~/components/Turnstile";
+import NotFound from "~/components/NotFound";
 import DatePicker from "~/components/DatePicker";
 import TimePicker from "~/components/TimePicker";
 import TimezoneSelect from "~/components/TimezoneSelect";
@@ -162,6 +163,26 @@ export const headers: HeadersFunction = ({ loaderHeaders }) => {
   if (cacheControl) headers.set("Cache-Control", cacheControl);
   return headers;
 };
+
+export function ErrorBoundary() {
+  const error = useRouteError();
+
+  if (isRouteErrorResponse(error) && (error.status === 404 || error.status === 410)) {
+    const isGone = error.status === 410;
+    return (
+      <NotFound
+        title={isGone ? "This event is no longer available" : "This event couldn't be found"}
+        message={
+          isGone
+            ? `This event expired after ${RETENTION_DAYS} days and was automatically deleted. You'll be taken back to the main page shortly.`
+            : "The link may be wrong, or the event was deleted or expired. You'll be taken back to the main page shortly."
+        }
+      />
+    );
+  }
+
+  throw error;
+}
 
 export async function loader({ params, request, context }: LoaderFunctionArgs) {
   const env = context.cloudflare.env as {

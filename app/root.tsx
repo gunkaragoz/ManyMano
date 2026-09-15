@@ -10,9 +10,12 @@ import {
   useLoaderData,
   useLocation,
   useNavigation,
+  isRouteErrorResponse,
+  useRouteError,
 } from "@remix-run/react";
 import { useEffect, useState } from "react";
 import { HeartHandshake } from "lucide-react";
+import NotFound from "~/components/NotFound";
 
 function GithubIcon({ className }: { className?: string }) {
   return (
@@ -107,6 +110,74 @@ export const meta: MetaFunction<typeof loader> = ({ data }) => {
     { name: "twitter:image", content: ogImage },
   ];
 };
+
+export function ErrorBoundary() {
+  const error = useRouteError();
+
+  // 404 (wrong link / deleted event) and 410 (expired event): show the
+  // friendly notice and redirect to the main page after 20 seconds.
+  if (isRouteErrorResponse(error) && (error.status === 404 || error.status === 410)) {
+    const isGone = error.status === 410;
+    return (
+      <html lang="en" className="h-full">
+        <head>
+          <Meta />
+          <Links />
+        </head>
+        <body className="flex flex-col min-h-screen bg-[#fafafc] text-slate-900">
+          <main className="flex-1 max-w-5xl w-full mx-auto px-6 sm:px-8 py-8 md:py-12">
+            <NotFound
+              title={isGone ? "This event is no longer available" : "This page couldn't be found"}
+              message={
+                isGone
+                  ? "This event expired and was automatically deleted. You'll be taken back to the main page shortly."
+                  : "The link may be wrong, or the event was deleted or expired. You'll be taken back to the main page shortly."
+              }
+            />
+          </main>
+          <ScrollRestoration />
+          <Scripts />
+        </body>
+      </html>
+    );
+  }
+
+  // Unexpected errors: no auto-redirect (don't mask real 500s).
+  const message =
+    isRouteErrorResponse(error)
+      ? `Something went wrong (${error.status}).`
+      : error instanceof Error
+        ? error.message
+        : "Something went wrong.";
+  return (
+    <html lang="en" className="h-full">
+      <head>
+        <Meta />
+        <Links />
+      </head>
+      <body className="flex flex-col min-h-screen bg-[#fafafc] text-slate-900">
+        <main className="flex-1 max-w-5xl w-full mx-auto px-6 sm:px-8 py-8 md:py-12">
+          <div className="max-w-xl mx-auto text-center py-12">
+            <div className="bg-white border border-slate-200/80 rounded-3xl px-8 py-10 space-y-4">
+              <h1 className="text-2xl font-bold text-slate-900 tracking-tight">
+                Something went wrong
+              </h1>
+              <p className="text-sm text-slate-600">{message}</p>
+              <Link
+                to="/"
+                className="inline-block py-2.5 px-5 rounded-2xl bg-slate-900 text-white font-semibold text-sm hover:bg-slate-800 transition-all"
+              >
+                Go to main page
+              </Link>
+            </div>
+          </div>
+        </main>
+        <ScrollRestoration />
+        <Scripts />
+      </body>
+    </html>
+  );
+}
 
 export default function App() {
   const { site } = useLoaderData<typeof loader>();
