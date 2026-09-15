@@ -69,6 +69,13 @@ Optional branding (leave empty/unset to hide — no throw):
 - `RESEND_API_KEY`: Your API key from [resend.com](https://resend.com).
 *(If omitted, ManyMano continues to work smoothly using direct in-browser `.ics` calendar downloads and direct tokenized links!)*
 - `TURNSTILE_SITE_KEY` / `TURNSTILE_SECRET_KEY` / `TURNSTILE_HOSTNAMES`: Cloudflare Turnstile bot protection. If the secret is omitted, verification is skipped (handy for local dev).
+- `ALERT_WEBHOOK_URL`: Discord or Slack incoming webhook for free-tier quota alerts. Every sent email is counted in D1 (UTC day/month); one webhook fires at 80/90/100% of the Resend free quota (100/day, 3,000/month) and on 429 exhaustion. `GET /api/usage` always shows the live counters. Cloudflare itself emails the account owner at ~90% of Workers/D1 daily limits — no setup needed.
+
+### Step 6: Apply migrations after pulling
+```bash
+npx wrangler d1 migrations apply manymano-db --remote   # production
+pnpm run db:migrate:local                               # local dev
+```
 
 ---
 

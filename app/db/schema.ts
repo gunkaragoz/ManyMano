@@ -71,3 +71,14 @@ export const pollVoteEntries = sqliteTable("poll_vote_entries", {
     .references(() => eventSlots.id, { onDelete: "cascade" }),
   response: text("response").notNull(), // 'YES' | 'MAYBE' | 'NO'
 });
+
+// Free-tier quota tracking (Resend email counts + alert dedupe).
+// Keys are period-scoped so rows never grow unboundedly in practice:
+//   email:daily:YYYY-MM-DD, email:monthly:YYYY-MM,
+//   email:alert:daily:80:YYYY-MM-DD, ... (one row per threshold hit)
+// Old periods are harmless (tiny rows); retention pruning leaves them alone.
+export const usageCounters = sqliteTable("usage_counters", {
+  key: text("key").primaryKey(),
+  count: integer("count").notNull().default(0),
+  updatedAt: text("updated_at").notNull(),
+});
