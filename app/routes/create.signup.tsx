@@ -1,7 +1,7 @@
 import type { ActionFunctionArgs, LoaderFunctionArgs, MetaFunction } from "@remix-run/cloudflare";
 import { json, redirect } from "@remix-run/cloudflare";
 import { Form, useActionData, useLoaderData, useNavigation, Link } from "@remix-run/react";
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { ArrowLeft, ArrowRight, ClipboardList, TriangleAlert, X } from "lucide-react";
 import { usePersistentState } from "~/utils/usePersistentState";
 import DatePicker from "~/components/DatePicker";
@@ -313,6 +313,31 @@ export default function CreateSignupSheet() {
   const { turnstileSiteKey } = useLoaderData<typeof loader>();
   const navigation = useNavigation();
   const isSubmitting = navigation.state === "submitting";
+  // Floating toast for validation errors. The inline banner below sits at the
+  // top of a long form, so after clicking Create at the bottom the error was
+  // off-screen. A fixed-viewport toast is always visible; the inline banner
+  // stays as a persistent fallback.
+  const [toast, setToast] = useState<{ text: string; key: number } | null>(null);
+  // Ref to the email field so email validation errors can move focus to it.
+  const emailRef = useRef<HTMLInputElement>(null);
+  const emailError = Boolean(actionData?.error && /email/i.test(actionData.error));
+  useEffect(() => {
+    if (actionData?.error) {
+      setToast({ text: actionData.error, key: Date.now() });
+      if (/email/i.test(actionData.error)) {
+        const t = window.setTimeout(() => {
+          emailRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
+          emailRef.current?.focus({ preventScroll: true });
+        }, 50);
+        return () => window.clearTimeout(t);
+      }
+    }
+  }, [actionData]);
+  useEffect(() => {
+    if (!toast) return;
+    const t = window.setTimeout(() => setToast(null), 6000);
+    return () => window.clearTimeout(t);
+  }, [toast]);
 
   const todayStr = new Date().toISOString().split("T")[0];
 
@@ -432,6 +457,25 @@ export default function CreateSignupSheet() {
 
   return (
     <div className="w-full max-w-4xl mx-auto space-y-8 py-4">
+      {toast && (
+        <div
+          key={toast.key}
+          role="alert"
+          aria-live="assertive"
+          className="fixed bottom-6 left-1/2 z-[60] w-[calc(100%-2rem)] max-w-md p-4 rounded-2xl border shadow-lg flex items-center gap-2.5 text-sm font-semibold animate-toast-in bg-rose-50 border-rose-200/80 text-rose-800"
+        >
+          <TriangleAlert className="w-4 h-4 shrink-0" />
+          <span className="flex-1">{toast.text}</span>
+          <button
+            type="button"
+            onClick={() => setToast(null)}
+            aria-label="Dismiss notification"
+            className="p-1 rounded-lg hover:bg-black/5 transition-colors shrink-0"
+          >
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+      )}
       {/* Header & Back Link */}
       <div className="space-y-2">
         <Link to="/" className="text-xs font-semibold text-slate-500 hover:text-slate-800 flex items-center gap-1.5 transition-colors">
@@ -570,17 +614,24 @@ export default function CreateSignupSheet() {
               </div>
 
               <div>
-                <label className="block text-xs font-semibold text-slate-700 mb-1.5">
+                <label htmlFor="organizer-email" className="block text-xs font-semibold text-slate-700 mb-1.5">
                   Your Email *
                 </label>
                 <input
+                  ref={emailRef}
+                  id="organizer-email"
                   type="email"
                   name="organizerEmail"
                   required
+                  aria-invalid={emailError}
                   value={details.organizerEmail}
                   onChange={(e) => updateDetails({ organizerEmail: e.target.value })}
                   placeholder="sarah@example.com"
-                  className="w-full px-4 py-3 rounded-xl border border-slate-200/90 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all placeholder:text-slate-400"
+                  className={`w-full px-4 py-3 rounded-xl border text-sm focus:outline-none focus:ring-2 transition-all placeholder:text-slate-400 ${
+                    emailError
+                      ? "border-rose-400 focus:ring-rose-500/20 focus:border-rose-500"
+                      : "border-slate-200/90 focus:ring-blue-500/20 focus:border-blue-500"
+                  }`}
                 />
                 <span className="text-[11px] text-slate-500 mt-1 block">
                   We'll email your private organizer link here.
