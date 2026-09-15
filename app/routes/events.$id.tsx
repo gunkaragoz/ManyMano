@@ -28,6 +28,7 @@ import {
 import { getDb, events, eventSlots, signups, pollVotes, pollVoteEntries } from "~/db";
 import { generateInternalId, generateSecretToken } from "~/utils/ids";
 import { sendEmail, emailFooter } from "~/utils/email";
+import { trackEmailUsage } from "~/utils/quota";
 import { escapeHtml } from "~/utils/sanitize";
 import {
   buildAdminCookie,
@@ -42,6 +43,7 @@ import { verifyTurnstile, turnstileFailure, hasTurnstileToken } from "~/utils/tu
 import { assessGuestRequest, needsVerification } from "~/utils/bot-protection";
 import Turnstile from "~/components/Turnstile";
 import DatePicker from "~/components/DatePicker";
+import TimePicker from "~/components/TimePicker";
 import TimezoneSelect from "~/components/TimezoneSelect";
 import { useCreateStickyHeader } from "~/utils/useCreateStickyHeader";
 import { buildGoogleCalendarUrl, pickCalendarSlot, effectiveDateForSlot, formatSlotDateLabel, formatLongDateLabel, formatDurationLabel, addMinutesToTimeString, parseTimeString } from "~/utils/calendar";
@@ -66,12 +68,14 @@ import {
   EMAIL_MAX,
   LOCATION_MAX,
   MAX_SLOTS_PER_EVENT,
+  MAX_VOTES_PER_EVENT,
   ORGANIZER_NAME_MAX,
   PARTICIPANT_NAME_MAX,
   SHIFT_NAME_MAX,
   SLOT_TITLE_MAX,
   TITLE_MAX,
   cleanText,
+  isPastIsoDate,
   isValidEmail,
   isValidIsoDate,
   isValidTime,
@@ -394,6 +398,7 @@ export async function action({ request, params, context }: ActionFunctionArgs) {
   const env = context.cloudflare.env as {
     DB: D1Database;
     RESEND_API_KEY?: string;
+    ALERT_WEBHOOK_URL?: string;
     FROM_EMAIL: string;
     SITE_URL: string;
     SITE_NAME: string;
@@ -601,7 +606,7 @@ export async function action({ request, params, context }: ActionFunctionArgs) {
         url: `${url.origin}/events/${eventId}`,
         fallbackTitle: `${site.siteName} Event`,
       });
-      await sendEmail({
+      const emailResult = await sendEmail({
         apiKey: env.RESEND_API_KEY,
         from: site.fromEmail,
         to: participantEmail,
@@ -627,6 +632,11 @@ export async function action({ request, params, context }: ActionFunctionArgs) {
             ${emailFooter(site)}
           </div>
         `,
+      });
+      await trackEmailUsage(env.DB, {
+        webhookUrl: env.ALERT_WEBHOOK_URL,
+        appName: site.siteName,
+        result: emailResult,
       });
     }
 
@@ -850,7 +860,7 @@ export async function action({ request, params, context }: ActionFunctionArgs) {
     if (participantEmail) {
       const manageUrl = `${url.origin}/events/${eventId}?cancel_token=${encodeURIComponent(editTokenPlain)}`;
       const eventUrl = `${url.origin}/events/${eventId}`;
-      await sendEmail({
+      const voteEmailResult = await sendEmail({
         apiKey: env.RESEND_API_KEY,
         from: site.fromEmail,
         to: participantEmail,
@@ -867,6 +877,11 @@ export async function action({ request, params, context }: ActionFunctionArgs) {
           </div>
         `,
       });
+      await trackEmailUsage(env.DB, {
+        webhookUrl: env.ALERT_WEBHOOK_URL,
+        appName: site.siteName,
+        result: voteEmailResult,
+      });
     }
 
     return json({
@@ -874,6 +889,292 @@ export async function action({ request, params, context }: ActionFunctionArgs) {
       message: `Availability recorded for ${participantName}!`,
       voteId,
       voteToken: editTokenPlain,
+    });
+  }
+
+  // 3a. Propose a new time (guest volunteers, TIME_POLL only, must be OPEN).
+  // The proposer is auto-counted as YES for the new option; their other
+  // votes are preserved (or saved from the submitted matrix when present).
+  if (intent === "propose_slot") {
+    if (!isPoll) {
+      return json({ error: "Only meeting polls take proposed times." }, { status: 400 });
+    }
+    if (isFinalized) {
+      return json({ error: "This poll is finalized — new times can't be proposed." }, { status: 409 });
+    }
+    const participantName = cleanText(formData.get("participantName"), PARTICIPANT_NAME_MAX);
+    const rawProposeEmail = cleanText(formData.get("participantEmail"), EMAIL_MAX);
+    const participantEmail = rawProposeEmail || null;
+
+    if (!participantName) {
+      return json({ error: "Your name is required to propose a time." }, { status: 400 });
+    }
+    if (participantEmail && !isValidEmail(participantEmail)) {
+      return json({ error: "Please enter a valid email address." }, { status: 400 });
+    }
+
+    // Same frictionless bot protection as voting. Reuses the "poll-vote"
+    // Turnstile action so no extra widget config is needed.
+    const guestProposeCheck = assessGuestRequest(formData, {
+      ip: request.headers.get("cf-connecting-ip") || "unknown",
+      eventId,
+    });
+    if (guestProposeCheck.verdict === "bot") {
+      return json({ success: true, message: `Thanks ${participantName}! Your proposed time was added.` });
+    }
+    if (guestProposeCheck.verdict === "challenge") {
+      const turnstilePropose = await verifyTurnstile({
+        token: formData.get("cf-turnstile-response") as string | null,
+        expectedAction: "poll-vote",
+        env,
+        remoteIp: request.headers.get("cf-connecting-ip"),
+      });
+      if (!turnstilePropose.ok) {
+        const f = needsVerification(guestProposeCheck);
+        return json(f.body, { status: f.status });
+      }
+    } else if (hasTurnstileToken(formData)) {
+      const turnstilePropose = await verifyTurnstile({
+        token: formData.get("cf-turnstile-response") as string | null,
+        expectedAction: "poll-vote",
+        env,
+        remoteIp: request.headers.get("cf-connecting-ip"),
+      });
+      if (!turnstilePropose.ok) {
+        const f = turnstileFailure(false);
+        return json(f.body, { status: f.status });
+      }
+    }
+
+    const slotDateRaw = cleanText(formData.get("slotDate"), 10);
+    const startRaw = cleanText(formData.get("slotStartTime"), 16);
+    const labelRaw = cleanText(formData.get("slotTitle"), SLOT_TITLE_MAX);
+    const pollDuration = (event as { durationMinutes?: number | null }).durationMinutes ?? null;
+
+    if (!slotDateRaw || !isValidIsoDate(slotDateRaw)) {
+      return json({ error: "Please pick a valid day for your proposed time." }, { status: 400 });
+    }
+    if (isPastIsoDate(slotDateRaw)) {
+      return json({ error: "That day has already passed — please propose a future time." }, { status: 400 });
+    }
+    let startTime: string | null = null;
+    let endTime: string | null = null;
+    if (pollDuration !== null) {
+      if (!startRaw || !isValidTime(startRaw)) {
+        return json({ error: "Please pick a valid start time for your proposal." }, { status: 400 });
+      }
+      startTime = startRaw;
+      endTime = addMinutesToTimeString(startRaw, pollDuration);
+    }
+    const slotError = validateSlotFields(slotDateRaw, startTime, endTime);
+    if (slotError) return json({ error: slotError }, { status: 400 });
+
+    const existingSlots = await db.select().from(eventSlots).where(eq(eventSlots.eventId, eventId));
+    if (existingSlots.length >= MAX_SLOTS_PER_EVENT) {
+      return json(
+        { error: `Too many options — maximum ${MAX_SLOTS_PER_EVENT} per poll.` },
+        { status: 400 }
+      );
+    }
+    const duplicate = existingSlots.some(
+      (s) => (s.slotDate || "") === slotDateRaw && (s.startTime || "") === (startTime || "")
+    );
+    if (duplicate) {
+      return json(
+        { error: "That time is already an option — vote for it instead of proposing it again." },
+        { status: 409 }
+      );
+    }
+
+    const maxOrder = existingSlots.reduce((m, s) => Math.max(m, s.displayOrder ?? 0), -1);
+    const title = (
+      labelRaw ||
+      autoPollTitle(labelRaw, slotDateRaw, startTime, endTime) ||
+      slotDateRaw
+    ).slice(0, SLOT_TITLE_MAX);
+    const newSlotId = generateInternalId();
+    await db.insert(eventSlots).values({
+      id: newSlotId,
+      eventId,
+      title,
+      shiftName: null,
+      slotDate: slotDateRaw,
+      capacity: 999,
+      startTime,
+      endTime,
+      displayOrder: maxOrder + 1,
+    });
+
+    // Attach the proposal to the proposer's vote (same identity rules as
+    // vote_poll): own token updates in place, same name+email reclaims,
+    // otherwise a fresh vote. The new slot is always YES for the proposer.
+    const normName = participantName.trim().toLowerCase();
+    const normEmail = (participantEmail || "").trim().toLowerCase();
+    const existingVotes = await db.select().from(pollVotes).where(eq(pollVotes.eventId, eventId));
+    const clientVoteId = cleanText(formData.get("clientVoteId"), 32) || null;
+    const clientVoteToken = cleanText(formData.get("clientVoteToken"), 128) || null;
+    const takenMessage =
+      "That name already voted. If that's you, please vote from your original browser or device (or enter the same email address). Otherwise pick a different name, e.g. \"John S.\"";
+
+    // Submitted matrix values for pre-existing options (the propose form
+    // mirrors the vote form's hidden slot_* inputs). Absent when the client
+    // has no selections to carry over.
+    const submittedResponses = new Map<string, string>();
+    let hasSubmittedMatrix = false;
+    for (const s of existingSlots) {
+      if (formData.has(`slot_${s.id}`)) {
+        hasSubmittedMatrix = true;
+        const resp = (formData.get(`slot_${s.id}`) as string) || "NO";
+        if (resp === "YES" || resp === "MAYBE") submittedResponses.set(s.id, resp);
+      }
+    }
+
+    const saveAccompanying = async (pollVoteId: string) => {
+      for (const [slotId, resp] of submittedResponses) {
+        await db.insert(pollVoteEntries).values({
+          id: generateInternalId(),
+          pollVoteId,
+          slotId,
+          response: resp,
+        });
+      }
+    };
+    const addYesForNewSlot = async (pollVoteId: string) => {
+      await db.insert(pollVoteEntries).values({
+        id: generateInternalId(),
+        pollVoteId,
+        slotId: newSlotId,
+        response: "YES",
+      });
+    };
+    // Replace-all path used when the client sent its current matrix: keeps
+    // the proposer's on-screen selections alongside the new YES.
+    const replaceAllWithProposal = async (pollVoteId: string) => {
+      await db.delete(pollVoteEntries).where(eq(pollVoteEntries.pollVoteId, pollVoteId));
+      await saveAccompanying(pollVoteId);
+      await addYesForNewSlot(pollVoteId);
+    };
+
+    const proposedWhen =
+      [slotDateRaw ? formatLongDateLabel(slotDateRaw) : "", startTime ? `${formatTime(startTime)}${endTime ? ` – ${formatTime(endTime)}` : ""}` : ""]
+        .filter(Boolean)
+        .join(" · ") || title;
+
+    const notifyProposer = async () => {
+      if (!participantEmail) return;
+      const eventUrl = `${url.origin}/events/${eventId}`;
+      const proposerEmailResult = await sendEmail({
+        apiKey: env.RESEND_API_KEY,
+        from: site.fromEmail,
+        to: participantEmail,
+        subject: `Your proposed time for "${event.title}" was added`,
+        html: `
+          <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto; padding: 24px; color: #1e293b;">
+            <p>Hi ${escapeHtml(participantName)},</p>
+            <p>Your proposed time <strong>${escapeHtml(proposedWhen)}</strong> was added to <strong>${escapeHtml(event.title)}</strong> and counted as Yes for you.</p>
+            <p><strong>Event page:</strong> <a href="${escapeHtml(eventUrl)}" style="color: #2563eb;">${escapeHtml(eventUrl)}</a></p>
+            ${emailFooter(site)}
+          </div>
+        `,
+      });
+      await trackEmailUsage(env.DB, {
+        webhookUrl: env.ALERT_WEBHOOK_URL,
+        appName: site.siteName,
+        result: proposerEmailResult,
+      });
+    };
+
+    if (clientVoteId && clientVoteToken) {
+      const candidate = existingVotes.find((v) => v.id === clientVoteId);
+      const ownVote =
+        candidate && (await secretMatches(clientVoteToken, candidate.editToken)) ? candidate : null;
+      if (ownVote) {
+        const renamedIntoTaken = existingVotes.some(
+          (v) => v.id !== ownVote.id && (v.participantName || "").trim().toLowerCase() === normName
+        );
+        if (renamedIntoTaken) {
+          return json({ error: takenMessage }, { status: 409 });
+        }
+        await db
+          .update(pollVotes)
+          .set({ participantName, participantEmail, updatedAt: now })
+          .where(eq(pollVotes.id, ownVote.id));
+        if (hasSubmittedMatrix) {
+          await replaceAllWithProposal(ownVote.id);
+        } else {
+          await addYesForNewSlot(ownVote.id);
+        }
+        await notifyProposer();
+        return json({
+          success: true,
+          message: `Thanks ${participantName}! Your proposed time was added and counted as Yes.`,
+          voteId: ownVote.id,
+          voteToken: clientVoteToken,
+          proposedSlotId: newSlotId,
+        });
+      }
+    }
+
+    const nameCollision = existingVotes.find(
+      (v) => (v.participantName || "").trim().toLowerCase() === normName
+    );
+    if (nameCollision) {
+      const reclaimable =
+        normEmail !== "" &&
+        (nameCollision.participantEmail || "").trim().toLowerCase() === normEmail;
+      if (reclaimable) {
+        const reclaimToken = generateSecretToken();
+        await db
+          .update(pollVotes)
+          .set({
+            participantName,
+            participantEmail,
+            editToken: await hashSecretForStorage(reclaimToken),
+            updatedAt: now,
+          })
+          .where(eq(pollVotes.id, nameCollision.id));
+        if (hasSubmittedMatrix) {
+          await replaceAllWithProposal(nameCollision.id);
+        } else {
+          await addYesForNewSlot(nameCollision.id);
+        }
+        await notifyProposer();
+        return json({
+          success: true,
+          message: `Thanks ${participantName}! Your proposed time was added and counted as Yes.`,
+          voteId: nameCollision.id,
+          voteToken: reclaimToken,
+          proposedSlotId: newSlotId,
+        });
+      }
+      return json({ error: takenMessage }, { status: 409 });
+    }
+
+    if (existingVotes.length >= MAX_VOTES_PER_EVENT) {
+      return json({ error: "This poll has reached the maximum number of responses." }, { status: 400 });
+    }
+
+    const voteId = generateInternalId();
+    const editTokenPlain = generateSecretToken();
+    await db.insert(pollVotes).values({
+      id: voteId,
+      eventId,
+      participantName,
+      participantEmail,
+      editToken: await hashSecretForStorage(editTokenPlain),
+      createdAt: now,
+      updatedAt: now,
+    });
+    await saveAccompanying(voteId);
+    await addYesForNewSlot(voteId);
+    await notifyProposer();
+
+    return json({
+      success: true,
+      message: `Thanks ${participantName}! Your proposed time was added and counted as Yes.`,
+      voteId,
+      voteToken: editTokenPlain,
+      proposedSlotId: newSlotId,
     });
   }
 
@@ -975,7 +1276,7 @@ export async function action({ request, params, context }: ActionFunctionArgs) {
       const key = voterEmail.toLowerCase();
       if (notified.has(key)) continue;
       notified.add(key);
-      await sendEmail({
+      const finalizeEmailResult = await sendEmail({
         apiKey: env.RESEND_API_KEY,
         from: site.fromEmail,
         to: voterEmail,
@@ -997,6 +1298,11 @@ export async function action({ request, params, context }: ActionFunctionArgs) {
             ${emailFooter(site)}
           </div>
         `,
+      });
+      await trackEmailUsage(env.DB, {
+        webhookUrl: env.ALERT_WEBHOOK_URL,
+        appName: site.siteName,
+        result: finalizeEmailResult,
       });
     }
 
@@ -1285,7 +1591,7 @@ function autoPollTitle(
 
 const EDIT_TIME_RE = /^([01]\d|2[0-3]):([0-5]\d)$/;
 
-/** Normalize legacy stored times ("10:00 AM", "9:00", ISO) to "HH:MM" for <input type="time">. */
+/** Normalize legacy stored times ("10:00 AM", "9:00", ISO) to "HH:MM" for TimePicker. */
 function normalizeToTimeInput(t: string | null | undefined): string {
   const parsed = parseTimeString(t);
   if (!parsed) return "";
@@ -1361,14 +1667,12 @@ function PollTimeOptionRow({
           className="col-span-2 sm:col-span-1 min-w-0"
         />
         {!isAllDay && (
-          <input
-            type="time"
-            required
-            aria-label="Start time"
+          <TimePicker
             name="slotStartTime"
             value={start}
-            onChange={(e) => setStart(e.target.value)}
-            className="w-full h-10 px-3 text-sm rounded-xl border border-slate-200 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 min-w-0"
+            onChange={setStart}
+            required
+            className="min-w-0"
           />
         )}
         {!isAllDay && (
@@ -1453,13 +1757,11 @@ function PollTimeNewOptionRow({
           className="col-span-2 sm:col-span-1 min-w-0"
         />
         {!isAllDay && (
-          <input
-            type="time"
-            aria-label="Start time for new option"
+          <TimePicker
             name="slotStartTime"
             value={start}
-            onChange={(e) => setStart(e.target.value)}
-            className="w-full h-10 px-3 text-sm rounded-xl border border-slate-200 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 min-w-0"
+            onChange={setStart}
+            className="min-w-0"
           />
         )}
         {!isAllDay && (
@@ -1627,7 +1929,7 @@ export default function EventView() {
     origin,
     siteName,
   } = useLoaderData<typeof loader>();
-  const actionData = useActionData<{ success?: boolean; message?: string; error?: string; voteId?: string; voteToken?: string; needsVerification?: boolean }>();
+  const actionData = useActionData<{ success?: boolean; message?: string; error?: string; voteId?: string; voteToken?: string; proposedSlotId?: string; needsVerification?: boolean }>();
   const [searchParams] = useSearchParams();
   const navigation = useNavigation();
   const isSubmitting = navigation.state === "submitting";
@@ -1773,6 +2075,11 @@ export default function EventView() {
   const [voterName, setVoterName] = useState("");
   const [voterEmail, setVoterEmail] = useState("");
   const [showAllVotesMobile, setShowAllVotesMobile] = useState(false);
+  // Volunteer-proposed time form state (TIME_POLL only, poll must be OPEN).
+  const [showPropose, setShowPropose] = useState(false);
+  const [proposeDate, setProposeDate] = useState("");
+  const [proposeStart, setProposeStart] = useState("10:00");
+  const [proposeLabel, setProposeLabel] = useState("");
 
   // The browser remembers its own vote id + private vote token so repeat saves
   // update it instead of creating duplicates. Stored as JSON {id, token}; a
@@ -1818,6 +2125,15 @@ export default function EventView() {
       }
       setClientVoteId(actionData.voteId);
       setClientVoteToken(actionData.voteToken);
+    }
+    // A proposed time is auto-counted as Yes — reflect it in the local
+    // matrix and reset the propose form so a second proposal starts clean.
+    if (actionData?.success && actionData?.proposedSlotId) {
+      const newId = actionData.proposedSlotId;
+      setUserVotes((prev) => ({ ...prev, [newId]: "YES" }));
+      setProposeDate("");
+      setProposeLabel("");
+      setShowPropose(false);
     }
   }, [actionData, voteStorageKey]);
 
@@ -3516,6 +3832,162 @@ export default function EventView() {
               </div>
             )}
           </div>
+
+          {/* Volunteer-proposed time — guests can add a missing option.
+              The proposer is auto-counted as Yes for their suggestion.
+              NOTE: no overflow-hidden on the card below — the DatePicker
+              calendar popup is absolutely positioned and would be clipped
+              by it (the toggle carries its own top rounding instead). */}
+          {event.status !== "FINALIZED" && (
+            <div className="bg-white border border-slate-200/80 rounded-3xl shadow-[0_2px_12px_rgba(0,0,0,0.03)]">
+              <button
+                type="button"
+                onClick={() => setShowPropose((v) => !v)}
+                aria-expanded={showPropose}
+                className="w-full p-5 sm:p-6 flex items-center justify-between gap-3 text-left hover:bg-slate-50/60 transition-colors rounded-t-3xl"
+              >
+                <span className="flex items-center gap-3 min-w-0">
+                  <span className="w-9 h-9 rounded-2xl bg-green-50 text-green-600 border border-green-100 flex items-center justify-center shrink-0">
+                    <CalendarPlus className="w-4 h-4" />
+                  </span>
+                  <span className="min-w-0">
+                    <span className="block font-bold text-slate-900 text-sm">
+                      Can&apos;t make these times? Propose a new time
+                    </span>
+                    <span className="block text-xs text-slate-500 mt-0.5">
+                      Suggest another option — you&apos;ll be counted as Yes for it.
+                    </span>
+                  </span>
+                </span>
+                <span className="text-xs font-bold text-blue-700 shrink-0">
+                  {showPropose ? "Hide" : "Propose"}
+                </span>
+              </button>
+
+              {showPropose && (
+                <Form
+                  method="post"
+                  className="p-5 sm:p-6 pt-0 space-y-4"
+                  onSubmit={(e) => {
+                    if (!voterName.trim()) {
+                      e.preventDefault();
+                      document.getElementById("voter-name")?.focus();
+                      alert("Please enter your name above first!");
+                      return;
+                    }
+                    if (!proposeDate) {
+                      e.preventDefault();
+                      alert("Please pick a day for your proposed time.");
+                    }
+                  }}
+                >
+                  <input type="hidden" name="intent" value="propose_slot" />
+                  <input type="hidden" name="clientVoteId" value={clientVoteId || ""} />
+                  <input type="hidden" name="clientVoteToken" value={clientVoteToken || ""} />
+                  <input type="hidden" name="participantName" value={voterName} />
+                  <input type="hidden" name="participantEmail" value={voterEmail} />
+                  <input type="hidden" name="formStartedAt" value={pageLoadedAt} />
+                  {/* Honeypot: humans never see it, bots autofill it. */}
+                  <div className="absolute -left-[9999px] top-auto w-px h-px overflow-hidden" aria-hidden="true">
+                    <label>
+                      Company website (leave blank)
+                      <input type="text" name="company_website" autoComplete="off" tabIndex={-1} />
+                    </label>
+                  </div>
+                  {/* Carry the voter's on-screen selections so proposing
+                      doesn't wipe them (server merges + forces new = YES). */}
+                  {slots.map((s) => (
+                    <input
+                      key={s.id}
+                      type="hidden"
+                      name={`slot_${s.id}`}
+                      value={userVotes[s.id] || "NO"}
+                    />
+                  ))}
+
+                  {(() => {
+                    const pollDuration =
+                      (event as { durationMinutes?: number | null }).durationMinutes ?? null;
+                    const isAllDay = pollDuration === null;
+                    const proposeEnd = isAllDay ? "" : endForDuration(proposeStart, pollDuration);
+                    // Same column template as create/poll's "Add your times"
+                    // rows so Day is compact and every input shares one
+                    // baseline: Day | Start | Ends (auto) | Label | action.
+                    const gridCols = isAllDay
+                      ? "sm:grid-cols-[minmax(0,1.45fr)_minmax(0,1fr)_auto]"
+                      : "sm:grid-cols-[minmax(0,1.45fr)_132px_104px_minmax(0,1fr)_auto]";
+                    return (
+                      // Single grid for headers + inputs: separate grids size
+                      // the `auto` button track differently (empty header cell
+                      // = 0px vs. the real button), which pushed every header
+                      // after Day out of alignment. Shared tracks = always lined up.
+                      <div className={`grid grid-cols-1 ${gridCols} gap-2.5 sm:gap-x-3 sm:gap-y-1.5 sm:items-center`}>
+                        <span aria-hidden="true" className="hidden sm:block text-[10px] uppercase font-bold tracking-wide text-slate-400">Day *</span>
+                        {!isAllDay && <span aria-hidden="true" className="hidden sm:block text-[10px] uppercase font-bold tracking-wide text-slate-400">Start *</span>}
+                        {!isAllDay && <span aria-hidden="true" className="hidden sm:block text-[10px] uppercase font-bold tracking-wide text-slate-400">Ends</span>}
+                        <span aria-hidden="true" className="hidden sm:block text-[10px] uppercase font-bold tracking-wide text-slate-400">Label</span>
+                        <span aria-hidden="true" className="hidden sm:block" />
+                        <DatePicker
+                          name="slotDate"
+                          value={proposeDate}
+                          onChange={setProposeDate}
+                          placeholder="Pick a day"
+                          accent="green"
+                          required
+                          className="min-w-0"
+                        />
+                        {!isAllDay && (
+                          <TimePicker
+                            name="slotStartTime"
+                            value={proposeStart}
+                            onChange={setProposeStart}
+                            accent="green"
+                            required
+                            className="min-w-0"
+                          />
+                        )}
+                        {!isAllDay && (
+                          <span
+                            title={proposeEnd ? `Ends ${formatTime(proposeEnd)}` : "End time"}
+                            className="flex items-center h-10 text-xs font-semibold text-slate-500 whitespace-nowrap tabular-nums truncate min-w-0"
+                          >
+                            → {proposeEnd ? formatTime(proposeEnd) : "—"}
+                          </span>
+                        )}
+                        <input
+                          type="text"
+                          name="slotTitle"
+                          value={proposeLabel}
+                          onChange={(e) => setProposeLabel(e.target.value)}
+                          placeholder="Label (optional)"
+                          aria-label="Label for your proposal (optional)"
+                          className="w-full h-10 px-3 text-sm rounded-xl border border-slate-200 bg-white focus:outline-none focus:ring-2 focus:ring-green-500/20 focus:border-green-500 placeholder:text-slate-400 min-w-0"
+                        />
+                        <button
+                          type="submit"
+                          disabled={isSubmitting}
+                          className="h-10 px-5 rounded-xl bg-green-600 hover:bg-green-700 text-white text-xs font-bold shadow-sm transition-all hover:scale-[1.02] active:scale-[0.98] disabled:opacity-50 whitespace-nowrap w-full sm:w-auto"
+                        >
+                          {isSubmitting ? "Adding…" : "+ Add & vote Yes"}
+                        </button>
+                      </div>
+                    );
+                  })()}
+
+                  {!voterName.trim() && (
+                    <p className="text-[11px] text-slate-500">
+                      Enter your name in “Your name” above first — your proposal is saved under it.
+                    </p>
+                  )}
+                  {needsHumanCheck && turnstileSiteKey && (
+                    <div className="flex justify-end [&:empty]:hidden [&:has(.cf-turnstile:empty)]:hidden">
+                      <Turnstile siteKey={turnstileSiteKey} action="poll-vote" resetKey={navigation.state} />
+                    </div>
+                  )}
+                </Form>
+              )}
+            </div>
+          )}
         </div>
       )}
 

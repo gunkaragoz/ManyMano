@@ -5,6 +5,7 @@ import { useEffect, useRef, useState } from "react";
 import { ArrowLeft, ArrowRight, CalendarDays, TriangleAlert, X } from "lucide-react";
 import { usePersistentState } from "~/utils/usePersistentState";
 import DatePicker from "~/components/DatePicker";
+import TimePicker from "~/components/TimePicker";
 import TimezoneSelect from "~/components/TimezoneSelect";
 import { detectLocalTimezone } from "~/utils/timezones";
 import { useCreateStickyHeader } from "~/utils/useCreateStickyHeader";
@@ -16,6 +17,7 @@ import {
   generateUniquePublicId,
 } from "~/utils/ids";
 import { sendEmail, emailFooter } from "~/utils/email";
+import { trackEmailUsage } from "~/utils/quota";
 import { escapeHtml } from "~/utils/sanitize";
 import { buildAdminCookie, hashSecretForStorage } from "~/utils/auth";
 import { verifyTurnstile, turnstileFailure } from "~/utils/turnstile";
@@ -84,6 +86,7 @@ export async function action({ request, context }: ActionFunctionArgs) {
   const env = context.cloudflare.env as {
     DB: D1Database;
     RESEND_API_KEY?: string;
+    ALERT_WEBHOOK_URL?: string;
     FROM_EMAIL: string;
     SITE_URL: string;
     SITE_NAME: string;
@@ -283,7 +286,7 @@ export async function action({ request, context }: ActionFunctionArgs) {
   const moreCount = validSlots.length > 8 ? `<p>…and ${validSlots.length - 8} more option(s).</p>` : "";
   const durationLabel = formatDurationLabel(durationMinutes);
 
-  await sendEmail({
+  const emailResult = await sendEmail({
     apiKey: env.RESEND_API_KEY,
     from: site.fromEmail,
     to: organizerEmail,
@@ -310,6 +313,13 @@ export async function action({ request, context }: ActionFunctionArgs) {
         ${emailFooter(site)}
       </div>
     `,
+  });
+  // Free-tier quota tracking: counts the send, fires a Discord/Slack webhook
+  // at 80/90/100% (best-effort, never blocks the redirect).
+  await trackEmailUsage(env.DB, {
+    webhookUrl: env.ALERT_WEBHOOK_URL,
+    appName: site.siteName,
+    result: emailResult,
   });
 
   const headers = new Headers();
@@ -893,13 +903,11 @@ export default function CreateMeetingPoll() {
                       />
 
                       {!isAllDay && (
-                        <input
-                          type="time"
-                          required
-                          aria-label={`Start time for option ${index + 1}`}
+                        <TimePicker
                           value={day.startTime}
-                          onChange={(e) => updateDay(day.id, { startTime: e.target.value })}
-                          className="w-full h-10 px-3 text-sm rounded-xl border border-slate-200 bg-white focus:outline-none focus:ring-2 focus:ring-green-500/20 focus:border-green-500 min-w-0"
+                          onChange={(startTime) => updateDay(day.id, { startTime })}
+                          accent="green"
+                          className="min-w-0"
                         />
                       )}
 

@@ -5,6 +5,7 @@ import { useEffect, useRef, useState } from "react";
 import { ArrowLeft, ArrowRight, ClipboardList, TriangleAlert, X } from "lucide-react";
 import { usePersistentState } from "~/utils/usePersistentState";
 import DatePicker from "~/components/DatePicker";
+import TimePicker from "~/components/TimePicker";
 import TimezoneSelect from "~/components/TimezoneSelect";
 import { detectLocalTimezone } from "~/utils/timezones";
 import { useCreateStickyHeader } from "~/utils/useCreateStickyHeader";
@@ -16,6 +17,7 @@ import {
   generateUniquePublicId,
 } from "~/utils/ids";
 import { sendEmail, emailFooter } from "~/utils/email";
+import { trackEmailUsage } from "~/utils/quota";
 import { formatLongDateLabel } from "~/utils/calendar";
 import { escapeHtml } from "~/utils/sanitize";
 import { buildAdminCookie, hashSecretForStorage } from "~/utils/auth";
@@ -74,6 +76,7 @@ export async function action({ request, context }: ActionFunctionArgs) {
   const env = context.cloudflare.env as {
     DB: D1Database;
     RESEND_API_KEY?: string;
+    ALERT_WEBHOOK_URL?: string;
     FROM_EMAIL: string;
     SITE_URL: string;
     SITE_NAME: string;
@@ -238,7 +241,7 @@ export async function action({ request, context }: ActionFunctionArgs) {
   // print it on flyers or show it at the door; scanning opens the event page.
   const qrUrl = `${publicUrl}/qr?format=png`;
 
-  await sendEmail({
+  const emailResult = await sendEmail({
     apiKey: env.RESEND_API_KEY,
     from: site.fromEmail,
     to: organizerEmail,
@@ -263,6 +266,13 @@ export async function action({ request, context }: ActionFunctionArgs) {
         ${emailFooter(site)}
       </div>
     `,
+  });
+  // Free-tier quota tracking: counts the send, fires a Discord/Slack webhook
+  // at 80/90/100% (best-effort, never blocks the redirect).
+  await trackEmailUsage(env.DB, {
+    webhookUrl: env.ALERT_WEBHOOK_URL,
+    appName: site.siteName,
+    result: emailResult,
   });
 
   const headers = new Headers();
@@ -705,11 +715,10 @@ export default function CreateSignupSheet() {
                     <label className="block text-[10px] uppercase font-bold text-slate-400 mb-1">
                       Start Time
                     </label>
-                    <input
-                      type="time"
+                    <TimePicker
                       value={shift.startTime}
-                      onChange={(e) => updateShift(shift.id, { startTime: e.target.value })}
-                      className="w-full px-3 py-2 text-xs rounded-xl border border-slate-200 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500"
+                      onChange={(startTime) => updateShift(shift.id, { startTime })}
+                      size="sm"
                     />
                   </div>
 
@@ -717,11 +726,10 @@ export default function CreateSignupSheet() {
                     <label className="block text-[10px] uppercase font-bold text-slate-400 mb-1">
                       End Time
                     </label>
-                    <input
-                      type="time"
+                    <TimePicker
                       value={shift.endTime}
-                      onChange={(e) => updateShift(shift.id, { endTime: e.target.value })}
-                      className="w-full px-3 py-2 text-xs rounded-xl border border-slate-200 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500"
+                      onChange={(endTime) => updateShift(shift.id, { endTime })}
+                      size="sm"
                     />
                   </div>
                 </div>
