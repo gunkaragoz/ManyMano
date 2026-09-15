@@ -43,6 +43,7 @@ import { assessGuestRequest, needsVerification } from "~/utils/bot-protection";
 import Turnstile from "~/components/Turnstile";
 import DatePicker from "~/components/DatePicker";
 import TimezoneSelect from "~/components/TimezoneSelect";
+import { useCreateStickyHeader } from "~/utils/useCreateStickyHeader";
 import { buildGoogleCalendarUrl, pickCalendarSlot, effectiveDateForSlot, formatSlotDateLabel, formatLongDateLabel, formatDurationLabel, addMinutesToTimeString, parseTimeString } from "~/utils/calendar";
 import {
   detectLocalTimezone,
@@ -2055,6 +2056,13 @@ export default function EventView() {
     </span>
   );
 
+  // Sticky nav summary (same as create screens): once the event header card
+  // scrolls under the nav, show readonly info in the global header.
+  // TIME_POLL has no event date — title only. SIGNUP_SHEET shows title + date.
+  const stickyDate = event.type === "TIME_POLL" ? "" : event.eventDate || "";
+  const titleSentinelRef = useRef<HTMLDivElement>(null);
+  useCreateStickyHeader(event.title || "", stickyDate, titleSentinelRef);
+
   return (
     <div className="space-y-10 py-2">
       {/* Event Created Banner with 1-Click Copy Links */}
@@ -2281,7 +2289,8 @@ export default function EventView() {
           )}
 
           <div className="flex flex-wrap items-center gap-2 pt-1">
-            {event.eventDate && (
+            {/* TIME_POLL has no event date — options carry their own days. */}
+            {event.type !== "TIME_POLL" && event.eventDate && (
               <span
                 title={
                   showViewerTz
@@ -2295,7 +2304,7 @@ export default function EventView() {
                 {showViewerTz ? ` · ${organizerTzLabel(organizerTz, headerTzAt)}` : ""}
               </span>
             )}
-            {!event.eventDate && showViewerTz && viewerTz && (
+            {(event.type === "TIME_POLL" || !event.eventDate) && showViewerTz && viewerTz && (
               <span
                 title={`All times on this page are listed in the organizer's timezone (${organizerTz}).`}
                 className="inline-flex items-center gap-1.5 text-xs font-semibold text-slate-700 bg-slate-100/90 px-3 py-1.5 rounded-full border border-slate-200/80"
@@ -2405,6 +2414,9 @@ export default function EventView() {
           </div>
         )}
       </div>
+
+      {/* Sentinel: show title (+ date for sign-up sheets) in nav header once the event header scrolls out of view */}
+      <div ref={titleSentinelRef} aria-hidden="true" className="h-px w-full" />
 
       {/* ===================================================================== */}
       {/* ADMIN EDIT PANEL                                                      */}
