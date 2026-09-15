@@ -309,6 +309,9 @@ export default function App() {
               <Link to="/create" className="hover:text-slate-900 transition-colors">
                 How it works
               </Link>
+              <Link to="/pulse" className="hover:text-slate-900 transition-colors">
+                Pulse
+              </Link>
               <a href="/#faq" className="hover:text-slate-900 transition-colors">
                 FAQ
               </a>
