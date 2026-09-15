@@ -82,7 +82,7 @@ export async function loader({ params, request, context }: LoaderFunctionArgs) {
 <main style="background: #ffffff; border: 1px solid #e2e8f0; border-radius: 24px; padding: 32px; max-width: 420px; width: 100%; text-align: center; box-sizing: border-box;">
 <h1 style="margin: 0 0 4px 0; font-size: 20px; color: #0f172a;">${escapeHtml(rawTitle)}</h1>
 <p style="margin: 0 0 20px 0; font-size: 13px; color: #64748b;">Scan to open this event</p>
-<a href="${escapeHtml(publicUrl)}"><img src="${escapeHtml(publicUrl)}/qr?format=png" alt="QR code for ${escapeHtml(rawTitle)}" width="300" height="300" style="width: 100%; max-width: 300px; height: auto; border: 1px solid #e2e8f0; border-radius: 16px; padding: 8px; background: #ffffff; box-sizing: border-box;"></a>
+<a href="${escapeHtml(publicUrl)}"><img src="${escapeHtml(publicUrl)}/qr?format=png" alt="QR code for ${escapeHtml(rawTitle)}" width="300" height="300" onerror="this.style.display='none'" style="width: 100%; max-width: 300px; height: auto; border: 1px solid #e2e8f0; border-radius: 16px; padding: 8px; background: #ffffff; box-sizing: border-box;"></a>
 <p style="margin: 20px 0 0 0; font-size: 13px; color: #334155; overflow-wrap: anywhere;"><a href="${escapeHtml(publicUrl)}" style="color: #2563eb;">${escapeHtml(publicUrl)}</a></p>
 </main>
 </body>
