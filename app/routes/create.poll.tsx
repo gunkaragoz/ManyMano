@@ -595,7 +595,7 @@ export default function CreateMeetingPoll() {
               Create Meeting Time Poll
             </h1>
             <p className="text-xs text-slate-500 mt-0.5">
-              Pick a duration, add days, and let attendees vote on their availability.
+              Pick a duration, add days, and let attendees vote on their availability. No account needed. Your email lets us send your private organizer link.
             </p>
           </div>
         </div>
@@ -726,7 +726,7 @@ export default function CreateMeetingPoll() {
                     }`}
                   />
                   <span className="text-[11px] text-slate-500 mt-1 block">
-                    We'll email your private admin link here to finalize the meeting.
+                    No account needed. Your email lets us send your private organizer link. It’s never shown publicly or shared.
                   </span>
                 </div>
               </div>

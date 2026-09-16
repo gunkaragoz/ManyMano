@@ -108,7 +108,7 @@ export default function Index() {
             <div className="space-y-2">
               <h2 className="text-2xl font-bold text-slate-900 tracking-tight">Sign-Up Sheets</h2>
               <p className="text-sm text-slate-500 leading-relaxed">
-                Slot limits, shifts, potluck food lists, and community tasks. People claim spots instantly with zero account signup.
+                Fill shifts and tasks fast. People claim spots instantly — no account needed.
               </p>
             </div>
 
@@ -124,6 +124,10 @@ export default function Index() {
               <li className="flex items-center gap-2.5">
                 <span className="w-4 h-4 rounded-full bg-blue-100 text-blue-700 flex items-center justify-center"><Check className="w-3 h-3" /></span>
                 <span>Secret organizer link with 1-click CSV roster export</span>
+              </li>
+              <li className="flex items-center gap-2.5">
+                <span className="w-4 h-4 rounded-full bg-blue-100 text-blue-700 flex items-center justify-center"><Check className="w-3 h-3" /></span>
+                <span>Reminder emails to organizers and participants</span>
               </li>
             </ul>
           </div>
@@ -146,22 +150,26 @@ export default function Index() {
             <div className="space-y-2">
               <h2 className="text-2xl font-bold text-slate-900 tracking-tight">Meeting Time Finder</h2>
               <p className="text-sm text-slate-500 leading-relaxed">
-                A clean consensus grid. Propose dates, let everyone vote Yes / Maybe / No, and lock the winner.
+                See which time works best. Everyone votes Yes, Maybe, or No, and you lock the winner.
               </p>
             </div>
 
             <ul className="space-y-2.5 text-xs text-slate-600 pt-2">
               <li className="flex items-center gap-2.5">
                 <span className="w-4 h-4 rounded-full bg-green-100 text-green-700 flex items-center justify-center"><Check className="w-3 h-3" /></span>
-                <span>Responsive consensus matrix with fast 1-click voting</span>
+                <span>Everyone votes Yes, Maybe, or No with fast 1-click voting</span>
               </li>
               <li className="flex items-center gap-2.5">
                 <span className="w-4 h-4 rounded-full bg-green-100 text-green-700 flex items-center justify-center"><Check className="w-3 h-3" /></span>
-                <span>Automatic local time zone conversion for attendees</span>
+                <span>See which time works best at a glance</span>
               </li>
               <li className="flex items-center gap-2.5">
                 <span className="w-4 h-4 rounded-full bg-green-100 text-green-700 flex items-center justify-center"><Check className="w-3 h-3" /></span>
-                <span>Real-time consensus star & calendar sync</span>
+                <span>Automatic time-zone conversion and calendar sync</span>
+              </li>
+              <li className="flex items-center gap-2.5">
+                <span className="w-4 h-4 rounded-full bg-green-100 text-green-700 flex items-center justify-center"><Check className="w-3 h-3" /></span>
+                <span>Reminder emails once you lock the winning time</span>
               </li>
             </ul>
           </div>

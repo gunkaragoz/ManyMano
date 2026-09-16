@@ -105,11 +105,11 @@ export function getHomeFaq(siteName: string): FaqItem[] {
     {
       question: "Are my events private?",
       answer:
-        "Yes. Events are unlisted — only people with the link can view them. Event pages are excluded from search engines, and organizer emails are never shown publicly.",
+        "Events are unlisted. Anyone with the link can view them. Event pages are excluded from search engines, and organizer emails are never shown publicly. Participant names and responses are visible to anyone with the link.",
     },
     {
       question: "How does the meeting poll work?",
-      answer: `Propose candidate time slots, attendees vote Yes, Maybe, or No, and ${siteName} highlights the top consensus slot. The organizer can then lock the winning time.`,
+      answer: `Propose times, everyone votes Yes, Maybe, or No, and ${siteName} shows which time works best. The organizer can then lock the winner.`,
     },
   ];
 }

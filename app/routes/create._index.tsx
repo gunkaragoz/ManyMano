@@ -29,7 +29,7 @@ export default function CreateChooser() {
       <div className="text-center space-y-2">
         <h1 className="text-3xl font-extrabold text-slate-900 tracking-tight">What would you like to create?</h1>
         <p className="text-sm text-slate-500">
-          Choose between organizing shifts with a sign-up sheet or finding consensus on a meeting time.
+          Choose between organizing shifts with a sign-up sheet or seeing which meeting time works best.
         </p>
       </div>
 
@@ -65,7 +65,7 @@ export default function CreateChooser() {
             </div>
             <h2 className="text-xl font-bold text-slate-900">Meeting Time Finder</h2>
             <p className="text-xs text-slate-500 leading-relaxed">
-              Propose candidate time slots on a clean consensus grid and let everyone vote.
+              Propose times and let everyone vote Yes, Maybe, or No to see which works best.
             </p>
           </div>
           <span className="text-xs font-bold text-green-600 flex items-center gap-1">
