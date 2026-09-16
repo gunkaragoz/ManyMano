@@ -3614,6 +3614,17 @@ export default function EventView() {
                   <tr className="bg-slate-50/80 border-b border-slate-200/80 text-slate-700 font-bold">
                     {slots.map((s) => {
                       const isWinning = event.winningSlotId === s.id;
+                      // Custom labels replace the auto "Day · time" title in storage,
+                      // so detect them the same way as mobile cards + consensus banner.
+                      const dayLabelForCustom = slotDayLabel[s.id] || "Undated";
+                      const timeLabelForCustom =
+                        s.startTime || s.endTime
+                          ? `${formatTime(s.startTime)}${s.endTime ? ` – ${formatTime(s.endTime)}` : ""}`
+                          : "All day";
+                      const autoTitleForCustom = `${dayLabelForCustom} · ${timeLabelForCustom}`;
+                      const rawTitleForCustom = (s.title || "").trim();
+                      const customLabel =
+                        rawTitleForCustom && rawTitleForCustom !== autoTitleForCustom ? s.title : "";
                       return (
                         <th
                           key={s.id}
@@ -3631,6 +3642,14 @@ export default function EventView() {
                               className="inline-block"
                             />
                           </div>
+                          {customLabel && (
+                            <div
+                              className="mt-1 text-[11px] font-medium text-slate-500 truncate max-w-[170px] mx-auto"
+                              title={customLabel}
+                            >
+                              {customLabel}
+                            </div>
+                          )}
                           {isWinning && (
                             <span className="mt-1 text-[10px] px-2.5 py-0.5 rounded-full bg-purple-100 text-purple-800 font-bold inline-flex items-center gap-1">
                               <Trophy className="w-3 h-3" /> Selected Meeting Time
