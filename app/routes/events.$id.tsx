@@ -301,8 +301,9 @@ export async function loader({ params, request, context }: LoaderFunctionArgs) {
       : rawSlots;
 
   if (event.type === "SIGNUP_SHEET") {
-    // Fetch signups — never expose emails or edit tokens to non-admins,
-    // and never expose edit tokens to anyone (self-serve uses emailed link).
+    // Fetch signups — never expose emails or edit tokens to the client.
+    // Organizers see emails only via the CSV roster export; the event page
+    // itself shows names (+ notes) to everyone, including organizers.
     const eventSignups = await db
       .select()
       .from(signups)
@@ -313,7 +314,7 @@ export async function loader({ params, request, context }: LoaderFunctionArgs) {
       slotId: s.slotId,
       eventId: s.eventId,
       participantName: s.participantName,
-      participantEmail: isAdmin ? s.participantEmail : null,
+      participantEmail: null as string | null,
       customFields: s.customFields,
       status: s.status,
       createdAt: s.createdAt,
@@ -359,8 +360,8 @@ export async function loader({ params, request, context }: LoaderFunctionArgs) {
             .where(inArray(pollVoteEntries.pollVoteId, voteIds))
         : [];
 
-    // Map votes with their entry responses — emails only for admins,
-    // edit tokens never leave the server.
+    // Map votes with their entry responses — emails and edit tokens never
+    // leave the server (organizers see emails only via the CSV export).
     const votesWithResponses = votes.map((v) => {
       const vEntries = entries.filter((e) => e.pollVoteId === v.id);
       const responses: Record<string, string> = {};
@@ -370,7 +371,7 @@ export async function loader({ params, request, context }: LoaderFunctionArgs) {
       return {
         id: v.id,
         participantName: v.participantName,
-        participantEmail: isAdmin ? v.participantEmail : null,
+        participantEmail: null as string | null,
         responses,
       };
     });
@@ -635,20 +636,9 @@ export async function action({ request, params, context }: ActionFunctionArgs) {
         : targetSlot.endTime
           ? formatTime(targetSlot.endTime)
           : "";
-      // Same "City · GMT±HH:MM" format as the UI header (never raw IANA or
-      // abbreviations like "EDT"). Offset is taken at the event instant (DST-aware).
-      const organizerTz = (event.timezone || "").trim() || "UTC";
-      const orgAt =
-        event.eventDate && targetSlot.startTime
-          ? zonedWallTimeToUtc(event.eventDate, targetSlot.startTime, organizerTz)
-          : null;
-      const whenTzPart = (() => {
-        const city = timezoneCity(organizerTz);
-        const offset = formatUtcOffsetLabel(organizerTz, orgAt ?? new Date());
-        return offset ? `${city} · ${offset}` : city;
-      })();
-      const whenBase = [whenDatePart, whenTimePart].filter(Boolean).join(" · ");
-      const whenLine = whenBase ? (whenTzPart ? `${whenBase} (${whenTzPart})` : whenBase) : whenTzPart;
+      // Emails carry date + wall-clock time only, no timezone suffix
+      // (matches the day-before reminders; the page shows dual clocks).
+      const whenLine = [whenDatePart, whenTimePart].filter(Boolean).join(" · ");
       const googleCalendarUrl = buildGoogleCalendarUrl({
         title: `${taskLabel} — ${event.title}`,
         description: event.description,
@@ -716,6 +706,58 @@ export async function action({ request, params, context }: ActionFunctionArgs) {
     }
 
     await db.delete(signups).where(eq(signups.id, signupId));
+
+    // Organizer-initiated removal: notify the person by email (best-effort —
+    // a failed send never fails the removal itself, sendEmail never throws).
+    // Self-cancellations (owner via edit token / cancel link) stay silent.
+    if (adminOk) {
+      const removedEmail = (existing.participantEmail || "").trim();
+      if (removedEmail && isValidEmail(removedEmail)) {
+        const [removedSlot] = existing.slotId
+          ? await db.select().from(eventSlots).where(eq(eventSlots.id, existing.slotId)).limit(1)
+          : [null];
+        const shiftPrefix = ((removedSlot as { shiftName?: string | null } | null)?.shiftName || "").trim();
+        const slotTitle = (removedSlot?.title || "").trim();
+        const taskLabel = slotTitle
+          ? shiftPrefix && shiftPrefix !== slotTitle
+            ? `${shiftPrefix} – ${slotTitle}`
+            : slotTitle
+          : shiftPrefix || "your spot";
+        const whenDatePart = event.eventDate ? formatLongDateLabel(event.eventDate) : "";
+        const whenTimePart = removedSlot?.startTime
+          ? `${formatTime(removedSlot.startTime)}${removedSlot.endTime ? ` – ${formatTime(removedSlot.endTime)}` : ""}`
+          : removedSlot?.endTime
+            ? formatTime(removedSlot.endTime)
+            : "";
+        const whenLine = [whenDatePart, whenTimePart].filter(Boolean).join(" · ");
+        const eventUrl = `${url.origin}/events/${eventId}`;
+        const removalResult = await sendEmail({
+          ...getEmailSenderConfig(env),
+          from: site.fromEmail,
+          to: removedEmail,
+          subject: `Removed: "${taskLabel}" for ${event.title}`,
+          html: `
+          <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto; padding: 24px; color: #1e293b;">
+            <h2 style="color: #0f172a; margin-top: 0;">Your sign-up was removed</h2>
+            <p>Hi ${escapeHtml(existing.participantName)},</p>
+            <p>The organizer removed your sign-up for <strong>${escapeHtml(taskLabel)}</strong> at <strong>${escapeHtml(event.title)}</strong>.</p>
+            ${whenLine ? `<p><strong>When:</strong> ${escapeHtml(whenLine)}</p>` : ""}
+            ${event.location ? `<p><strong>Location:</strong> ${escapeHtml(event.location)}</p>` : ""}
+            <p><strong>Event page:</strong> <a href="${escapeHtml(eventUrl)}" style="color: #2563eb;">${escapeHtml(eventUrl)}</a></p>
+            <p style="font-size: 13px; color: #64748b;">If you think this was a mistake, please contact the organizer${event.organizerName ? ` (${escapeHtml(event.organizerName)})` : ""} or sign up again if a spot is still open.</p>
+            ${emailFooter(site)}
+          </div>
+        `,
+        });
+        await trackEmailUsage(env.DB, {
+          webhookUrl: env.ALERT_WEBHOOK_URL,
+          appName: site.siteName,
+          result: removalResult,
+          limits: getEmailLimits(removalResult.provider, env),
+        });
+      }
+    }
+
     return json({ success: true, message: "Signup cancelled." });
   }
 
@@ -1250,6 +1292,39 @@ export async function action({ request, params, context }: ActionFunctionArgs) {
     }
     await db.delete(pollVoteEntries).where(eq(pollVoteEntries.pollVoteId, voteId));
     await db.delete(pollVotes).where(eq(pollVotes.id, voteId));
+
+    // Organizer-initiated removal: notify the voter by email (best-effort).
+    // Self-removals (owner via edit token / cancel link) stay silent.
+    if (adminOk) {
+      const removedEmail = (existing.participantEmail || "").trim();
+      if (removedEmail && isValidEmail(removedEmail)) {
+        const eventUrl = `${url.origin}/events/${eventId}`;
+        const voteRemovalResult = await sendEmail({
+          ...getEmailSenderConfig(env),
+          from: site.fromEmail,
+          to: removedEmail,
+          subject: `Your vote for "${event.title}" was removed`,
+          html: `
+          <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto; padding: 24px; color: #1e293b;">
+            <h2 style="color: #0f172a; margin-top: 0;">Your vote was removed</h2>
+            <p>Hi ${escapeHtml(existing.participantName)},</p>
+            <p>The organizer removed your vote for <strong>${escapeHtml(event.title)}</strong>.</p>
+            ${event.description ? `<p><strong>Description:</strong><br>${escapeHtml(event.description).replace(/\r?\n/g, "<br>")}</p>` : ""}
+            <p><strong>Event page:</strong> <a href="${escapeHtml(eventUrl)}" style="color: #2563eb;">${escapeHtml(eventUrl)}</a></p>
+            <p style="font-size: 13px; color: #64748b;">If you think this was a mistake, please contact the organizer${event.organizerName ? ` (${escapeHtml(event.organizerName)})` : ""} or vote again while the poll is still open.</p>
+            ${emailFooter(site)}
+          </div>
+        `,
+        });
+        await trackEmailUsage(env.DB, {
+          webhookUrl: env.ALERT_WEBHOOK_URL,
+          appName: site.siteName,
+          result: voteRemovalResult,
+          limits: getEmailLimits(voteRemovalResult.provider, env),
+        });
+      }
+    }
+
     return json({ success: true, message: "Vote removed." });
   }
 
@@ -1300,20 +1375,11 @@ export async function action({ request, params, context }: ActionFunctionArgs) {
       : winningSlot.endTime
         ? formatTime(winningSlot.endTime)
         : "";
-    const lockedTz = (event.timezone || "").trim() || "UTC";
-    const lockedAt =
-      lockedDate && winningSlot.startTime
-        ? zonedWallTimeToUtc(lockedDate, winningSlot.startTime, lockedTz)
-        : null;
-    const lockedTzPart = (() => {
-      const city = timezoneCity(lockedTz);
-      const offset = formatUtcOffsetLabel(lockedTz, lockedAt ?? new Date());
-      return offset ? `${city} · ${offset}` : city;
-    })();
     const lockedBase = [lockedDate ? formatLongDateLabel(lockedDate) : "", lockedTimePart]
       .filter(Boolean)
       .join(" · ");
-    const lockedWhen = lockedBase ? (lockedTzPart ? `${lockedBase} (${lockedTzPart})` : lockedBase) : lockedTzPart;
+    // No timezone suffix in emails (matches signup + reminder mails).
+    const lockedWhen = lockedBase;
     const lockedCalendarUrl = buildGoogleCalendarUrl({
       title: event.title,
       description: event.description,
@@ -3391,11 +3457,6 @@ export default function EventView() {
                                   <span className="font-semibold text-slate-800">
                                     {idx + 1}. {s.participantName}
                                   </span>
-                                  {isAdmin && (s as { participantEmail?: string | null }).participantEmail && (
-                                    <span className="block text-[11px] text-slate-500 truncate mt-0.5">
-                                      {(s as { participantEmail?: string | null }).participantEmail}
-                                    </span>
-                                  )}
                                   {customNotes && (
                                     <span className="block text-[11px] text-slate-500 truncate mt-0.5">
                                       "{customNotes}"
@@ -3410,7 +3471,13 @@ export default function EventView() {
                                     <input type="hidden" name="adminToken" value={adminToken || ""} />
                                     <button
                                       type="submit"
-                                      title="Cancel entry"
+                                      title="Remove entry"
+                                      aria-label={`Remove sign-up by ${s.participantName}`}
+                                      onClick={(e) => {
+                                        if (!window.confirm(`Remove ${s.participantName} from this spot? This cannot be undone.`)) {
+                                          e.preventDefault();
+                                        }
+                                      }}
                                       className="text-slate-400 hover:text-rose-600 p-1 transition-colors"
                                     >
                                       <X className="w-3.5 h-3.5" />
@@ -3776,6 +3843,11 @@ export default function EventView() {
                                   type="submit"
                                   title="Remove vote"
                                   aria-label={`Remove vote by ${v.participantName}`}
+                                  onClick={(e) => {
+                                    if (!window.confirm(`Remove vote by ${v.participantName}? This cannot be undone.`)) {
+                                      e.preventDefault();
+                                    }
+                                  }}
                                   className="min-w-[44px] min-h-[44px] inline-flex items-center justify-center text-slate-400 hover:text-rose-600 transition-colors"
                                 >
                                   <X className="w-4 h-4" />
@@ -3868,14 +3940,7 @@ export default function EventView() {
                     <tr key={v.id} className="hover:bg-slate-50/60 transition-colors">
                       <td className="p-4 sticky left-0 bg-white border-r border-slate-200/80 font-semibold text-slate-900">
                         <div className="flex items-center justify-between gap-2">
-                          <span>
-                            {v.participantName}
-                            {isAdmin && (v as { participantEmail?: string | null }).participantEmail && (
-                              <span className="block text-[11px] font-normal text-slate-500">
-                                {(v as { participantEmail?: string | null }).participantEmail}
-                              </span>
-                            )}
-                          </span>
+                          <span>{v.participantName}</span>
                           {isAdmin && (
                             <Form method="post">
                               <input type="hidden" name="intent" value="delete_poll_vote" />
@@ -3884,6 +3949,12 @@ export default function EventView() {
                               <button
                                 type="submit"
                                 title="Remove vote"
+                                aria-label={`Remove vote by ${v.participantName}`}
+                                onClick={(e) => {
+                                  if (!window.confirm(`Remove vote by ${v.participantName}? This cannot be undone.`)) {
+                                    e.preventDefault();
+                                  }
+                                }}
                                 className="text-slate-300 hover:text-rose-600 p-1 transition-colors"
                               >
                                 <X className="w-3.5 h-3.5" />

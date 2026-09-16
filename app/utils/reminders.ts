@@ -33,7 +33,6 @@ import {
   type AppDb,
 } from "~/db";
 import { buildGoogleCalendarUrl, effectiveDateForSlot, formatLongDateLabel } from "./calendar";
-import { formatUtcOffsetLabel, timezoneCity, zonedWallTimeToUtc } from "./timezones";
 import { isExpired } from "./retention";
 import { isValidEmail } from "./validation";
 import { escapeHtml } from "./sanitize";
@@ -246,29 +245,25 @@ function taskLabel(slot: { title: string; shiftName?: string | null }): string {
   return shift ? `${shift} – ${slot.title}` : slot.title;
 }
 
-/** "Saturday, September 20th, 2026 · 8:00 AM – 10:00 AM (New York · GMT-04:00)". */
+/** "Saturday, September 20th, 2026 · 8:00 AM – 10:00 AM" (no timezone — see below). */
 export function whenLineFor(args: {
   eventDate: string | null;
   startTime: string | null;
   endTime: string | null;
   timezone: string;
 }): string {
+  // Reminder emails deliberately carry no timezone: the stored date is the
+  // organizer-local calendar day and times are wall-clock as entered, so a
+  // "City · GMT±HH:MM" suffix adds noise without helping anyone act.
+  // (The event page itself still shows the dual organizer/viewer clocks.)
+  void args.timezone;
   const whenDatePart = args.eventDate ? formatLongDateLabel(args.eventDate) : "";
   const whenTimePart = args.startTime
     ? `${formatTime(args.startTime)}${args.endTime ? ` – ${formatTime(args.endTime)}` : ""}`
     : args.endTime
       ? formatTime(args.endTime)
       : "";
-  const tz = (args.timezone || "").trim() || "UTC";
-  const at =
-    args.eventDate && args.startTime
-      ? zonedWallTimeToUtc(args.eventDate, args.startTime, tz)
-      : null;
-  const city = timezoneCity(tz);
-  const offset = formatUtcOffsetLabel(tz, at ?? new Date());
-  const whenTzPart = offset ? `${city} · ${offset}` : city;
-  const whenBase = [whenDatePart, whenTimePart].filter(Boolean).join(" · ");
-  return whenBase ? (whenTzPart ? `${whenBase} (${whenTzPart})` : whenBase) : whenTzPart;
+  return [whenDatePart, whenTimePart].filter(Boolean).join(" · ");
 }
 
 /** "1/3 volunteers" (capped slots) or "4 signed up" (unlimited). */
