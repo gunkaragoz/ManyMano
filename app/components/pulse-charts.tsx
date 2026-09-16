@@ -93,6 +93,21 @@ export function DailyChart({
   const yFor = (v: number) => PAD_T + innerH - (v / ceil) * innerH;
   const baseline = yFor(0);
   const labelEvery = n <= 10 ? 1 : n <= 31 ? Math.ceil(n / 8) : Math.ceil(n / 10);
+  // Precompute label indices: every labelEvery-th tick, plus the last day.
+  // If the last day is too close to the previous tick (e.g. only 1 slot away)
+  // the two texts overlap (see "Sep 15 / Sep 16"), so drop the
+  // second-to-last tick and keep the final label instead.
+  const labelIdx = new Set<number>();
+  for (let i = 0; i < n; i += labelEvery) labelIdx.add(i);
+  if (n > 1) {
+    const lastRegular = Math.floor((n - 1) / labelEvery) * labelEvery;
+    const gap = n - 1 - lastRegular;
+    if (gap !== 0) {
+      const minGap = labelEvery === 1 ? 1 : 2;
+      if (gap < minGap) labelIdx.delete(lastRegular);
+      labelIdx.add(n - 1);
+    }
+  }
 
   // 7-day moving average of total activity (subtle slate line).
   const avg = totals.map((_, i) => {
@@ -172,7 +187,7 @@ export function DailyChart({
                   );
                 })
               )}
-              {(i % labelEvery === 0 || i === n - 1) && (
+              {labelIdx.has(i) && (
                 <text x={cx} y={H - 9} textAnchor="middle" fontSize={10.5} fill="#94a3b8">
                   {d.label}
                 </text>
