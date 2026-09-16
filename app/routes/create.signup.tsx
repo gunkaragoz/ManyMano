@@ -510,7 +510,7 @@ export default function CreateSignupSheet() {
               Create Sign-Up Sheet
             </h1>
             <p className="text-xs text-slate-500 mt-0.5">
-              Set up shifts with tasks and spots for your event. No account needed. Your email lets us send your private organizer link.
+              Set up shifts with tasks and spots for your event. No account needed. Your email receives your private organizer link — lose it and you can get a new one from the event page.
             </p>
           </div>
         </div>
@@ -653,7 +653,7 @@ export default function CreateSignupSheet() {
                   }`}
                 />
                 <span className="text-[11px] text-slate-500 mt-1 block">
-                  No account needed. Your email lets us send your private organizer link. It’s never shown publicly or shared.
+                  No account needed. Your email receives your private organizer link (never shown publicly or shared). Lose it and you can get a new one from the event page — the old link will stop working.
                 </span>
               </div>
             </div>

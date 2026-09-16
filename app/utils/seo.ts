@@ -98,6 +98,11 @@ export function getHomeFaq(siteName: string): FaqItem[] {
         "Every event gets a public link to share with attendees and a separate secret admin link to manage responses, export CSV, and delete the event.",
     },
     {
+      question: "What if I lose my organizer link?",
+      answer:
+        "Open your event's public link and use “Lost your organizer link?” — enter the email address you used when you created the event and we'll email you a new organizer link. Your old link will stop working. If you can't get into that inbox anymore, ask someone with the organizer link to forward it, or create a new event.",
+    },
+    {
       question: "How do calendar invites work?",
       answer:
         "Attendees can add events to Google Calendar in one click or download a standard .ics file for Apple Calendar and Outlook. No email is required.",

@@ -36,6 +36,7 @@ export async function loader({ request, context }: LoaderFunctionArgs) {
     "- Instant calendar invites via one-click Google Calendar links and RFC 5545 .ics downloads (Apple Calendar, Outlook).",
     "- No accounts or passwords; events are created and shared in seconds.",
     "- Organizer admin mode via a secret link; participants get cancel links when they leave an email.",
+    "- Lost your organizer link? Open the event's public link and use “Lost your organizer link?” to get a new link by email (the old link stops working).",
     "",
     "## Key pages",
     "",

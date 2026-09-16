@@ -12,6 +12,7 @@ import {
   Clock,
   Download,
   Globe,
+  KeyRound,
   Link2,
   Lock,
   MapPin,
@@ -413,6 +414,30 @@ export async function loader({ params, request, context }: LoaderFunctionArgs) {
       }
     );
   }
+}
+
+// Strict per-IP+event cap for organizer-link recovery (5/hour): the guest
+// bot-protection limit above (30/10min) is too generous for inbox-spamming
+// and email-quota burning via the public link. Bounded like auth.ts.
+const resendAttempts = new Map<string, { count: number; resetAt: number }>();
+const RESEND_LIMIT = 5;
+const RESEND_WINDOW_MS = 60 * 60 * 1000;
+
+function checkResendRateLimit(key: string): boolean {
+  const now = Date.now();
+  const entry = resendAttempts.get(key);
+  if (!entry || now > entry.resetAt) {
+    if (resendAttempts.size >= 1000) {
+      for (const [k, v] of resendAttempts) {
+        if (now > v.resetAt) resendAttempts.delete(k);
+        if (resendAttempts.size < 800) break;
+      }
+    }
+    resendAttempts.set(key, { count: 1, resetAt: now + RESEND_WINDOW_MS });
+    return true;
+  }
+  entry.count += 1;
+  return entry.count <= RESEND_LIMIT;
 }
 
 export async function action({ request, params, context }: ActionFunctionArgs) {
@@ -1577,6 +1602,113 @@ export async function action({ request, params, context }: ActionFunctionArgs) {
     return redirect(`/events/${eventId}?cancel_error=1`);
   }
 
+  // 11. Organizer-link recovery ("Lost your organizer link?").
+  // What happens: admin tokens are stored hashed (one-way), so the old link
+  // can never be looked up — recovery issues a FRESH token and emails it to
+  // the organizer address on file, invalidating the previous link/cookies.
+  // To avoid leaking which email is the organizer's, every valid-format
+  // request gets the same generic success message whether it matched or not.
+  if (intent === "resend_admin_link") {
+    const emailRaw = cleanText(formData.get("organizerEmail"), EMAIL_MAX);
+    const genericOk =
+      "If that email matches the one used to create this event, a new organizer link is on its way. Check your inbox and spam folder — your old link will stop working.";
+
+    // Honeypot: bots self-identify here — fake success, no email, no DB write.
+    const resendHoneypot = ((formData.get("company_website") as string | null) ?? "").trim();
+    if (resendHoneypot.length > 0) {
+      return json({ success: true, message: genericOk });
+    }
+
+    if (!isValidEmail(emailRaw)) {
+      return json({ error: "Please enter a valid email address." }, { status: 400 });
+    }
+
+    // Frictionless bot protection (same as guest writes): challenge floods /
+    // superhuman-fast submits with Turnstile, otherwise stay invisible.
+    const resendCheck = assessGuestRequest(formData, {
+      ip: request.headers.get("cf-connecting-ip") || "unknown",
+      eventId,
+    });
+    if (resendCheck.verdict === "bot") {
+      return json({ success: true, message: genericOk });
+    }
+    if (resendCheck.verdict === "challenge") {
+      const turnstileResend = await verifyTurnstile({
+        token: formData.get("cf-turnstile-response") as string | null,
+        expectedAction: "resend-admin",
+        env,
+        remoteIp: request.headers.get("cf-connecting-ip"),
+      });
+      if (!turnstileResend.ok) {
+        const f = needsVerification(resendCheck);
+        return json(f.body, { status: f.status });
+      }
+    } else if (hasTurnstileToken(formData)) {
+      const turnstileResend = await verifyTurnstile({
+        token: formData.get("cf-turnstile-response") as string | null,
+        expectedAction: "resend-admin",
+        env,
+        remoteIp: request.headers.get("cf-connecting-ip"),
+      });
+      if (!turnstileResend.ok) {
+        const f = turnstileFailure(false);
+        return json(f.body, { status: f.status });
+      }
+    }
+
+    // Strict per-event resend cap (on top of the guest rate limit above):
+    // 5 reissues / hour per IP+event so a stranger with the public link
+    // can't spam the organizer's inbox or burn email quota.
+    if (!checkResendRateLimit(`${request.headers.get("cf-connecting-ip") || "unknown"}:${eventId}`)) {
+      return json(
+        { error: "Too many recovery requests — please wait a while and try again." },
+        { status: 429 }
+      );
+    }
+
+    const matches =
+      emailRaw.trim().toLowerCase() === (event.organizerEmail || "").trim().toLowerCase();
+    if (!matches) {
+      return json({ success: true, message: genericOk });
+    }
+
+    const freshToken = generateSecretToken();
+    await db
+      .update(events)
+      .set({ adminToken: await hashSecretForStorage(freshToken), updatedAt: now })
+      .where(eq(events.id, eventId));
+
+    const freshAdminUrl = `${url.origin}/events/${eventId}?admin=${encodeURIComponent(freshToken)}`;
+    const freshPublicUrl = `${url.origin}/events/${eventId}`;
+    const resendResult = await sendEmail({
+      ...getEmailSenderConfig(env),
+      from: site.fromEmail,
+      to: event.organizerEmail,
+      subject: `Your new organizer link: "${event.title}"`,
+      html: `
+        <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto; padding: 24px; color: #1e293b;">
+          <h2 style="font-size: 20px; font-weight: 700; color: #0f172a; margin-top: 0;">Your new organizer link is ready</h2>
+          <p>Hi ${escapeHtml(event.organizerName || "organizer")},</p>
+          <p>Someone asked for a new organizer link for <strong>${escapeHtml(event.title)}</strong>. Your old organizer link no longer works — use this one from now on:</p>
+          <div style="background: #f8fafc; border: 1px solid #e2e8f0; padding: 18px; border-radius: 12px; margin: 20px 0;">
+            <p style="margin: 0 0 12px 0;"><strong>New secret organizer link (keep private):</strong><br><a href="${escapeHtml(freshAdminUrl)}" style="color: #2563eb;">${escapeHtml(freshAdminUrl)}</a></p>
+            <p style="margin: 0;"><strong>Public link for attendees:</strong><br><a href="${escapeHtml(freshPublicUrl)}" style="color: #2563eb;">${escapeHtml(freshPublicUrl)}</a></p>
+          </div>
+          <p style="font-size: 13px; color: #64748b;">If you didn't request this, someone entered your organizer email on the event page — your event is unchanged, only the link is new. Bookmark the new link and keep it private.</p>
+          ${emailFooter(site)}
+        </div>
+      `,
+    });
+    await trackEmailUsage(env.DB, {
+      webhookUrl: env.ALERT_WEBHOOK_URL,
+      appName: site.siteName,
+      result: resendResult,
+      limits: getEmailLimits(resendResult.provider, env),
+    });
+
+    return json({ success: true, message: genericOk });
+  }
+
   return json({ error: "Unknown intent" }, { status: 400 });
 }
 
@@ -2424,7 +2556,7 @@ export default function EventView() {
             <div>
               <h2 className="text-lg font-bold text-slate-900">Your event is live!</h2>
               <p className="text-xs text-slate-500">
-                Share the public link with attendees and bookmark your secret admin link.
+                Share the public link with attendees and bookmark your secret admin link. We also emailed both links to your inbox — lose the organizer link later and you can get a new one from this event page.
               </p>
             </div>
           </div>
@@ -2489,6 +2621,9 @@ export default function EventView() {
               </div>
             </div>
           </div>
+          <p className="text-[11px] text-slate-500 leading-relaxed">
+            Lost your organizer link later? Open the public event link and use “Lost your organizer link?” to email yourself a new one — the old link will stop working.
+          </p>
         </div>
       )}
 
@@ -2761,6 +2896,73 @@ export default function EventView() {
               </span>
             </p>
           </div>
+        )}
+
+        {/* Organizer-link recovery — visible to non-admins so a lost private
+            link is never a dead end. Tokens are stored hashed, so the old link
+            can't be looked up: recovery emails a FRESH link to the organizer
+            address on file and invalidates the previous one. */}
+        {!isAdmin && (
+          <details className="group rounded-xl border border-slate-200 bg-slate-50/70 px-4 py-3 open:bg-white transition-colors">
+            <summary className="flex items-center gap-2.5 cursor-pointer list-none text-xs font-bold text-slate-800">
+              <span className="w-7 h-7 rounded-full bg-slate-900 text-white flex items-center justify-center shrink-0">
+                <KeyRound className="w-3.5 h-3.5" />
+              </span>
+              <span className="flex-1">
+                Lost your organizer link?
+                <span className="block text-[11px] font-medium text-slate-500 mt-0.5">
+                  Enter your email and we&apos;ll send you a new one.
+                </span>
+              </span>
+              <span className="text-slate-400 group-open:rotate-45 transition-transform text-lg leading-none font-normal">
+                +
+              </span>
+            </summary>
+            <div className="mt-3 space-y-3 text-xs text-slate-600 leading-relaxed">
+              <p>
+                Enter the email you used to create this event and we&apos;ll send you a new organizer link. Your old link will stop working.
+              </p>
+              <p>
+                Can&apos;t open that inbox? Ask someone with the link to forward it, or create a new event.
+              </p>
+              <Form method="post" className="flex flex-col sm:flex-row gap-2">
+                <input type="hidden" name="intent" value="resend_admin_link" />
+                <input type="hidden" name="formStartedAt" value={pageLoadedAt} />
+                {/* Honeypot: humans never see it, bots autofill it. */}
+                <div className="absolute -left-[9999px] top-auto w-px h-px overflow-hidden" aria-hidden="true">
+                  <label>
+                    Company website (leave blank)
+                    <input type="text" name="company_website" autoComplete="off" tabIndex={-1} />
+                  </label>
+                </div>
+                <label htmlFor="recovery-email" className="sr-only">
+                  Organizer email
+                </label>
+                <input
+                  id="recovery-email"
+                  type="email"
+                  name="organizerEmail"
+                  required
+                  placeholder="you@example.com"
+                  autoComplete="email"
+                  className="flex-1 px-4 py-2.5 rounded-xl border border-slate-200 bg-white text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 placeholder:text-slate-400"
+                />
+                <button
+                  type="submit"
+                  disabled={isSubmitting}
+                  className="px-5 py-2.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-white text-xs font-bold shadow-sm transition-all disabled:opacity-50 inline-flex items-center justify-center gap-1.5 shrink-0"
+                >
+                  <Lock className="w-3.5 h-3.5" />
+                  {isSubmitting ? "Sending…" : "Email me a new link"}
+                </button>
+              </Form>
+              {needsHumanCheck && turnstileSiteKey && (
+                <div className="flex justify-start [&:empty]:hidden [&:has(.cf-turnstile:empty)]:hidden">
+                  <Turnstile siteKey={turnstileSiteKey} action="resend-admin" resetKey={navigation.state} />
+                </div>
+              )}
+            </div>
+          </details>
         )}
       </div>
 
