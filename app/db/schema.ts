@@ -1,4 +1,4 @@
-import { sqliteTable, text, integer } from "drizzle-orm/sqlite-core";
+import { sqliteTable, text, integer, primaryKey } from "drizzle-orm/sqlite-core";
 
 export const events = sqliteTable("events", {
   id: text("id").primaryKey(),
@@ -71,6 +71,23 @@ export const pollVoteEntries = sqliteTable("poll_vote_entries", {
     .references(() => eventSlots.id, { onDelete: "cascade" }),
   response: text("response").notNull(), // 'YES' | 'MAYBE' | 'NO'
 });
+
+// Day-before reminder dedupe (see app/utils/reminders.ts + GET /api/reminders).
+// One row per (event, date, kind) once the send was attempted successfully,
+// so a retried cron run never double-emails. Kinds: 'organizer' | 'participants'.
+// reminder_key is the event-local calendar day being reminded about (YYYY-MM-DD).
+export const reminderSends = sqliteTable(
+  "reminder_sends",
+  {
+    eventId: text("event_id")
+      .notNull()
+      .references(() => events.id, { onDelete: "cascade" }),
+    reminderKey: text("reminder_key").notNull(),
+    kind: text("kind").notNull(),
+    sentAt: text("sent_at").notNull(),
+  },
+  (t) => [primaryKey({ columns: [t.eventId, t.reminderKey, t.kind] })]
+);
 
 // Free-tier quota tracking (Resend email counts + alert dedupe).
 // Keys are period-scoped so rows never grow unboundedly in practice:

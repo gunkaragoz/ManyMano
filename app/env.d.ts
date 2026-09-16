@@ -18,6 +18,7 @@ declare module "@remix-run/cloudflare" {
         EMAIL_DAILY_LIMIT?: string;
         EMAIL_MONTHLY_LIMIT?: string;
         ALERT_WEBHOOK_URL?: string;
+        REMINDER_SECRET?: string;
         FROM_EMAIL: string;
         SITE_URL: string;
         SITE_NAME: string;
