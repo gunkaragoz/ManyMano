@@ -1447,7 +1447,11 @@ export async function action({ request, params, context }: ActionFunctionArgs) {
       event.type === "TIME_POLL" ? event.eventDate : cleanText(formData.get("eventDate"), 32) || null;
     const location = cleanText(formData.get("location"), LOCATION_MAX) || null;
     const organizerName = cleanText(formData.get("organizerName"), ORGANIZER_NAME_MAX);
-    const timezone = normalizeTimezone(formData.get("timezone") as string | null);
+    // SIGNUP_SHEET edit form historically had no timezone input — a missing
+    // field must keep the stored zone, not reset to UTC (which caused
+    // dual-clock UTC + viewer displays after any Save Details).
+    const timezoneRaw = formData.get("timezone") as string | null;
+    const timezone = timezoneRaw === null ? event.timezone || "UTC" : normalizeTimezone(timezoneRaw);
 
     if (!title) {
       return json({ error: "Event title is required." }, { status: 400 });
@@ -3090,6 +3094,15 @@ export default function EventView() {
                   className="w-full px-4 py-3 rounded-xl border border-slate-200/90 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all placeholder:text-slate-400"
                 />
               </div>
+              {/* SIGNUP_SHEET has timed shifts like create — timezone must be
+                  editable here too, otherwise Save Details silently resets it
+                  to UTC (see update_event action). Mirrors create/signup. */}
+              {event.type !== "TIME_POLL" && (
+                <div className="sm:col-span-2">
+                  <label htmlFor="edit-timezone" className="block text-xs font-semibold text-slate-700 mb-1.5">Timezone</label>
+                  <EditTimezoneField initial={(event as { timezone?: string | null }).timezone || "UTC"} />
+                </div>
+              )}
               <div className="sm:col-span-2">
                 <label className="block text-xs font-semibold text-slate-700 mb-1.5">Description</label>
                 <textarea
