@@ -80,6 +80,10 @@ export function getHomeFaq(siteName: string): FaqItem[] {
   if (!siteName) throw new Error("[config] getHomeFaq requires siteName (SITE_NAME).");
   return [
     {
+      question: `What can I use ${siteName} for?`,
+      answer: `${siteName} provides free online sign-up sheets and meeting polls for anyone organizing a group, friends, families, teams, nonprofits, community groups, schools, PTAs, and PTOs. Use it for volunteer scheduling, potluck sign-ups, event shifts, school activities, and coordinating helpers for fundraisers. Need a time that works for everyone? Create a meeting poll and let your group vote. Just share a link — no accounts required, no ads, and free.`,
+    },
+    {
       question: `Is ${siteName} really free?`,
       answer: `Yes. ${siteName} is free forever with no paywalls or feature limits and is open source.`,
     },
