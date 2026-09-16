@@ -1,17 +1,18 @@
 import type { HeadersFunction, LoaderFunctionArgs } from "@remix-run/cloudflare";
 import { json } from "@remix-run/cloudflare";
 import { getSiteConfig } from "~/utils/site";
+import { resolveEmailProvider, providerLabel } from "~/utils/email";
 import {
   QUOTA_ALERT_THRESHOLDS,
-  RESEND_DAILY_LIMIT,
-  RESEND_MONTHLY_LIMIT,
+  getEmailLimits,
   getEmailUsage,
 } from "~/utils/quota";
 
-// GET /api/usage — free-tier quota status (aggregate counts only, no PII).
+// GET /api/usage — email quota status (aggregate counts only, no PII).
 //
-// - `email`: live Resend send counters tracked in D1 (UTC day/month). This is
-//   the limit you'll actually hit first (100/day, 3,000/month free).
+// - `email`: live send counters tracked in D1 (UTC day/month) against the
+//   active provider's limits (Resend free 100/day / 3,000/month by default;
+//   SMTP/SES-sized defaults or EMAIL_*_LIMIT overrides — see .env.sample).
 // - `cloudflare`: live Workers/D1 consumption is NOT queryable from inside
 //   the app without a Cloudflare API token, so this echoes the static free
 //   limits + where to watch them. Cloudflare itself emails the account owner
@@ -32,6 +33,9 @@ export const headers: HeadersFunction = ({ loaderHeaders }) => {
 export async function loader({ context }: LoaderFunctionArgs) {
   const env = context.cloudflare.env as {
     DB: D1Database;
+    EMAIL_PROVIDER?: string;
+    EMAIL_DAILY_LIMIT?: string;
+    EMAIL_MONTHLY_LIMIT?: string;
     ALERT_WEBHOOK_URL?: string;
     SITE_URL: string;
     SITE_NAME: string;
@@ -40,10 +44,12 @@ export async function loader({ context }: LoaderFunctionArgs) {
     FROM_EMAIL: string;
   };
   const site = getSiteConfig(env);
+  const provider = resolveEmailProvider(env);
+  const limits = getEmailLimits(provider, env);
 
   let email = null;
   try {
-    email = await getEmailUsage(env.DB);
+    email = await getEmailUsage(env.DB, new Date(), limits);
   } catch {
     // Fresh DB before migration 0004 runs: report zeros, not a 500.
     email = { daily: 0, monthly: 0, dailyPct: 0, monthlyPct: 0 };
@@ -53,8 +59,10 @@ export async function loader({ context }: LoaderFunctionArgs) {
     {
       email: {
         ...email,
-        dailyLimit: RESEND_DAILY_LIMIT,
-        monthlyLimit: RESEND_MONTHLY_LIMIT,
+        provider,
+        providerLabel: providerLabel(provider),
+        dailyLimit: limits.dailyLimit,
+        monthlyLimit: limits.monthlyLimit,
       },
       alerts: {
         webhookConfigured: Boolean((env.ALERT_WEBHOOK_URL ?? "").trim()),

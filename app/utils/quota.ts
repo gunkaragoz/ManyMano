@@ -7,34 +7,81 @@
 // `x-resend-daily-quota` / `x-resend-monthly-quota` response headers (free
 // plan) and 429s when exhausted. This module closes that gap:
 //
-// - Every successful Resend send increments UTC day/month counters in D1
+// - Every successful send increments UTC day/month counters in D1
 //   (atomic upserts, so concurrent signups can't lose counts).
 // - When usage crosses 80/90/100% (or Resend reports exhaustion), a single
 //   Discord/Slack webhook fires per threshold per period (atomic claim, so
 //   concurrent requests can't double-alert).
-// - Emailing the alert via Resend itself would be self-defeating once the
-//   quota is gone — hence a Discord/Slack incoming webhook (set
+// - Emailing the alert via the mail provider itself would be self-defeating
+//   once the quota is gone — hence a Discord/Slack incoming webhook (set
 //   ALERT_WEBHOOK_URL). The same JSON payload carries both `text` (Slack)
 //   and `content` (Discord), so one URL works for either.
+//
+// Limits are provider-aware (see getEmailLimits): Resend free defaults,
+// SMTP/SES-sized defaults, or explicit EMAIL_DAILY_LIMIT /
+// EMAIL_MONTHLY_LIMIT overrides.
 //
 // Everything here is best-effort and never throws: quota tracking must never
 // break signups, votes, or event creation.
 
+import type { EmailProvider } from "./email";
+import { providerLabel } from "./email";
+
 export const RESEND_DAILY_LIMIT = 100;
 export const RESEND_MONTHLY_LIMIT = 3000;
+
+/**
+ * Default alert baseline for the smtp provider (SES-sized production
+ * starting point: ~50k/day). SES/SMTP limits vary per account — override
+ * with EMAIL_DAILY_LIMIT / EMAIL_MONTHLY_LIMIT (see getEmailLimits).
+ */
+export const SMTP_DEFAULT_DAILY_LIMIT = 50000;
+export const SMTP_DEFAULT_MONTHLY_LIMIT = 1500000;
+
+export interface EmailLimits {
+  dailyLimit: number;
+  monthlyLimit: number;
+}
+
+/** Env keys for quota-limit overrides (both optional). */
+export interface EmailLimitsEnv {
+  EMAIL_DAILY_LIMIT?: string;
+  EMAIL_MONTHLY_LIMIT?: string;
+}
+
+function parseLimit(raw: string | undefined, fallback: number): number {
+  const n = parseInt((raw ?? "").trim(), 10);
+  return Number.isFinite(n) && n > 0 ? n : fallback;
+}
+
+/**
+ * Resolve alert limits: explicit EMAIL_DAILY_LIMIT / EMAIL_MONTHLY_LIMIT
+ * win, otherwise per-provider defaults (Resend free vs SMTP/SES-sized).
+ */
+export function getEmailLimits(provider: EmailProvider, env?: EmailLimitsEnv): EmailLimits {
+  const fallback =
+    provider === "smtp"
+      ? { dailyLimit: SMTP_DEFAULT_DAILY_LIMIT, monthlyLimit: SMTP_DEFAULT_MONTHLY_LIMIT }
+      : { dailyLimit: RESEND_DAILY_LIMIT, monthlyLimit: RESEND_MONTHLY_LIMIT };
+  return {
+    dailyLimit: parseLimit(env?.EMAIL_DAILY_LIMIT, fallback.dailyLimit),
+    monthlyLimit: parseLimit(env?.EMAIL_MONTHLY_LIMIT, fallback.monthlyLimit),
+  };
+}
 
 /** Pct-of-quota thresholds that each fire at most one webhook per period. */
 export const QUOTA_ALERT_THRESHOLDS = [80, 90, 100] as const;
 
 export interface EmailSendResult {
   success: boolean;
-  /** True when no RESEND_API_KEY is set and nothing was actually sent. */
+  provider: EmailProvider;
+  /** True when no provider credentials are set and nothing was actually sent. */
   skipped?: boolean;
   /** Set when Resend answered 429 quota-exhausted. */
   quotaExhausted?: "daily" | "monthly" | null;
-  /** Resend-reported used quota from response headers (free plan), if present. */
-  resendDailyUsed?: number | null;
-  resendMonthlyUsed?: number | null;
+  /** Provider-reported used quota (Resend free-plan headers), if present. */
+  providerDailyUsed?: number | null;
+  providerMonthlyUsed?: number | null;
 }
 
 export interface EmailUsage {
@@ -73,7 +120,11 @@ async function getCount(d1: D1Database, key: string): Promise<number> {
   }
 }
 
-export async function getEmailUsage(d1: D1Database, now = new Date()): Promise<EmailUsage> {
+export async function getEmailUsage(
+  d1: D1Database,
+  now = new Date(),
+  limits: EmailLimits = { dailyLimit: RESEND_DAILY_LIMIT, monthlyLimit: RESEND_MONTHLY_LIMIT }
+): Promise<EmailUsage> {
   const [daily, monthly] = await Promise.all([
     getCount(d1, dailyKey(utcDayString(now))),
     getCount(d1, monthlyKey(utcMonthString(now))),
@@ -81,8 +132,8 @@ export async function getEmailUsage(d1: D1Database, now = new Date()): Promise<E
   return {
     daily,
     monthly,
-    dailyPct: pct(daily, RESEND_DAILY_LIMIT),
-    monthlyPct: pct(monthly, RESEND_MONTHLY_LIMIT),
+    dailyPct: pct(daily, limits.dailyLimit),
+    monthlyPct: pct(monthly, limits.monthlyLimit),
   };
 }
 
@@ -100,14 +151,16 @@ async function incrementCounter(d1: D1Database, key: string, nowIso: string): Pr
 }
 
 /**
- * Record one sent email. When Resend's own headers report a higher used
- * number (sends from before this tracking existed, or another sender on the
- * same key), the counter jumps to the server truth so alerts stay accurate.
+ * Record one sent email. When the provider's own headers report a higher
+ * used number (sends from before this tracking existed, or another sender
+ * on the same key), the counter jumps to the server truth so alerts stay
+ * accurate.
  */
 export async function recordEmailSent(
   d1: D1Database,
   result: EmailSendResult,
-  now = new Date()
+  now = new Date(),
+  limits: EmailLimits = { dailyLimit: RESEND_DAILY_LIMIT, monthlyLimit: RESEND_MONTHLY_LIMIT }
 ): Promise<EmailUsage> {
   const nowIso = now.toISOString();
   const day = dailyKey(utcDayString(now));
@@ -120,13 +173,13 @@ export async function recordEmailSent(
 
   // Reconcile with Resend server truth (max wins, per counter).
   const bumps: Array<{ key: string; to: number }> = [];
-  if (result.resendDailyUsed != null && result.resendDailyUsed > daily) {
-    bumps.push({ key: day, to: result.resendDailyUsed });
-    daily = result.resendDailyUsed;
+  if (result.providerDailyUsed != null && result.providerDailyUsed > daily) {
+    bumps.push({ key: day, to: result.providerDailyUsed });
+    daily = result.providerDailyUsed;
   }
-  if (result.resendMonthlyUsed != null && result.resendMonthlyUsed > monthly) {
-    bumps.push({ key: month, to: result.resendMonthlyUsed });
-    monthly = result.resendMonthlyUsed;
+  if (result.providerMonthlyUsed != null && result.providerMonthlyUsed > monthly) {
+    bumps.push({ key: month, to: result.providerMonthlyUsed });
+    monthly = result.providerMonthlyUsed;
   }
   for (const b of bumps) {
     try {
@@ -142,8 +195,8 @@ export async function recordEmailSent(
   return {
     daily,
     monthly,
-    dailyPct: pct(daily, RESEND_DAILY_LIMIT),
-    monthlyPct: pct(monthly, RESEND_MONTHLY_LIMIT),
+    dailyPct: pct(daily, limits.dailyLimit),
+    monthlyPct: pct(monthly, limits.monthlyLimit),
   };
 }
 
@@ -193,6 +246,8 @@ export async function checkQuotaAlerts(
     appName?: string;
     usage: EmailUsage;
     quotaExhausted?: "daily" | "monthly" | null;
+    provider?: EmailProvider;
+    limits?: EmailLimits;
     now?: Date;
   }
 ): Promise<string[]> {
@@ -202,6 +257,11 @@ export async function checkQuotaAlerts(
   const now = opts.now ?? new Date();
   const nowIso = now.toISOString();
   const app = (opts.appName ?? "ManyMano").trim() || "ManyMano";
+  const label = providerLabel(opts.provider ?? "resend");
+  const limits = opts.limits ?? {
+    dailyLimit: RESEND_DAILY_LIMIT,
+    monthlyLimit: RESEND_MONTHLY_LIMIT,
+  };
 
   const checks: Array<{
     scope: "daily" | "monthly";
@@ -213,14 +273,14 @@ export async function checkQuotaAlerts(
     {
       scope: "daily",
       used: opts.usage.daily,
-      limit: RESEND_DAILY_LIMIT,
+      limit: limits.dailyLimit,
       pctValue: opts.usage.dailyPct,
       period: utcDayString(now),
     },
     {
       scope: "monthly",
       used: opts.usage.monthly,
-      limit: RESEND_MONTHLY_LIMIT,
+      limit: limits.monthlyLimit,
       pctValue: opts.usage.monthlyPct,
       period: utcMonthString(now),
     },
@@ -234,8 +294,8 @@ export async function checkQuotaAlerts(
       const message =
         `⚠️ ${app} email quota: ${c.used}/${c.limit} ${c.scope} (${c.pctValue}%). ` +
         (threshold >= 100
-          ? "Sending will pause until the quota resets — consider upgrading Resend."
-          : "Heads up — approaching the Resend free limit.");
+          ? `Sending will pause until the quota resets — consider upgrading ${label}.`
+          : `Heads up — approaching the ${label} limit.`);
       if (await postWebhook(webhookUrl, message)) sent.push(`${c.scope}:${threshold}`);
     }
   }
@@ -246,7 +306,7 @@ export async function checkQuotaAlerts(
     const alertKey = `email:alert:${scope}:exhausted:${period}`;
     if (await claimAlert(d1, alertKey, nowIso)) {
       const message =
-        `🛑 ${app} email quota EXHAUSTED (${scope}). Resend returned 429 — ` +
+        `🛑 ${app} email quota EXHAUSTED (${scope}). ${label} reported the quota is spent — ` +
         "no confirmation emails are going out. App keeps working (links + .ics downloads unaffected).";
       if (await postWebhook(webhookUrl, message)) sent.push(`${scope}:exhausted`);
     }
@@ -265,18 +325,27 @@ export async function trackEmailUsage(
     webhookUrl?: string;
     appName?: string;
     result: EmailSendResult;
+    provider?: EmailProvider;
+    limits?: EmailLimits;
     now?: Date;
   }
 ): Promise<EmailUsage | null> {
   try {
     if (opts.result.skipped) return null;
     const now = opts.now ?? new Date();
-    const usage = await recordEmailSent(d1, opts.result, now);
+    const provider = opts.provider ?? opts.result.provider ?? "resend";
+    const limits = opts.limits ?? {
+      dailyLimit: RESEND_DAILY_LIMIT,
+      monthlyLimit: RESEND_MONTHLY_LIMIT,
+    };
+    const usage = await recordEmailSent(d1, opts.result, now, limits);
     await checkQuotaAlerts(d1, {
       webhookUrl: opts.webhookUrl,
       appName: opts.appName,
       usage,
       quotaExhausted: opts.result.success ? null : (opts.result.quotaExhausted ?? null),
+      provider,
+      limits,
       now,
     });
     return usage;

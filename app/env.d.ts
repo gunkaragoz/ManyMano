@@ -8,7 +8,15 @@ declare module "@remix-run/cloudflare" {
     cloudflare: {
       env: {
         DB: D1Database;
+        EMAIL_PROVIDER?: string;
         RESEND_API_KEY?: string;
+        SMTP_HOST?: string;
+        SMTP_PORT?: string;
+        SMTP_USERNAME?: string;
+        SMTP_PASSWORD?: string;
+        SMTP_SECURE?: string;
+        EMAIL_DAILY_LIMIT?: string;
+        EMAIL_MONTHLY_LIMIT?: string;
         ALERT_WEBHOOK_URL?: string;
         FROM_EMAIL: string;
         SITE_URL: string;

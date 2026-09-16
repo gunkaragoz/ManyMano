@@ -16,8 +16,8 @@ import {
   generateSecretToken,
   generateUniquePublicId,
 } from "~/utils/ids";
-import { sendEmail, emailFooter } from "~/utils/email";
-import { trackEmailUsage } from "~/utils/quota";
+import { sendEmail, emailFooter, getEmailSenderConfig } from "~/utils/email";
+import { trackEmailUsage, getEmailLimits } from "~/utils/quota";
 import { formatLongDateLabel } from "~/utils/calendar";
 import { escapeHtml } from "~/utils/sanitize";
 import { buildAdminCookie, hashSecretForStorage } from "~/utils/auth";
@@ -75,7 +75,15 @@ export async function loader({ context }: LoaderFunctionArgs) {
 export async function action({ request, context }: ActionFunctionArgs) {
   const env = context.cloudflare.env as {
     DB: D1Database;
+    EMAIL_PROVIDER?: string;
     RESEND_API_KEY?: string;
+    SMTP_HOST?: string;
+    SMTP_PORT?: string;
+    SMTP_USERNAME?: string;
+    SMTP_PASSWORD?: string;
+    SMTP_SECURE?: string;
+    EMAIL_DAILY_LIMIT?: string;
+    EMAIL_MONTHLY_LIMIT?: string;
     ALERT_WEBHOOK_URL?: string;
     FROM_EMAIL: string;
     SITE_URL: string;
@@ -242,7 +250,7 @@ export async function action({ request, context }: ActionFunctionArgs) {
   const qrUrl = `${publicUrl}/qr?format=png`;
 
   const emailResult = await sendEmail({
-    apiKey: env.RESEND_API_KEY,
+    ...getEmailSenderConfig(env),
     from: site.fromEmail,
     to: organizerEmail,
     subject: `Your sign-up sheet: "${title}" is ready!`,
@@ -273,6 +281,7 @@ export async function action({ request, context }: ActionFunctionArgs) {
     webhookUrl: env.ALERT_WEBHOOK_URL,
     appName: site.siteName,
     result: emailResult,
+    limits: getEmailLimits(emailResult.provider, env),
   });
 
   const headers = new Headers();

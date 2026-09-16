@@ -27,8 +27,8 @@ import {
 } from "lucide-react";
 import { getDb, events, eventSlots, signups, pollVotes, pollVoteEntries } from "~/db";
 import { generateInternalId, generateSecretToken } from "~/utils/ids";
-import { sendEmail, emailFooter } from "~/utils/email";
-import { trackEmailUsage } from "~/utils/quota";
+import { sendEmail, emailFooter, getEmailSenderConfig } from "~/utils/email";
+import { trackEmailUsage, getEmailLimits } from "~/utils/quota";
 import { escapeHtml } from "~/utils/sanitize";
 import {
   buildAdminCookie,
@@ -418,7 +418,15 @@ export async function loader({ params, request, context }: LoaderFunctionArgs) {
 export async function action({ request, params, context }: ActionFunctionArgs) {
   const env = context.cloudflare.env as {
     DB: D1Database;
+    EMAIL_PROVIDER?: string;
     RESEND_API_KEY?: string;
+    SMTP_HOST?: string;
+    SMTP_PORT?: string;
+    SMTP_USERNAME?: string;
+    SMTP_PASSWORD?: string;
+    SMTP_SECURE?: string;
+    EMAIL_DAILY_LIMIT?: string;
+    EMAIL_MONTHLY_LIMIT?: string;
     ALERT_WEBHOOK_URL?: string;
     FROM_EMAIL: string;
     SITE_URL: string;
@@ -628,7 +636,7 @@ export async function action({ request, params, context }: ActionFunctionArgs) {
         fallbackTitle: `${site.siteName} Event`,
       });
       const emailResult = await sendEmail({
-        apiKey: env.RESEND_API_KEY,
+        ...getEmailSenderConfig(env),
         from: site.fromEmail,
         to: participantEmail,
         subject: `Confirmed: "${taskLabel}" for ${event.title}`,
@@ -658,6 +666,7 @@ export async function action({ request, params, context }: ActionFunctionArgs) {
         webhookUrl: env.ALERT_WEBHOOK_URL,
         appName: site.siteName,
         result: emailResult,
+        limits: getEmailLimits(emailResult.provider, env),
       });
     }
 
@@ -882,7 +891,7 @@ export async function action({ request, params, context }: ActionFunctionArgs) {
       const manageUrl = `${url.origin}/events/${eventId}?cancel_token=${encodeURIComponent(editTokenPlain)}`;
       const eventUrl = `${url.origin}/events/${eventId}`;
       const voteEmailResult = await sendEmail({
-        apiKey: env.RESEND_API_KEY,
+        ...getEmailSenderConfig(env),
         from: site.fromEmail,
         to: participantEmail,
         subject: `Your vote for "${event.title}" is recorded`,
@@ -902,6 +911,7 @@ export async function action({ request, params, context }: ActionFunctionArgs) {
         webhookUrl: env.ALERT_WEBHOOK_URL,
         appName: site.siteName,
         result: voteEmailResult,
+        limits: getEmailLimits(voteEmailResult.provider, env),
       });
     }
 
@@ -1085,7 +1095,7 @@ export async function action({ request, params, context }: ActionFunctionArgs) {
       if (!participantEmail) return;
       const eventUrl = `${url.origin}/events/${eventId}`;
       const proposerEmailResult = await sendEmail({
-        apiKey: env.RESEND_API_KEY,
+        ...getEmailSenderConfig(env),
         from: site.fromEmail,
         to: participantEmail,
         subject: `Your proposed time for "${event.title}" was added`,
@@ -1102,6 +1112,7 @@ export async function action({ request, params, context }: ActionFunctionArgs) {
         webhookUrl: env.ALERT_WEBHOOK_URL,
         appName: site.siteName,
         result: proposerEmailResult,
+        limits: getEmailLimits(proposerEmailResult.provider, env),
       });
     };
 
@@ -1298,7 +1309,7 @@ export async function action({ request, params, context }: ActionFunctionArgs) {
       if (notified.has(key)) continue;
       notified.add(key);
       const finalizeEmailResult = await sendEmail({
-        apiKey: env.RESEND_API_KEY,
+        ...getEmailSenderConfig(env),
         from: site.fromEmail,
         to: voterEmail,
         subject: `Locked in: "${event.title}" — ${lockedBase || winningSlot.title}`,
@@ -1324,6 +1335,7 @@ export async function action({ request, params, context }: ActionFunctionArgs) {
         webhookUrl: env.ALERT_WEBHOOK_URL,
         appName: site.siteName,
         result: finalizeEmailResult,
+        limits: getEmailLimits(finalizeEmailResult.provider, env),
       });
     }
 

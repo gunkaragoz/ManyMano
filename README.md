@@ -33,7 +33,8 @@
 ManyMano is architected to fit comfortably inside **Cloudflare's Free Tier**:
 - **Cloudflare Pages & Workers**: 100,000 requests/day, tiny <100KB worker bundle.
 - **Cloudflare D1 (SQLite)**: 5,000,000 reads/day, 100,000 writes/day, 5GB storage.
-- **Resend Transactional Email**: 3,000 free emails/month.
+- **Resend Transactional Email**: 3,000 free emails/month (default provider).
+- **SMTP / Amazon SES**: switch `EMAIL_PROVIDER` to `smtp` for higher volume via any SMTP server, including SES.
 
 ### Step 1: Deploy with Git
 1. Click the **[Deploy to Cloudflare](https://deploy.workers.cloudflare.com/?url=https://github.com/gunkaragoz/ManyMano)** button above.
@@ -66,10 +67,13 @@ Optional branding (leave empty/unset to hide — no throw):
 - `FOOTER_CREDIT_URL` + `FOOTER_CREDIT_LABEL` (footer credit link, shown only when both are set)
 
 ### Step 5 (Optional): Configure integrations
+- `EMAIL_PROVIDER`: `resend` (default) or `smtp`.
 - `RESEND_API_KEY`: Your API key from [resend.com](https://resend.com).
 *(If omitted, ManyMano continues to work smoothly using direct in-browser `.ics` calendar downloads and direct tokenized links!)*
+- SMTP (`EMAIL_PROVIDER="smtp"`): `SMTP_HOST` / `SMTP_PORT` / `SMTP_USERNAME` / `SMTP_PASSWORD` (+ optional `SMTP_SECURE`). Works with any SMTP server, including Amazon SES via its SMTP endpoint (e.g. `email-smtp.eu-central-1.amazonaws.com:587` with SES SMTP credentials) when traffic outgrows Resend free. Notes: Workers blocks port 25 (use 587/465); SMTP sends need the Pages runtime (`wrangler pages dev` or deployed), not plain `vite dev`.
+- `EMAIL_DAILY_LIMIT` / `EMAIL_MONTHLY_LIMIT`: override the quota-alert baselines for your SMTP/SES limits (defaults: Resend 100/day + 3,000/month; SMTP 50,000/day + 1,500,000/month).
 - `TURNSTILE_SITE_KEY` / `TURNSTILE_SECRET_KEY` / `TURNSTILE_HOSTNAMES`: Cloudflare Turnstile bot protection. If the secret is omitted, verification is skipped (handy for local dev).
-- `ALERT_WEBHOOK_URL`: Discord or Slack incoming webhook for free-tier quota alerts. Every sent email is counted in D1 (UTC day/month); one webhook fires at 80/90/100% of the Resend free quota (100/day, 3,000/month) and on 429 exhaustion. `GET /api/usage` always shows the live counters. Cloudflare itself emails the account owner at ~90% of Workers/D1 daily limits — no setup needed.
+- `ALERT_WEBHOOK_URL`: Discord or Slack incoming webhook for quota alerts. Every sent email is counted in D1 (UTC day/month); one webhook fires at 80/90/100% of the active provider quota (see above) and on Resend 429 exhaustion. `GET /api/usage` always shows the live counters. Cloudflare itself emails the account owner at ~90% of Workers/D1 daily limits — no setup needed.
 
 ### Step 6: Apply migrations after pulling
 ```bash
@@ -109,7 +113,7 @@ Open [http://localhost:5173](http://localhost:5173) in your browser.
 - **ORM & Migrations**: [Drizzle ORM](https://orm.drizzle.team/)
 - **Styling**: [Tailwind CSS](https://tailwindcss.com/)
 - **Calendar**: Edge-native RFC 5545 `.ics` generator
-- **Email**: [Resend](https://resend.com/) with graceful offline fallback
+- **Email**: [Resend](https://resend.com/) (default) or generic SMTP incl. Amazon SES, with graceful offline fallback
 
 ---
 
