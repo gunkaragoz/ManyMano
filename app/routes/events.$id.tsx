@@ -2347,6 +2347,29 @@ export default function EventView() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // Organizer shortcut: after creating the poll the organizer already typed
+  // their name/email on the create form. Prefill the vote form for admins so
+  // they appear in the availability grid (editable row) without re-typing.
+  // Attendees (non-admin) never get this prefill. Skipped when this browser
+  // already has its own vote — that effect above wins for the name.
+  useEffect(() => {
+    if (!isAdmin) return;
+    try {
+      const raw = window.localStorage.getItem(voteStorageKey);
+      if (raw && raw.startsWith("{")) {
+        const parsed = JSON.parse(raw) as { id?: string; token?: string };
+        if (parsed?.id && parsed?.token) return;
+      }
+    } catch {
+      // fall through to prefill
+    }
+    const orgName = ((event as { organizerName?: string | null }).organizerName || "").trim();
+    const orgEmail = ((event as { organizerEmail?: string | null }).organizerEmail || "").trim();
+    if (orgName) setVoterName((prev) => prev || orgName);
+    if (orgEmail) setVoterEmail((prev) => prev || orgEmail);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isAdmin, event.id]);
+
   // Remember our vote id after a successful save.
   useEffect(() => {
     if (actionData?.success && actionData?.voteId && actionData?.voteToken) {
@@ -2374,6 +2397,17 @@ export default function EventView() {
 
   const ownVote =
     clientVoteId && pollData ? pollData.votes.find((v) => v.id === clientVoteId) ?? null : null;
+
+  // The editable "Your vote" row already represents the viewer's saved vote,
+  // so hide that vote from the read-only roster — otherwise the same name
+  // appears twice (once saved, once editable). Tallies and per-slot voter
+  // chips stay inclusive so counts keep matching. When the poll is finalized
+  // there is no editable row, so show every vote.
+  const isVotingOpen = event.status !== "FINALIZED";
+  const visibleVotes =
+    isVotingOpen && ownVote && pollData
+      ? pollData.votes.filter((v) => v.id !== ownVote.id)
+      : (pollData?.votes ?? []);
 
   const cycleSlotVote = (slotId: string) => {
     const current = userVotes[slotId] || "NO";
@@ -3823,7 +3857,7 @@ export default function EventView() {
               })}
 
               {/* Mobile: all responses (collapsible, avoids giant matrix) */}
-              {pollData.votes.length > 0 && (
+              {visibleVotes.length > 0 && (
                 <div className="p-5 bg-slate-50/60">
                   <button
                     type="button"
@@ -3833,11 +3867,11 @@ export default function EventView() {
                   >
                     {showAllVotesMobile
                       ? "Hide all responses"
-                      : `Show all ${pollData.votes.length} responses`}
+                      : `Show all ${visibleVotes.length} responses`}
                   </button>
                   {showAllVotesMobile && (
                     <div className="mt-3 space-y-2">
-                      {pollData.votes.map((v) => {
+                      {visibleVotes.map((v) => {
                         const vYes = Object.values(v.responses).filter((r) => r === "YES").length;
                         return (
                           <div key={v.id} className="bg-white border border-slate-200/80 rounded-2xl p-3.5 flex items-center justify-between gap-2 text-xs">
@@ -3948,8 +3982,9 @@ export default function EventView() {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100 font-medium">
-                  {/* Participant rows */}
-                  {pollData.votes.map((v) => (
+                  {/* Participant rows — own vote excluded while voting is open:
+                      it lives in the editable "Your vote" row below. */}
+                  {visibleVotes.map((v) => (
                     <tr key={v.id} className="hover:bg-slate-50/60 transition-colors">
                       <td className="p-4 sticky left-0 bg-white border-r border-slate-200/80 font-semibold text-slate-900">
                         <div className="flex items-center justify-between gap-2">
