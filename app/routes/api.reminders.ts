@@ -2,8 +2,8 @@ import type {
   ActionFunctionArgs,
   HeadersFunction,
   LoaderFunctionArgs,
-} from "@remix-run/cloudflare";
-import { json } from "@remix-run/cloudflare";
+} from "react-router";
+import { data } from "react-router";
 import { getDb } from "~/db";
 import { getEmailSenderConfig, sendEmail } from "~/utils/email";
 import { getEmailLimits, trackEmailUsage } from "~/utils/quota";
@@ -112,13 +112,13 @@ async function handleReminders(request: Request, env: ReminderEnv) {
 
   const secret = (env.REMINDER_SECRET ?? "").trim();
   if (!secret) {
-    return json(
+    return data(
       { error: "Reminder endpoint is not configured (set REMINDER_SECRET). See .env.sample." },
       { status: 503, headers: { "Cache-Control": "private, no-store" } }
     );
   }
   if (!isAuthorized(request, secret)) {
-    return json({ error: "Unauthorized." }, { status: 401, headers: { "Cache-Control": "private, no-store" } });
+    return data({ error: "Unauthorized." }, { status: 401, headers: { "Cache-Control": "private, no-store" } });
   }
 
   const url = new URL(request.url);
@@ -127,7 +127,7 @@ async function handleReminders(request: Request, env: ReminderEnv) {
   let date = reminderDateString();
   if (dateRaw) {
     if (!isValidIsoDate(dateRaw)) {
-      return json(
+      return data(
         { error: "Invalid ?date= — use YYYY-MM-DD." },
         { status: 400, headers: { "Cache-Control": "private, no-store" } }
       );
@@ -139,7 +139,7 @@ async function handleReminders(request: Request, env: ReminderEnv) {
   try {
     targets = await collectReminderTargets(db, date);
   } catch {
-    return json(
+    return data(
       { error: "Could not load reminder targets." },
       { status: 500, headers: { "Cache-Control": "private, no-store" } }
     );
@@ -240,7 +240,7 @@ async function handleReminders(request: Request, env: ReminderEnv) {
     }
   }
 
-  return json(
+  return data(
     {
       ok: true,
       date,

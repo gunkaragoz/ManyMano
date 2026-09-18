@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Link, useNavigate } from "@remix-run/react";
+import { Link, useNavigate } from "react-router";
 import { FileQuestion } from "lucide-react";
 
 export const NOT_FOUND_REDIRECT_SECONDS = 20;

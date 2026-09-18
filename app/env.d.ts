@@ -1,9 +1,9 @@
-/// <reference types="@remix-run/cloudflare" />
+/// <reference types="vite/client" />
 /// <reference types="@cloudflare/workers-types" />
 
 import type { D1Database } from "@cloudflare/workers-types";
 
-declare module "@remix-run/cloudflare" {
+declare module "react-router" {
   interface AppLoadContext {
     cloudflare: {
       env: {

@@ -4,10 +4,10 @@ allowBuilds:
   workerd: true
 
 # Security overrides for Dependabot alerts (transitive deps).
-# - react-router-dom/react-router 6.30.4 -> 6.30.6 (GHSA-jjmj-jmhj-qwj2 open redirect -> XSS)
 # - ws 8.18.0 -> 8.21.0 (memory-exhaustion DoS from tiny fragments).
 #   Scoped to v8 only so vite-node's ws@7 stays on 7.x.
+# NOTE (RR7 migration): the react-router(-dom) 6.30.6 pins were removed —
+# the app itself is now on react-router 7. If a transitive dep still pulls
+# RR6, re-add a scoped override rather than a top-level pin.
 overrides:
-  react-router-dom: 6.30.6
-  react-router: 6.30.6
   ws@8: 8.21.0

@@ -1,4 +1,4 @@
-import type { LoaderFunctionArgs } from "@remix-run/cloudflare";
+import type { LoaderFunctionArgs } from "react-router";
 import { eq } from "drizzle-orm";
 import { getDb, events, eventSlots } from "~/db";
 import { generateICS, pickCalendarSlot, effectiveDateForSlot } from "~/utils/calendar";

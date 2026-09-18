@@ -1,9 +1,11 @@
-// Route contract snapshot — pre-migration parity detector.
+// Route contract snapshot — post-migration (RR7) expectations.
 //
-// Purpose: before touching Remix/RR/Vite, pin down what each route file
-// exports (loader/action/meta/headers) and which framework package it
-// imports from. After the codemod the same test runs with the import
-// allow-list flipped to `react-router`, and any dropped export fails loudly.
+// History: pre-migration this pinned the Remix 2 state (@remix-run/*
+// imports, vitePlugin + v3 flags, Pages Functions entry). After the
+// Remix 2 → RR7 move it asserts the new shape instead: all framework
+// imports from `react-router`, `reactRouter()` vite plugin, file-based
+// routes via app/routes.ts, and the Workers entry. Any dropped route
+// export or leftover @remix-run import fails loudly.
 import { describe, expect, it } from "vitest";
 import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { resolve } from "node:path";
@@ -55,48 +57,52 @@ describe("route files present", () => {
   });
 });
 
-describe("framework imports (pre-migration snapshot)", () => {
-  it("routes import only from @remix-run/* (codemod will flip to react-router)", () => {
+describe("framework imports (RR7)", () => {
+  it("no @remix-run imports remain anywhere in app/", () => {
     const files = readdirSync(ROUTES_DIR);
     for (const f of files) {
-      const src = routeSource(f);
-      expect(src, `${f} must not import react-router yet`).not.toMatch(/from ["']react-router["']/);
+      expect(routeSource(f), `${f} still imports @remix-run`).not.toMatch(/@remix-run\//);
     }
-    const remixUsers = files.filter((f) => /@remix-run\//.test(routeSource(f)));
-    // Shell + all data routes use the framework; static text routes may not.
-    expect(remixUsers.length).toBeGreaterThan(10);
+    for (const f of ["root.tsx", "entry.client.tsx", "entry.server.tsx", "env.d.ts"]) {
+      const src = readFileSync(resolve(ROOT, "app", f), "utf8");
+      expect(src, `app/${f} still imports @remix-run`).not.toMatch(/@remix-run\//);
+    }
   });
 
-  it("entry files use RemixBrowser / RemixServer (codemod flips to HydratedRouter / ServerRouter)", () => {
+  it("entry files use HydratedRouter / ServerRouter", () => {
     const client = readFileSync(resolve(ROOT, "app/entry.client.tsx"), "utf8");
     const server = readFileSync(resolve(ROOT, "app/entry.server.tsx"), "utf8");
-    expect(client).toMatch(/RemixBrowser/);
-    expect(server).toMatch(/RemixServer/);
+    expect(client).toMatch(/HydratedRouter/);
+    expect(server).toMatch(/ServerRouter/);
     expect(server).toMatch(/Content-Security-Policy/);
     expect(server).toMatch(/Strict-Transport-Security/);
   });
 
-  it("vite plugin is still @remix-run/dev with all v3 future flags", () => {
+  it("vite plugin is reactRouter with no v3 future flags", () => {
     const vite = readFileSync(resolve(ROOT, "vite.config.ts"), "utf8");
-    expect(vite).toMatch(/@remix-run\/dev/);
-    for (const flag of [
-      "v3_fetcherPersist",
-      "v3_relativeSplatPath",
-      "v3_throwAbortReason",
-      "v3_singleFetch",
-      "v3_lazyRouteDiscovery",
-    ]) {
-      expect(vite, `missing future flag ${flag}`).toContain(flag);
-    }
+    expect(vite).toMatch(/@react-router\/dev\/vite/);
+    expect(vite).toMatch(/cloudflareDevProxy/);
+    expect(vite).not.toMatch(/@remix-run\/dev/);
+    expect(vite).not.toMatch(/v3_/);
+  });
+
+  it("routes.ts + react-router.config.ts exist (file-based routing preserved)", () => {
+    const routes = readFileSync(resolve(ROOT, "app/routes.ts"), "utf8");
+    expect(routes).toMatch(/flatRoutes/);
+    expect(existsSync(resolve(ROOT, "react-router.config.ts"))).toBe(true);
   });
 });
 
 describe("deploy entry", () => {
-  it("Pages function handler exists (Workers migration removes it later)", () => {
+  it("Pages function handler uses @react-router/cloudflare (Workers move is Phase 1c)", () => {
     const fn = resolve(ROOT, "functions/[[path]].ts");
     expect(existsSync(fn)).toBe(true);
     const src = readFileSync(fn, "utf8");
     expect(src).toMatch(/createPagesFunctionHandler/);
+    expect(src).toMatch(/@react-router\/cloudflare/);
+    expect(src).not.toMatch(/@remix-run/);
     expect(src).toMatch(/www\./);
+    const wrangler = readFileSync(resolve(ROOT, "wrangler.toml"), "utf8");
+    expect(wrangler).toMatch(/pages_build_output_dir/);
   });
 });

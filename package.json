@@ -4,10 +4,10 @@
   "sideEffects": false,
   "type": "module",
   "scripts": {
-    "build": "VITE_CJS_IGNORE_WARNING=true remix vite:build",
-    "dev": "VITE_CJS_IGNORE_WARNING=true remix vite:dev",
-    "start": "wrangler pages dev ./build/client",
-    "typecheck": "tsc",
+    "build": "react-router build",
+    "dev": "react-router dev",
+    "start": "wrangler dev",
+    "typecheck": "react-router typegen && tsc",
     "test:predeploy": "node tests/predeploy.mjs",
     "test:unit": "vitest run",
     "test:staging": "vitest run --config vitest.staging.config.ts",
@@ -15,12 +15,12 @@
     "db:generate": "drizzle-kit generate",
     "db:migrate:local": "wrangler d1 migrations apply manymano-db --local",
     "db:migrate:remote": "wrangler d1 migrations apply manymano-db --remote",
-    "deploy": "npm run typecheck && npm run build && npm run test:predeploy && wrangler pages deploy ./build/client"
+    "deploy": "npm run typecheck && npm run build && npm run test:predeploy && wrangler deploy"
   },
   "dependencies": {
-    "@remix-run/cloudflare": "^2.17.5",
-    "@remix-run/cloudflare-pages": "^2.17.5",
-    "@remix-run/react": "^2.17.5",
+    "@react-router/cloudflare": "7.18.4",
+    "@react-router/dev": "7.18.4",
+    "@react-router/fs-routes": "7.18.4",
     "clsx": "^2.1.1",
     "drizzle-orm": "^0.45.2",
     "isbot": "^5.1.23",
@@ -28,12 +28,12 @@
     "qrcode": "^1.5.4",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
+    "react-router": "7.18.4",
     "tailwind-merge": "^3.0.2",
     "worker-mailer": "^1.2.1"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^4.20250224.0",
-    "@remix-run/dev": "^2.17.5",
     "@types/qrcode": "^1.5.6",
     "@types/react": "^18.3.18",
     "@types/react-dom": "^18.3.5",

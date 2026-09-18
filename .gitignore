@@ -1,6 +1,7 @@
 node_modules
 .wrangler
 build
+.react-router
 .cache
 .env
 .dev.vars

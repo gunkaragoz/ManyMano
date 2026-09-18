@@ -33,6 +33,33 @@ const fail = (msg) => {
   console.error(`  ✗ FAIL: ${msg}`);
 };
 
+// RR7 loaders return `data(payload, init)` (DataWithResponseInit), not a
+// Response. Unwrap both shapes so the gate asserts payload + status either way.
+function payloadOf(res) {
+  if (res !== null && typeof res === "object" && "data" in res && "type" in res) {
+    return res.data;
+  }
+  return res;
+}
+
+async function payloadJson(res) {
+  const payload = payloadOf(res);
+  if (payload !== null && typeof payload === "object" && typeof payload.json === "function") {
+    return payload.json();
+  }
+  return payload;
+}
+
+function statusOf(res) {
+  if (res instanceof Response) return res.status;
+  if (res !== null && typeof res === "object" && "init" in res) {
+    const init = res.init;
+    if (typeof init === "number") return init;
+    return init?.status ?? 200;
+  }
+  return 200;
+}
+
 /** Parse a KEY=VALUE dotenv-style file (quotes stripped, `#` comments ignored). */
 function parseDotenvFile(path) {
   const out = {};
@@ -142,7 +169,7 @@ if (!existsSync(serverEntry)) {
           request: mockRequest(`${env.SITE_URL || "https://smoke-test.local"}/`),
           params: {},
         });
-        const data = await res.json();
+        const data = await payloadJson(res);
         assert(data?.site?.siteUrl, "root loader response has no site.siteUrl");
         assert(data?.site?.siteName, "root loader response has no site.siteName");
         ok(`root loader 200 with complete env (siteUrl=${data.site.siteUrl})`);
@@ -176,7 +203,7 @@ if (!existsSync(serverEntry)) {
             request: mockRequest(),
             params: {},
           });
-          assert.strictEqual(res.status, 200);
+          assert.strictEqual(statusOf(res), 200);
           ok("home (/) loader 200 with complete env");
         } catch (err) {
           fail(`home (/) loader threw with COMPLETE env: ${err?.message}`);
@@ -197,7 +224,7 @@ if (!existsSync(serverEntry)) {
           request: mockRequest(`${env.SITE_URL || "https://smoke-test.local"}/`),
           params: {},
         });
-        assert.strictEqual(res.status, 200);
+        assert.strictEqual(statusOf(res), 200);
         ok("root loader 200 WITHOUT optional vars (derived defaults)");
       } catch (err) {
         fail(`root loader threw WITHOUT optional vars (production 500 risk): ${err?.message}`);
@@ -209,7 +236,7 @@ if (!existsSync(serverEntry)) {
             request: mockRequest(),
             params: {},
           });
-          assert.strictEqual(res.status, 200);
+          assert.strictEqual(statusOf(res), 200);
           ok("home (/) loader 200 WITHOUT optional vars");
         } catch (err) {
           fail(`home (/) loader threw WITHOUT optional vars: ${err?.message}`);

@@ -1,6 +1,6 @@
-import type { ActionFunctionArgs, LoaderFunctionArgs, MetaFunction } from "@remix-run/cloudflare";
-import { json, redirect } from "@remix-run/cloudflare";
-import { Form, useActionData, useLoaderData, useNavigation, Link } from "@remix-run/react";
+import type { ActionFunctionArgs, LoaderFunctionArgs, MetaFunction } from "react-router";
+import { data, redirect } from "react-router";
+import { Form, useActionData, useLoaderData, useNavigation, Link } from "react-router";
 import { useEffect, useRef, useState } from "react";
 import { ArrowLeft, ArrowRight, CalendarDays, TriangleAlert, X } from "lucide-react";
 import { usePersistentState } from "~/utils/usePersistentState";
@@ -66,7 +66,7 @@ export async function loader({ context }: LoaderFunctionArgs) {
   const env = context.cloudflare.env as {
     TURNSTILE_SITE_KEY?: string;
   };
-  return json({ turnstileSiteKey: env.TURNSTILE_SITE_KEY ?? null });
+  return data({ turnstileSiteKey: env.TURNSTILE_SITE_KEY ?? null });
 }
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
@@ -124,16 +124,16 @@ export async function action({ request, context }: ActionFunctionArgs) {
   const timezone = parseTimezoneInput(formData.get("timezone") as string);
 
   if (!title) {
-    return json({ error: "Please enter a meeting title." }, { status: 400 });
+    return data({ error: "Please enter a meeting title." }, { status: 400 });
   }
   if (!timezone) {
-    return json({ error: "Please pick a timezone from the list." }, { status: 400 });
+    return data({ error: "Please pick a timezone from the list." }, { status: 400 });
   }
   if (!organizerName) {
-    return json({ error: "Please enter your name." }, { status: 400 });
+    return data({ error: "Please enter your name." }, { status: 400 });
   }
   if (!isValidEmail(organizerEmail)) {
-    return json({ error: "A valid email is required to receive your secret management link." }, { status: 400 });
+    return data({ error: "A valid email is required to receive your secret management link." }, { status: 400 });
   }
 
   // Bot protection before any DB work.
@@ -145,7 +145,7 @@ export async function action({ request, context }: ActionFunctionArgs) {
   });
   if (!turnstile.ok) {
     const f = turnstileFailure();
-    return json(f.body, { status: f.status });
+    return data(f.body, { status: f.status });
   }
 
   // Single duration for the whole poll. "allday" (or missing) => NULL = All day.
@@ -156,7 +156,7 @@ export async function action({ request, context }: ActionFunctionArgs) {
   } else {
     const parsed = parseInt(durationRaw, 10);
     if (Number.isNaN(parsed) || parsed < 5 || parsed > 1440) {
-      return json({ error: "Please pick a valid duration (5–1440 minutes) or All day." }, { status: 400 });
+      return data({ error: "Please pick a valid duration (5–1440 minutes) or All day." }, { status: 400 });
     }
     durationMinutes = parsed;
   }
@@ -175,7 +175,7 @@ export async function action({ request, context }: ActionFunctionArgs) {
   }> = [];
 
   if (slotDates.length > MAX_SLOTS_PER_EVENT) {
-    return json(
+    return data(
       { error: `Too many options — maximum ${MAX_SLOTS_PER_EVENT} per poll.` },
       { status: 400 }
     );
@@ -187,14 +187,14 @@ export async function action({ request, context }: ActionFunctionArgs) {
     const date = (slotDates[idx] || "").trim();
     if (!date) continue;
     if (!DATE_RE.test(date) || !isValidIsoDate(date)) {
-      return json({ error: `Row ${idx + 1}: please pick a valid day.` }, { status: 400 });
+      return data({ error: `Row ${idx + 1}: please pick a valid day.` }, { status: 400 });
     }
     if (isPastIsoDate(date)) {
-      return json({ error: `Row ${idx + 1}: that day has already passed.` }, { status: 400 });
+      return data({ error: `Row ${idx + 1}: that day has already passed.` }, { status: 400 });
     }
     const optionKey = `${date}|${durationMinutes === null ? "" : (slotStartTimes[idx] || "").trim()}`;
     if (seenOptions.has(optionKey)) {
-      return json({ error: `Row ${idx + 1}: this day and time is already in the poll.` }, { status: 400 });
+      return data({ error: `Row ${idx + 1}: this day and time is already in the poll.` }, { status: 400 });
     }
     seenOptions.add(optionKey);
     const label = cleanText(slotLabels[idx], SLOT_TITLE_MAX);
@@ -210,7 +210,7 @@ export async function action({ request, context }: ActionFunctionArgs) {
     }
     const start = (slotStartTimes[idx] || "").trim();
     if (!TIME_RE.test(start)) {
-      return json({ error: `Row ${idx + 1}: please pick a start time.` }, { status: 400 });
+      return data({ error: `Row ${idx + 1}: please pick a start time.` }, { status: 400 });
     }
     // One duration for the whole poll: the end is always derived from it, so
     // a posted end time can't contradict the start (overnight wrap is fine).
@@ -225,7 +225,7 @@ export async function action({ request, context }: ActionFunctionArgs) {
   }
 
   if (validSlots.length === 0) {
-    return json({ error: "Please add at least one day." }, { status: 400 });
+    return data({ error: "Please add at least one day." }, { status: 400 });
   }
 
   const sortedDates = [...validSlots].map((s) => s.slotDate).sort();

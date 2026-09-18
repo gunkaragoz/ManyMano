@@ -1,12 +1,12 @@
-import type { MetaFunction } from "@remix-run/cloudflare";
-import { Link, useLoaderData, useSearchParams } from "@remix-run/react";
+import type { MetaFunction } from "react-router";
+import { Link, useLoaderData, useSearchParams } from "react-router";
 import { useEffect, useState } from "react";
 import { ArrowRight, CalendarDays, Check, CircleCheck, ClipboardList, X } from "lucide-react";
 import { getHomeFaq, faqPageJsonLd, mergeParentMeta, rootSiteFromMatches } from "~/utils/seo";
 import type { FaqItem } from "~/utils/seo";
 import { getSiteConfig, toPublicSiteConfig } from "~/utils/site";
-import { json } from "@remix-run/cloudflare";
-import type { LoaderFunctionArgs } from "@remix-run/cloudflare";
+import { data } from "react-router";
+import type { LoaderFunctionArgs } from "react-router";
 
 // Brand-specific extras live here (route-level), not in getHomeFaq(),
 // so forks with a different SITE_NAME keep a clean generic FAQ.
@@ -24,7 +24,7 @@ function getFaqForSite(siteName: string): FaqItem[] {
 
 export async function loader({ context }: LoaderFunctionArgs) {
   const config = getSiteConfig(context.cloudflare.env);
-  return json({ site: toPublicSiteConfig(config), faq: getFaqForSite(config.siteName) });
+  return data({ site: toPublicSiteConfig(config), faq: getFaqForSite(config.siteName) });
 }
 
 // Remix renders only the deepest `meta` export, so merge parent (root)

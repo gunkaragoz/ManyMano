@@ -150,9 +150,9 @@ export function breadcrumbJsonLd(
 }
 
 // ---------------------------------------------------------------------------
-// Per-page meta helpers (Remix v2 `meta` merging).
+// Per-page meta helpers (React Router `meta` merging).
 //
-// Remix renders ONLY the deepest route's `meta` export — it does NOT merge
+// React Router renders ONLY the deepest route's `meta` export — it does NOT merge
 // parent + child automatically. So every child route that exports `meta`
 // must explicitly re-include the parent descriptors it wants to keep.
 // These helpers make that override-and-keep-rest pattern trivial and keep

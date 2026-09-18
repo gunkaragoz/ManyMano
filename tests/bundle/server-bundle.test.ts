@@ -45,6 +45,33 @@ const CRITICAL_IDS = [
   "routes/create.poll",
 ];
 
+// RR7 loaders return `data(payload, init)` (DataWithResponseInit), not a
+// Response. Unwrap both shapes so the gate asserts payload + status either way.
+function payloadOf(res: unknown): unknown {
+  if (res !== null && typeof res === "object" && "data" in res && "type" in res) {
+    return (res as { data: unknown }).data;
+  }
+  return res;
+}
+
+async function payloadJson(res: unknown): Promise<any> {
+  const payload = payloadOf(res);
+  if (payload !== null && typeof payload === "object" && typeof (payload as any).json === "function") {
+    return (payload as Response).json();
+  }
+  return payload;
+}
+
+function statusOf(res: unknown): number {
+  if (res instanceof Response) return res.status;
+  if (res !== null && typeof res === "object" && "init" in res) {
+    const init = (res as { init?: ResponseInit | number | null }).init;
+    if (typeof init === "number") return init;
+    return init?.status ?? 200;
+  }
+  return 200;
+}
+
 describe("server bundle", () => {
   it("build output exists (run `pnpm run build` first)", () => {
     expect(existsSync(SERVER_ENTRY), "build/server/index.js not found — run the build first").toBe(true);
@@ -69,7 +96,7 @@ describe("server bundle", () => {
       request: req(`${env.SITE_URL}/`),
       params: {},
     });
-    const data = await rootRes.json();
+    const data = await payloadJson(rootRes);
     expect(data?.site?.siteUrl).toBeTruthy();
     expect(data?.site?.siteName).toBeTruthy();
 
@@ -78,7 +105,7 @@ describe("server bundle", () => {
       request: req(),
       params: {},
     });
-    expect(homeRes.status).toBe(200);
+    expect(statusOf(homeRes)).toBe(200);
   });
 
   it("root loader fail-fasts per required key", async () => {
@@ -109,12 +136,12 @@ describe("server bundle", () => {
       request: req,
       params: {},
     });
-    expect(rootRes.status).toBe(200);
+    expect(statusOf(rootRes)).toBe(200);
     const homeRes = await mod.routes["routes/_index"].module.loader({
       context: { cloudflare: { env } },
       request: req,
       params: {},
     });
-    expect(homeRes.status).toBe(200);
+    expect(statusOf(homeRes)).toBe(200);
   });
 });

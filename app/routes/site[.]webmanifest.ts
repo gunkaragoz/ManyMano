@@ -1,4 +1,4 @@
-import type { LoaderFunctionArgs } from "@remix-run/cloudflare";
+import type { LoaderFunctionArgs } from "react-router";
 import { getSiteConfig } from "~/utils/site";
 
 // Serves /site.webmanifest dynamically so PWA name/description follow

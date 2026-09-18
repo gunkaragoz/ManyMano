@@ -1,6 +1,6 @@
-import type { ActionFunctionArgs, LoaderFunctionArgs, MetaFunction } from "@remix-run/cloudflare";
-import { json, redirect } from "@remix-run/cloudflare";
-import { Form, useActionData, useLoaderData, useNavigation, Link } from "@remix-run/react";
+import type { ActionFunctionArgs, LoaderFunctionArgs, MetaFunction } from "react-router";
+import { data, redirect } from "react-router";
+import { Form, useActionData, useLoaderData, useNavigation, Link } from "react-router";
 import { useEffect, useRef, useState } from "react";
 import { ArrowLeft, ArrowRight, ClipboardList, TriangleAlert, X } from "lucide-react";
 import { usePersistentState } from "~/utils/usePersistentState";
@@ -69,7 +69,7 @@ export async function loader({ context }: LoaderFunctionArgs) {
   const env = context.cloudflare.env as {
     TURNSTILE_SITE_KEY?: string;
   };
-  return json({ turnstileSiteKey: env.TURNSTILE_SITE_KEY ?? null });
+  return data({ turnstileSiteKey: env.TURNSTILE_SITE_KEY ?? null });
 }
 
 export async function action({ request, context }: ActionFunctionArgs) {
@@ -116,19 +116,19 @@ export async function action({ request, context }: ActionFunctionArgs) {
 
   // Validation
   if (!title) {
-    return json({ error: "Please enter an event title." }, { status: 400 });
+    return data({ error: "Please enter an event title." }, { status: 400 });
   }
   if (eventDate && !isValidIsoDate(eventDate)) {
-    return json({ error: "Please pick a valid event date." }, { status: 400 });
+    return data({ error: "Please pick a valid event date." }, { status: 400 });
   }
   if (!timezone) {
-    return json({ error: "Please pick a timezone from the list." }, { status: 400 });
+    return data({ error: "Please pick a timezone from the list." }, { status: 400 });
   }
   if (!organizerName) {
-    return json({ error: "Please enter your name." }, { status: 400 });
+    return data({ error: "Please enter your name." }, { status: 400 });
   }
   if (!isValidEmail(organizerEmail)) {
-    return json({ error: "A valid email is required to receive your secret management link." }, { status: 400 });
+    return data({ error: "A valid email is required to receive your secret management link." }, { status: 400 });
   }
 
   // Bot protection before any DB work.
@@ -140,7 +140,7 @@ export async function action({ request, context }: ActionFunctionArgs) {
   });
   if (!turnstile.ok) {
     const f = turnstileFailure();
-    return json(f.body, { status: f.status });
+    return data(f.body, { status: f.status });
   }
 
   // Parse shifts / tasks.
@@ -179,21 +179,21 @@ export async function action({ request, context }: ActionFunctionArgs) {
     .slice(0, MAX_SLOTS_PER_EVENT);
 
   if (validSlots.length === 0) {
-    return json({ error: "Please add at least one task." }, { status: 400 });
+    return data({ error: "Please add at least one task." }, { status: 400 });
   }
   for (const s of validSlots) {
     if ((s.startTime && !isValidTime(s.startTime)) || (s.endTime && !isValidTime(s.endTime))) {
-      return json({ error: `"${s.title}": please pick a valid time.` }, { status: 400 });
+      return data({ error: `"${s.title}": please pick a valid time.` }, { status: 400 });
     }
     if (s.startTime && s.endTime && timeToMinutes(s.endTime) <= timeToMinutes(s.startTime)) {
-      return json(
+      return data(
         { error: `"${s.title}": end time must be after the start time.` },
         { status: 400 }
       );
     }
   }
   if (slotTitles.length > MAX_SLOTS_PER_EVENT) {
-    return json(
+    return data(
       { error: `Too many tasks — maximum ${MAX_SLOTS_PER_EVENT} per event.` },
       { status: 400 }
     );

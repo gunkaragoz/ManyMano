@@ -1,5 +1,5 @@
-import type { HeadersFunction, LoaderFunctionArgs } from "@remix-run/cloudflare";
-import { json } from "@remix-run/cloudflare";
+import type { HeadersFunction, LoaderFunctionArgs } from "react-router";
+import { data } from "react-router";
 import { getSiteConfig } from "~/utils/site";
 import { resolveEmailProvider, providerLabel } from "~/utils/email";
 import {
@@ -55,7 +55,7 @@ export async function loader({ context }: LoaderFunctionArgs) {
     email = { daily: 0, monthly: 0, dailyPct: 0, monthlyPct: 0 };
   }
 
-  return json(
+  return data(
     {
       email: {
         ...email,

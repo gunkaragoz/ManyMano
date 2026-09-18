@@ -1,5 +1,5 @@
-import type { LinksFunction, LoaderFunctionArgs, MetaFunction } from "@remix-run/cloudflare";
-import { json } from "@remix-run/cloudflare";
+import type { LinksFunction, LoaderFunctionArgs, MetaFunction } from "react-router";
+import { data } from "react-router";
 import {
   Links,
   Meta,
@@ -12,7 +12,7 @@ import {
   useNavigation,
   isRouteErrorResponse,
   useRouteError,
-} from "@remix-run/react";
+} from "react-router";
 import { useEffect, useState } from "react";
 import { HeartHandshake } from "lucide-react";
 import NotFound from "~/components/NotFound";
@@ -60,7 +60,7 @@ import { getSiteConfig, toPublicSiteConfig } from "~/utils/site";
 export async function loader({ context }: LoaderFunctionArgs) {
   // Fail-fast: missing SITE_* env throws here instead of serving stale brand.
   const config = getSiteConfig(context.cloudflare.env);
-  return json({ site: toPublicSiteConfig(config) });
+  return data({ site: toPublicSiteConfig(config) });
 }
 
 export const links: LinksFunction = () => [

@@ -1,6 +1,6 @@
-import type { HeadersFunction, LoaderFunctionArgs, MetaFunction } from "@remix-run/cloudflare";
-import { json } from "@remix-run/cloudflare";
-import { Link, useLoaderData, useNavigate, useNavigation } from "@remix-run/react";
+import type { HeadersFunction, LoaderFunctionArgs, MetaFunction } from "react-router";
+import { data } from "react-router";
+import { Link, useLoaderData, useNavigate, useNavigation } from "react-router";
 import {
   Activity,
   ArrowRight,
@@ -57,7 +57,7 @@ export async function loader({ request, context }: LoaderFunctionArgs) {
   } catch {
     throw new Response("Stats temporarily unavailable.", { status: 500 });
   }
-  return json(
+  return data(
     { stats },
     { headers: { "Cache-Control": "public, max-age=60" } }
   );

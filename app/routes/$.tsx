@@ -1,4 +1,4 @@
-import type { MetaFunction } from "@remix-run/cloudflare";
+import type { MetaFunction } from "react-router";
 import NotFound from "~/components/NotFound";
 import { mergeParentMeta, pageMetaOverrides, rootSiteFromMatches } from "~/utils/seo";
 
