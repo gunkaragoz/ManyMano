@@ -15,7 +15,8 @@
     "db:generate": "drizzle-kit generate",
     "db:migrate:local": "wrangler d1 migrations apply manymano-db --local",
     "db:migrate:remote": "wrangler d1 migrations apply manymano-db --remote",
-    "deploy": "npm run typecheck && npm run build && npm run test:unit && npm run test:predeploy && wrangler deploy"
+    "deploy": "npm run typecheck && npm run build && npm run test:unit && npm run test:predeploy && wrangler deploy",
+    "deploy:staging": "npm run typecheck && CLOUDFLARE_ENV=staging npm run build && npm run test:unit && npm run test:predeploy && wrangler deploy"
   },
   "dependencies": {
     "@cloudflare/vite-plugin": "^1.55.0",

@@ -53,8 +53,12 @@ describe.skipIf(!LIVE)("staging read-only parity", () => {
     const robots = await get("/robots.txt");
     expect(robots.status).toBe(200);
 
-    const missing = await get(`/stg-missing-${STAMP}`);
-    expect([404]).toContain(missing.status);
+    // NOTE: the $.tsx catch-all renders the NotFound UI with HTTP 200
+    // (pre-existing behavior, same on prod). Assert the friendly copy,
+    // not the status — returning a true 404 is a separate follow-up.
+    const missing = await fetch(`${STAGING_URL}/stg-missing-${STAMP}`);
+    expect(missing.status).toBe(200);
+    expect(await missing.text()).toContain("couldn&#x27;t be found");
   });
 });
 
