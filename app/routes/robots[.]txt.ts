@@ -1,3 +1,4 @@
+import { getCloudflareEnv } from "~/utils/cloudflare-context";
 import type { LoaderFunctionArgs } from "react-router";
 import { absoluteUrl } from "~/utils/seo";
 import { getSiteConfig } from "~/utils/site";
@@ -11,7 +12,7 @@ export async function loader({ request, context }: LoaderFunctionArgs) {
     }
   })();
   // Canonical sitemap URL always points at production (SITE_URL). No fallback.
-  const { siteUrl } = getSiteConfig(context.cloudflare.env);
+  const { siteUrl } = getSiteConfig(getCloudflareEnv(context));
   const sitemapUrl = absoluteUrl("/sitemap.xml", siteUrl);
   void origin;
   const body = [

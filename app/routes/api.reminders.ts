@@ -1,3 +1,4 @@
+import { getCloudflareEnv } from "~/utils/cloudflare-context";
 import type {
   ActionFunctionArgs,
   HeadersFunction,
@@ -258,11 +259,11 @@ async function handleReminders(request: Request, env: ReminderEnv) {
 }
 
 export async function loader({ request, context }: LoaderFunctionArgs) {
-  const env = context.cloudflare.env as unknown as ReminderEnv;
+  const env = getCloudflareEnv(context) as unknown as ReminderEnv;
   return handleReminders(request, env);
 }
 
 export async function action({ request, context }: ActionFunctionArgs) {
-  const env = context.cloudflare.env as unknown as ReminderEnv;
+  const env = getCloudflareEnv(context) as unknown as ReminderEnv;
   return handleReminders(request, env);
 }

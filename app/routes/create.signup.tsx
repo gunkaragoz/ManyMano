@@ -1,3 +1,4 @@
+import { getCloudflareEnv } from "~/utils/cloudflare-context";
 import type { ActionFunctionArgs, LoaderFunctionArgs, MetaFunction } from "react-router";
 import { data, redirect } from "react-router";
 import { Form, useActionData, useLoaderData, useNavigation, Link } from "react-router";
@@ -66,14 +67,14 @@ export const meta: MetaFunction = ({ matches }) => {
 };
 
 export async function loader({ context }: LoaderFunctionArgs) {
-  const env = context.cloudflare.env as {
+  const env = getCloudflareEnv(context) as {
     TURNSTILE_SITE_KEY?: string;
   };
   return data({ turnstileSiteKey: env.TURNSTILE_SITE_KEY ?? null });
 }
 
 export async function action({ request, context }: ActionFunctionArgs) {
-  const env = context.cloudflare.env as {
+  const env = getCloudflareEnv(context) as {
     DB: D1Database;
     EMAIL_PROVIDER?: string;
     RESEND_API_KEY?: string;

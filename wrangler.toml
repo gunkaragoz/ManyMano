@@ -1,10 +1,27 @@
 name = "manymano"
+main = "./workers/app.ts"
 compatibility_date = "2024-09-23"
 compatibility_flags = ["nodejs_compat"]
-pages_build_output_dir = "./build/client"
+
+# React Router client assets (./build/client) are served by the Worker.
+[assets]
+directory = "./build/client"
 
 [[d1_databases]]
 binding = "DB"
 database_name = "manymano-db"
 database_id = "ab5abbfd-0d23-43ec-856a-e4fd4707e0e2"
+migrations_dir = "./drizzle/migrations"
+
+# Staging (prod copy): isolated worker + D1, staging-only secrets.
+# Create once: wrangler d1 create manymano-db-staging, then fill database_id.
+# Secrets: wrangler secret put --env staging (keys stay empty on purpose —
+# the no-mail gate fails the build if provider creds ever appear in staging).
+[env.staging]
+name = "manymano-staging"
+
+[[env.staging.d1_databases]]
+binding = "DB"
+database_name = "manymano-db-staging"
+database_id = "REPLACE_WITH_STAGING_DB_ID"
 migrations_dir = "./drizzle/migrations"

@@ -1,3 +1,4 @@
+import { getCloudflareEnv } from "~/utils/cloudflare-context";
 import type { LinksFunction, LoaderFunctionArgs, MetaFunction } from "react-router";
 import { data } from "react-router";
 import {
@@ -59,7 +60,7 @@ import { getSiteConfig, toPublicSiteConfig } from "~/utils/site";
 
 export async function loader({ context }: LoaderFunctionArgs) {
   // Fail-fast: missing SITE_* env throws here instead of serving stale brand.
-  const config = getSiteConfig(context.cloudflare.env);
+  const config = getSiteConfig(getCloudflareEnv(context));
   return data({ site: toPublicSiteConfig(config) });
 }
 
@@ -72,9 +73,9 @@ export const links: LinksFunction = () => [
   { rel: "manifest", href: "/site.webmanifest" },
 ];
 
-export const meta: MetaFunction<typeof loader> = ({ data }) => {
-  if (!data?.site) throw new Error("[config] Root loader must provide `site` (SITE_URL/SITE_NAME).");
-  const { site } = data;
+export const meta: MetaFunction<typeof loader> = ({ loaderData }) => {
+  if (!loaderData?.site) throw new Error("[config] Root loader must provide `site` (SITE_URL/SITE_NAME).");
+  const { site } = loaderData;
   const siteUrl = site.siteUrl;
   const siteName = site.siteName;
   const tagline = site.siteTagline;

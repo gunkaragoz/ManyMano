@@ -23,7 +23,7 @@ export function emitCreateStickyHeader(detail: CreateStickyHeaderDetail) {
 export function useCreateStickyHeader(
   title: string,
   date: string,
-  sentinelRef: RefObject<HTMLElement>
+  sentinelRef: RefObject<HTMLElement | null>
 ) {
   const [scrolledPast, setScrolledPast] = useState(false);
 

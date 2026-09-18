@@ -1,3 +1,4 @@
+import { getCloudflareEnv } from "~/utils/cloudflare-context";
 import type { ActionFunctionArgs, HeadersFunction, LoaderFunctionArgs, MetaFunction } from "react-router";
 import { data, redirect } from "react-router";
 import { useLoaderData, useActionData, useNavigation, useSearchParams, useFetcher, Form, isRouteErrorResponse, useRouteError } from "react-router";
@@ -89,14 +90,14 @@ import {
 // search indexes and give each event a real title/description. Remix renders
 // only the deepest `meta` export, so merge parent descriptors (OG image,
 // twitter card, etc.) and override title/description/canonical/robots.
-export const meta: MetaFunction<typeof loader> = ({ data, matches }) => {
+export const meta: MetaFunction<typeof loader> = ({ loaderData, matches }) => {
   const site = rootSiteFromMatches(matches);
   const siteName = site.siteName;
   const siteUrl = site.siteUrl;
   const fallbackTitle = `Event | ${siteName}`;
   const fallbackDescription =
     "View event details and respond. No account needed.";
-  if (!data?.event) {
+  if (!loaderData?.event) {
     return mergeParentMeta(matches, [
       ...pageMetaOverrides({
         title: fallbackTitle,
@@ -107,11 +108,11 @@ export const meta: MetaFunction<typeof loader> = ({ data, matches }) => {
       }),
     ]);
   }
-  const rawTitle = (data.event.title || "Untitled event").trim() || "Untitled event";
+  const rawTitle = (loaderData.event.title || "Untitled event").trim() || "Untitled event";
   const title = truncate(`${rawTitle} | ${siteName}`, 70);
   const rawDesc =
-    (data.event.description || "").trim() ||
-    (data.event.type === "SIGNUP_SHEET"
+    (loaderData.event.description || "").trim() ||
+    (loaderData.event.type === "SIGNUP_SHEET"
       ? `Sign up for ${rawTitle}. No account needed — claim your spot in seconds.`
       : `Vote on the best time for ${rawTitle}. No account needed.`);
   const description = truncate(rawDesc, 155);
@@ -119,7 +120,7 @@ export const meta: MetaFunction<typeof loader> = ({ data, matches }) => {
     ...pageMetaOverrides({
       title,
       description,
-      path: `/events/${data.event.id}`,
+      path: `/events/${loaderData.event.id}`,
       robots: "noindex, nofollow",
       siteUrl,
     }),
@@ -186,7 +187,7 @@ export function ErrorBoundary() {
 }
 
 export async function loader({ params, request, context }: LoaderFunctionArgs) {
-  const env = context.cloudflare.env as {
+  const env = getCloudflareEnv(context) as {
     DB: D1Database;
     TURNSTILE_SITE_KEY?: string;
     SITE_URL: string;
@@ -442,7 +443,7 @@ function checkResendRateLimit(key: string): boolean {
 }
 
 export async function action({ request, params, context }: ActionFunctionArgs) {
-  const env = context.cloudflare.env as {
+  const env = getCloudflareEnv(context) as {
     DB: D1Database;
     EMAIL_PROVIDER?: string;
     RESEND_API_KEY?: string;

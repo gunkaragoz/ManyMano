@@ -1,3 +1,4 @@
+import { getCloudflareEnv } from "~/utils/cloudflare-context";
 import type { LoaderFunctionArgs } from "react-router";
 import { absoluteUrl } from "~/utils/seo";
 import { getSiteConfig } from "~/utils/site";
@@ -17,7 +18,7 @@ const ENTRIES: SitemapEntry[] = [
 
 export async function loader({ request, context }: LoaderFunctionArgs) {
   void request;
-  const { siteUrl } = getSiteConfig(context.cloudflare.env);
+  const { siteUrl } = getSiteConfig(getCloudflareEnv(context));
   const today = new Date().toISOString().split("T")[0];
   const urls = ENTRIES.map(
     (e) => `  <url>

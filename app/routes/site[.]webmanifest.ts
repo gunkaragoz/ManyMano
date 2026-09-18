@@ -1,10 +1,11 @@
+import { getCloudflareEnv } from "~/utils/cloudflare-context";
 import type { LoaderFunctionArgs } from "react-router";
 import { getSiteConfig } from "~/utils/site";
 
 // Serves /site.webmanifest dynamically so PWA name/description follow
 // SITE_NAME / SITE_TAGLINE. No hardcoded brand fallback.
 export async function loader({ context }: LoaderFunctionArgs) {
-  const site = getSiteConfig(context.cloudflare.env);
+  const site = getSiteConfig(getCloudflareEnv(context));
   const manifest = {
     name: site.siteName,
     short_name: site.siteName,

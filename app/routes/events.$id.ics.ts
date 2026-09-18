@@ -1,3 +1,4 @@
+import { getCloudflareEnv } from "~/utils/cloudflare-context";
 import type { LoaderFunctionArgs } from "react-router";
 import { eq } from "drizzle-orm";
 import { getDb, events, eventSlots } from "~/db";
@@ -7,7 +8,7 @@ import { isExpired, pruneExpiredEvents } from "~/utils/retention";
 import { getSiteConfig } from "~/utils/site";
 
 export async function loader({ params, request, context }: LoaderFunctionArgs) {
-  const env = context.cloudflare.env;
+  const env = getCloudflareEnv(context);
   // Site config resolves ICS_PRODID / ICS_UID_DOMAIN defaults from SITE_* —
   // never throws for those (see app/utils/site.ts).
   const site = getSiteConfig(env);

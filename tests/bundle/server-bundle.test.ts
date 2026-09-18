@@ -1,18 +1,30 @@
-// Server-bundle parity — Vitest port of tests/predeploy.mjs §4.
+// Loader parity — source-level, through a real RouterContextProvider.
 //
-// Runs against the built `build/server/index.js` (so `pnpm run build` must
-// run first). Mirrors the predeploy gate: critical routes present, root +
-// home loaders 200 with complete env, fail-fast per required key, and the
-// optional-vars regression (loaders stay green without SECURITY_CONTACT /
-// ICS_*). After the RR/Vite migration the bundle path or route-id shape may
-// change — update the import below, keep the assertions.
+// History: this suite used to import the built server bundle and call
+// loaders directly (Remix v2 / RR7-Pages era). Under Workers (RR8) the
+// server bundle is a workerd-only worker entry that cannot be imported in
+// plain node — and calling loaders with hand-made `{ cloudflare: ... }`
+// objects would bypass the exact thing being migrated (the v8 provider
+// context). So this now imports the route modules from source (vitest
+// transforms TS natively) and seeds a REAL RouterContextProvider exactly
+// like workers/app.ts does, asserting:
+//
+//   - root + home loaders 200 with complete env (payload carries brand)
+//   - fail-fast per missing required key (loader throws, never stale brand)
+//   - loaders stay green without optional vars (derived-defaults regression)
+//
+// Artifact serving (real HTTP incl. CSP/HSTS/www-redirect) is covered by
+// the staging HTTP suites + manual dev smoke, not here.
 import { describe, expect, it } from "vitest";
 import assert from "node:assert";
-import { existsSync, readFileSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
+import { RouterContextProvider } from "react-router";
+import { cloudflareContext } from "~/utils/cloudflare-context";
+import { loader as rootLoader } from "~/root";
+import { loader as homeLoader } from "~/routes/_index";
 
 const ROOT = process.cwd();
-const SERVER_ENTRY = resolve(ROOT, "build/server/index.js");
 
 function requiredKeys(): string[] {
   const siteTs = readFileSync(resolve(ROOT, "app/utils/site.ts"), "utf8");
@@ -35,31 +47,25 @@ function completeEnv(): Record<string, string> {
   };
 }
 
-const CRITICAL_IDS = [
-  "root",
-  "routes/_index",
-  "routes/events.$id",
-  "routes/events.$id.ics",
-  "routes/events.$id.export",
-  "routes/create.signup",
-  "routes/create.poll",
-];
+// Seed a provider exactly like workers/app.ts does in production.
+function seedContext(env: Record<string, string>): RouterContextProvider {
+  const context = new RouterContextProvider();
+  context.set(cloudflareContext, {
+    env: env as never,
+    cf: {} as never,
+    ctx: { waitUntil: () => {}, passThroughOnException: () => {} },
+    caches: {} as never,
+  });
+  return context;
+}
 
-// RR7 loaders return `data(payload, init)` (DataWithResponseInit), not a
+// RR8 loaders return `data(payload, init)` (DataWithResponseInit), not a
 // Response. Unwrap both shapes so the gate asserts payload + status either way.
 function payloadOf(res: unknown): unknown {
   if (res !== null && typeof res === "object" && "data" in res && "type" in res) {
     return (res as { data: unknown }).data;
   }
   return res;
-}
-
-async function payloadJson(res: unknown): Promise<any> {
-  const payload = payloadOf(res);
-  if (payload !== null && typeof payload === "object" && typeof (payload as any).json === "function") {
-    return (payload as Response).json();
-  }
-  return payload;
 }
 
 function statusOf(res: unknown): number {
@@ -72,54 +78,34 @@ function statusOf(res: unknown): number {
   return 200;
 }
 
-describe("server bundle", () => {
-  it("build output exists (run `pnpm run build` first)", () => {
-    expect(existsSync(SERVER_ENTRY), "build/server/index.js not found — run the build first").toBe(true);
-  });
-
-  it("contains all critical routes with loaders", async () => {
-    const mod = await import(SERVER_ENTRY);
-    const routes = mod.routes ?? {};
-    for (const id of CRITICAL_IDS) {
-      expect(routes[id], `route ${id} missing from server bundle`).toBeTruthy();
-    }
-    expect(typeof routes.root?.module?.loader).toBe("function");
-    expect(typeof routes["routes/_index"]?.module?.loader).toBe("function");
-  });
-
-  it("root + home loaders 200 with complete env", async () => {
-    const mod = await import(SERVER_ENTRY);
-    const env = completeEnv();
+describe("loader parity through provider context", () => {
+  it("root + home loaders 200 with complete env (payload carries brand)", async () => {
+    const context = seedContext(completeEnv());
     const req = (url = "https://smoke-test.local/") => new Request(url);
-    const rootRes = await mod.routes.root.module.loader({
-      context: { cloudflare: { env } },
-      request: req(`${env.SITE_URL}/`),
+    const rootRes = (await rootLoader({
+      request: req("https://smoke-test.local/"),
+      context,
       params: {},
-    });
-    const data = await payloadJson(rootRes);
+    } as never)) as unknown;
+    const data = payloadOf(rootRes) as { site?: { siteUrl?: string; siteName?: string } };
     expect(data?.site?.siteUrl).toBeTruthy();
     expect(data?.site?.siteName).toBeTruthy();
 
-    const homeRes = await mod.routes["routes/_index"].module.loader({
-      context: { cloudflare: { env } },
-      request: req(),
-      params: {},
-    });
+    const homeRes = (await homeLoader({ request: req(), context, params: {} } as never)) as unknown;
     expect(statusOf(homeRes)).toBe(200);
   });
 
-  it("root loader fail-fasts per required key", async () => {
-    const mod = await import(SERVER_ENTRY);
+  it("root loader fail-fasts per required key (throws, never stale brand)", async () => {
     for (const key of requiredKeys()) {
       const broken = { ...completeEnv() };
       delete broken[key];
       let threw = false;
       try {
-        await mod.routes.root.module.loader({
-          context: { cloudflare: { env: broken } },
+        await rootLoader({
           request: new Request("https://smoke-test.local/"),
+          context: seedContext(broken),
           params: {},
-        });
+        } as never);
       } catch {
         threw = true;
       }
@@ -127,21 +113,12 @@ describe("server bundle", () => {
     }
   });
 
-  it("loaders stay green without optional vars (derived defaults)", async () => {
-    const mod = await import(SERVER_ENTRY);
-    const env = completeEnv();
+  it("loaders stay green without optional vars (derived-defaults regression)", async () => {
+    const context = seedContext(completeEnv());
     const req = new Request("https://smoke-test.local/");
-    const rootRes = await mod.routes.root.module.loader({
-      context: { cloudflare: { env } },
-      request: req,
-      params: {},
-    });
+    const rootRes = (await rootLoader({ request: req, context, params: {} } as never)) as unknown;
     expect(statusOf(rootRes)).toBe(200);
-    const homeRes = await mod.routes["routes/_index"].module.loader({
-      context: { cloudflare: { env } },
-      request: req,
-      params: {},
-    });
+    const homeRes = (await homeLoader({ request: req, context, params: {} } as never)) as unknown;
     expect(statusOf(homeRes)).toBe(200);
   });
 });

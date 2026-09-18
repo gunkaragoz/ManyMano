@@ -270,9 +270,9 @@ export function getPageMeta(siteName: string): Record<"createChooser" | "createS
 
 /** Read the public site config that the root loader injects (fail-fast). */
 export function rootSiteFromMatches(
-  matches: Array<{ id: string; data?: unknown }>
+  matches: Array<{ id: string; loaderData?: unknown }>
 ): PublicSiteConfig {
-  const root = matches.find((m) => m.id === "root")?.data as
+  const root = matches.find((m) => m.id === "root")?.loaderData as
     | { site?: PublicSiteConfig }
     | undefined;
   if (!root?.site?.siteUrl || !root?.site?.siteName) {

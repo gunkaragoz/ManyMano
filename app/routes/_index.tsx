@@ -1,3 +1,4 @@
+import { getCloudflareEnv } from "~/utils/cloudflare-context";
 import type { MetaFunction } from "react-router";
 import { Link, useLoaderData, useSearchParams } from "react-router";
 import { useEffect, useState } from "react";
@@ -23,15 +24,15 @@ function getFaqForSite(siteName: string): FaqItem[] {
 }
 
 export async function loader({ context }: LoaderFunctionArgs) {
-  const config = getSiteConfig(context.cloudflare.env);
+  const config = getSiteConfig(getCloudflareEnv(context));
   return data({ site: toPublicSiteConfig(config), faq: getFaqForSite(config.siteName) });
 }
 
 // Remix renders only the deepest `meta` export, so merge parent (root)
 // descriptors and just append the home-only FAQ JSON-LD. Without this the
 // homepage would lose its <title>, description, OG tags and canonical.
-export const meta: MetaFunction<typeof loader> = ({ data, matches }) => {
-  const faq = data?.faq ?? getFaqForSite(rootSiteFromMatches(matches).siteName);
+export const meta: MetaFunction<typeof loader> = ({ loaderData, matches }) => {
+  const faq = loaderData?.faq ?? getFaqForSite(rootSiteFromMatches(matches).siteName);
   return mergeParentMeta(matches, [
     { "script:ld+json": faqPageJsonLd(faq) },
   ]);

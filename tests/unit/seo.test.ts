@@ -56,9 +56,9 @@ describe("seo helpers", () => {
   });
 
   it("resolves root site from matches or throws", () => {
-    const site = rootSiteFromMatches([{ id: "root", data: { site: { siteUrl: SITE_URL, siteName: SITE_NAME } } }]);
+    const site = rootSiteFromMatches([{ id: "root", loaderData: { site: { siteUrl: SITE_URL, siteName: SITE_NAME } } }]);
     expect(site.siteUrl).toBe(SITE_URL);
-    expect(() => rootSiteFromMatches([{ id: "root", data: {} }])).toThrow();
+    expect(() => rootSiteFromMatches([{ id: "root", loaderData: {} }])).toThrow();
   });
 
   it("truncates titles on word boundaries", () => {

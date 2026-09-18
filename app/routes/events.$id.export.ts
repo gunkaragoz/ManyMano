@@ -1,3 +1,4 @@
+import { getCloudflareEnv } from "~/utils/cloudflare-context";
 import type { LoaderFunctionArgs } from "react-router";
 import { eq, and, inArray } from "drizzle-orm";
 import { getDb, events, eventSlots, signups, pollVotes, pollVoteEntries } from "~/db";
@@ -5,7 +6,7 @@ import { getPresentedAdminToken, verifyAdminToken } from "~/utils/auth";
 import { isExpired, pruneExpiredEvents } from "~/utils/retention";
 
 export async function loader({ params, request, context }: LoaderFunctionArgs) {
-  const env = context.cloudflare.env as { DB: D1Database };
+  const env = getCloudflareEnv(context) as { DB: D1Database };
   const db = getDb(env.DB);
   const eventId = params.id;
 

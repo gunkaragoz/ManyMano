@@ -78,10 +78,11 @@ describe("framework imports (RR7)", () => {
     expect(server).toMatch(/Strict-Transport-Security/);
   });
 
-  it("vite plugin is reactRouter with no v3 future flags", () => {
+  it("vite plugin is reactRouter + Cloudflare with no v3 future flags", () => {
     const vite = readFileSync(resolve(ROOT, "vite.config.ts"), "utf8");
     expect(vite).toMatch(/@react-router\/dev\/vite/);
-    expect(vite).toMatch(/cloudflareDevProxy/);
+    expect(vite).toMatch(/@cloudflare\/vite-plugin/);
+    expect(vite).not.toMatch(/cloudflareDevProxy/);
     expect(vite).not.toMatch(/@remix-run\/dev/);
     expect(vite).not.toMatch(/v3_/);
   });
@@ -94,15 +95,15 @@ describe("framework imports (RR7)", () => {
 });
 
 describe("deploy entry", () => {
-  it("Pages function handler uses @react-router/cloudflare (Workers move is Phase 1c)", () => {
-    const fn = resolve(ROOT, "functions/[[path]].ts");
-    expect(existsSync(fn)).toBe(true);
-    const src = readFileSync(fn, "utf8");
-    expect(src).toMatch(/createPagesFunctionHandler/);
-    expect(src).toMatch(/@react-router\/cloudflare/);
-    expect(src).not.toMatch(/@remix-run/);
-    expect(src).toMatch(/www\./);
+  it("Workers entry seeds a RouterContextProvider (Pages Functions removed)", () => {
+    expect(existsSync(resolve(ROOT, "functions/[[path]].ts"))).toBe(false);
+    const worker = readFileSync(resolve(ROOT, "workers/app.ts"), "utf8");
+    expect(worker).toMatch(/createRequestHandler/);
+    expect(worker).toMatch(/RouterContextProvider/);
+    expect(worker).toMatch(/cloudflareContext/);
+    expect(worker).toMatch(/www\./);
     const wrangler = readFileSync(resolve(ROOT, "wrangler.toml"), "utf8");
-    expect(wrangler).toMatch(/pages_build_output_dir/);
+    expect(wrangler).toMatch(/workers\/app\.ts/);
+    expect(wrangler).not.toMatch(/pages_build_output_dir/);
   });
 });

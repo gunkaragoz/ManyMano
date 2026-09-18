@@ -1,25 +1,30 @@
-// predeploy gate — fails the build when the app would 500 in production.
+// predeploy gate — fails the deploy when the app would 500 in production.
 //
 // Why this exists: every route loader calls getSiteConfig(env) which
-// fail-fasts on missing core SITE_* vars. Cloudflare Pages only skips the
-// deploy when the build command exits non-zero, so this script runs as part
-// of the build (see package.json + the Pages build_command) and aborts on:
+// fail-fasts on missing core SITE_* vars. Wrangler only skips the deploy
+// when the deploy command exits non-zero, so this script runs as part of
+// `pnpm run deploy` (see package.json) and aborts on:
 //
 //   1. Missing/invalid required env vars (the class of bug behind the
 //      "Application Error" 500 — only the core brand vars are required now;
-//      SECURITY_CONTACT / ICS_* fall back to derived defaults, and the gate
-//      proves the loaders stay green without them).
+//      SECURITY_CONTACT / ICS_* fall back to derived defaults).
 //   2. .env.sample drifting out of sync with the required vars in
 //      app/utils/site.ts (so a new required var can't ship undocumented).
-//   3. Server bundle that doesn't import or is missing critical routes.
-//   4. Root loader throwing with a complete env, or NOT throwing with an
-//      incomplete env (fail-fast behavior inverted).
-//   5. Missing public assets referenced by root meta/links (og-cover, icons).
+//   3. Missing build artifact or critical routes (a broken build /
+//      accidentally deleted route would 500 or 404 in production).
+//   4. Missing public assets referenced by root meta/links (og-cover, icons).
 //
-// Env source: Cloudflare Pages exposes dashboard env vars to the build as
-// process.env; locally the dev proxy reads .dev.vars. Mirror that here:
-// start from .dev.vars (if present) and let real process.env values win, so
-// the same script validates both environments.
+// Loader behavior itself (200 with complete env, throw per missing key,
+// green without optional vars) is covered by
+// tests/bundle/server-bundle.test.ts, which seeds a real
+// RouterContextProvider like workers/app.ts does. The built worker entry
+// (build/server/index.js) is workerd-only and cannot be imported in node,
+// so this gate asserts its presence + shape instead of executing it.
+//
+// Env source: `wrangler deploy` exposes dashboard vars at runtime, not at
+// build time; locally the Cloudflare Vite plugin reads .dev.vars. Mirror
+// that here: start from .dev.vars (if present) and let real process.env
+// values win, so the same script validates both environments.
 
 import { existsSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
@@ -32,33 +37,6 @@ const fail = (msg) => {
   failures += 1;
   console.error(`  ✗ FAIL: ${msg}`);
 };
-
-// RR7 loaders return `data(payload, init)` (DataWithResponseInit), not a
-// Response. Unwrap both shapes so the gate asserts payload + status either way.
-function payloadOf(res) {
-  if (res !== null && typeof res === "object" && "data" in res && "type" in res) {
-    return res.data;
-  }
-  return res;
-}
-
-async function payloadJson(res) {
-  const payload = payloadOf(res);
-  if (payload !== null && typeof payload === "object" && typeof payload.json === "function") {
-    return payload.json();
-  }
-  return payload;
-}
-
-function statusOf(res) {
-  if (res instanceof Response) return res.status;
-  if (res !== null && typeof res === "object" && "init" in res) {
-    const init = res.init;
-    if (typeof init === "number") return init;
-    return init?.status ?? 200;
-  }
-  return 200;
-}
 
 /** Parse a KEY=VALUE dotenv-style file (quotes stripped, `#` comments ignored). */
 function parseDotenvFile(path) {
@@ -82,7 +60,7 @@ function parseDotenvFile(path) {
   return out;
 }
 
-/** Effective env: .dev.vars base, real process.env wins (Pages build vars). */
+/** Effective env: .dev.vars base, real process.env wins (dashboard vars). */
 function loadEffectiveEnv() {
   const devVarsPath = resolve(ROOT, ".dev.vars");
   const base = existsSync(devVarsPath) ? parseDotenvFile(devVarsPath) : {};
@@ -122,7 +100,7 @@ for (const key of requiredKeys) {
   if (!((env[key] ?? "").trim())) {
     fail(
       `Missing required env var ${key}. ` +
-        `Set it in Cloudflare Pages dashboard (production) or .dev.vars (local). See .env.sample.`
+        `Set it via wrangler secret/vars (production) or .dev.vars (local). See .env.sample.`
     );
   } else ok(`${key} is set`);
 }
@@ -132,122 +110,48 @@ if (((env.SITE_URL ?? "").trim()) && !/^https?:\/\//.test(env.SITE_URL.trim().re
   ok("SITE_URL is an absolute http(s) URL");
 }
 
-// --- 4. Server bundle imports; critical routes + loaders present --------------
-console.log("\n[4/5] Server bundle imports with all critical routes");
-const serverEntry = resolve(ROOT, "build/server/index.js");
-if (!existsSync(serverEntry)) {
-  fail(`build/server/index.js not found — run the build before this gate (pnpm run build)`);
+// --- 4. Build artifact + critical routes + worker entry present ---------------
+console.log("\n[4/5] Build artifact, worker entry and critical routes present");
+for (const artifact of ["build/server/index.js", "build/client"]) {
+  if (!existsSync(resolve(ROOT, artifact))) {
+    fail(`${artifact} not found — run the build before this gate (pnpm run build)`);
+  } else ok(artifact);
+}
+const workerSrc = resolve(ROOT, "workers/app.ts");
+if (!existsSync(workerSrc)) {
+  fail("workers/app.ts not found (Worker entry missing — nothing to deploy)");
 } else {
-  try {
-    const mod = await import(serverEntry);
-    const routes = mod.routes ?? {};
-    const routeIds = Object.keys(routes);
-    console.log(`  routes in bundle: ${routeIds.join(", ")}`);
-    const critical = [
-      "root",
-      "routes/_index",
-      "routes/events.$id",
-      "routes/events.$id.ics",
-      "routes/events.$id.export",
-      "routes/create.signup",
-      "routes/create.poll",
-    ];
-    for (const id of critical) {
-      if (!routes[id]) fail(`route ${id} missing from server bundle`);
-      else ok(`route ${id} present`);
-    }
-    if (typeof routes.root?.module?.loader !== "function") {
-      fail("root route has no loader export");
-    } else {
-      ok("root route loader export present");
-
-      // 4a. Root loader succeeds with the complete env (would 500 otherwise).
-      const mockRequest = (url) => new Request(url ?? "https://smoke-test.local/");
-      try {
-        const res = await routes.root.module.loader({
-          context: { cloudflare: { env } },
-          request: mockRequest(`${env.SITE_URL || "https://smoke-test.local"}/`),
-          params: {},
-        });
-        const data = await payloadJson(res);
-        assert(data?.site?.siteUrl, "root loader response has no site.siteUrl");
-        assert(data?.site?.siteName, "root loader response has no site.siteName");
-        ok(`root loader 200 with complete env (siteUrl=${data.site.siteUrl})`);
-      } catch (err) {
-        fail(`root loader threw with COMPLETE env (this is the production 500): ${err?.message}`);
-      }
-
-      // 4b. Root loader fail-fasts with an incomplete env (guard must work).
-      for (const key of requiredKeys) {
-        const broken = { ...env };
-        delete broken[key];
-        let threw = false;
-        try {
-          await routes.root.module.loader({
-            context: { cloudflare: { env: broken } },
-            request: mockRequest(),
-            params: {},
-          });
-        } catch {
-          threw = true;
-        }
-        if (!threw) fail(`root loader did NOT throw without ${key} (fail-fast broken!)`);
-        else ok(`root loader fail-fasts without ${key}`);
-      }
-
-      // 4c. Home loader succeeds too (homepage is the most-hit route).
-      if (typeof routes["routes/_index"]?.module?.loader === "function") {
-        try {
-          const res = await routes["routes/_index"].module.loader({
-            context: { cloudflare: { env } },
-            request: mockRequest(),
-            params: {},
-          });
-          assert.strictEqual(statusOf(res), 200);
-          ok("home (/) loader 200 with complete env");
-        } catch (err) {
-          fail(`home (/) loader threw with COMPLETE env: ${err?.message}`);
-        }
-      } else {
-        fail("home (routes/_index) route has no loader export");
-      }
-
-      // 4d. Regression: optional vars absent (the production scenario that
-      // once 500'd). Derived defaults kick in — loaders must stay green and
-      // the resolved values must be brand-correct, not hardcoded.
-      const OPTIONAL_WITH_DEFAULTS = ["SECURITY_CONTACT", "ICS_UID_DOMAIN", "ICS_PRODID"];
-      const minimal = { ...env };
-      for (const key of OPTIONAL_WITH_DEFAULTS) delete minimal[key];
-      try {
-        const res = await routes.root.module.loader({
-          context: { cloudflare: { env: minimal } },
-          request: mockRequest(`${env.SITE_URL || "https://smoke-test.local"}/`),
-          params: {},
-        });
-        assert.strictEqual(statusOf(res), 200);
-        ok("root loader 200 WITHOUT optional vars (derived defaults)");
-      } catch (err) {
-        fail(`root loader threw WITHOUT optional vars (production 500 risk): ${err?.message}`);
-      }
-      if (typeof routes["routes/_index"]?.module?.loader === "function") {
-        try {
-          const res = await routes["routes/_index"].module.loader({
-            context: { cloudflare: { env: minimal } },
-            request: mockRequest(),
-            params: {},
-          });
-          assert.strictEqual(statusOf(res), 200);
-          ok("home (/) loader 200 WITHOUT optional vars");
-        } catch (err) {
-          fail(`home (/) loader threw WITHOUT optional vars: ${err?.message}`);
-        }
-      }
-      // security.txt / .ics loaders resolve config through the same
-      // getSiteConfig path, so the root-loader checks above cover them.
-    }
-  } catch (err) {
-    fail(`server bundle import failed (broken build would 500): ${err?.message}`);
+  const src = readFileSync(workerSrc, "utf8");
+  for (const [label, re] of [
+    ["createRequestHandler", /createRequestHandler/],
+    ["provider context seeding", /RouterContextProvider/],
+    ["cloudflare context key", /cloudflareContext/],
+    ["www → apex redirect", /www\./],
+  ]) {
+    if (!re.test(src)) fail(`workers/app.ts missing ${label}`);
+    else ok(`workers/app.ts: ${label}`);
   }
+}
+const wranglerToml = readFileSync(resolve(ROOT, "wrangler.toml"), "utf8");
+for (const [label, re] of [
+  ["worker entry", /workers\/app\.ts/],
+  ["D1 binding", /binding\s*=\s*"DB"/],
+]) {
+  if (!re.test(wranglerToml)) fail(`wrangler.toml missing ${label}`);
+  else ok(`wrangler.toml: ${label}`);
+}
+const criticalRouteFiles = [
+  "app/root.tsx",
+  "app/routes/_index.tsx",
+  "app/routes/events.$id.tsx",
+  "app/routes/events.$id.ics.ts",
+  "app/routes/events.$id.export.ts",
+  "app/routes/create.signup.tsx",
+  "app/routes/create.poll.tsx",
+];
+for (const file of criticalRouteFiles) {
+  if (!existsSync(resolve(ROOT, file))) fail(`critical route ${file} missing`);
+  else ok(`route ${file} present`);
 }
 
 // --- 5. Public assets referenced by root meta/links exist ---------------------

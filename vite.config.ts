@@ -1,5 +1,5 @@
 import { reactRouter } from "@react-router/dev/vite";
-import { cloudflareDevProxy } from "@react-router/dev/vite/cloudflare";
+import { cloudflare } from "@cloudflare/vite-plugin";
 import { defineConfig } from "vite";
 import tsconfigPaths from "vite-tsconfig-paths";
 import { existsSync, readFileSync } from "node:fs";
@@ -72,7 +72,11 @@ export default defineConfig({
     strictPort: true,
   },
   plugins: [
-    cloudflareDevProxy(),
+    // Bind to React Router's ssr environment so workers/app.ts (the wrangler
+    // entry, importing virtual:react-router/server-build) builds with the
+    // client manifest available. Without this the plugin spawns its own
+    // worker environment and the server-manifest virtual module 404s.
+    cloudflare({ viteEnvironment: { name: "ssr" } }),
     reactRouter(),
     tsconfigPaths(),
   ],

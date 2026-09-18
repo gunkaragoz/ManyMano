@@ -1,3 +1,4 @@
+import { getCloudflareEnv } from "~/utils/cloudflare-context";
 import type { HeadersFunction, LoaderFunctionArgs, MetaFunction } from "react-router";
 import { data } from "react-router";
 import { Link, useLoaderData, useNavigate, useNavigation } from "react-router";
@@ -49,7 +50,7 @@ export const headers: HeadersFunction = ({ loaderHeaders }) => {
 };
 
 export async function loader({ request, context }: LoaderFunctionArgs) {
-  const env = context.cloudflare.env as { DB: D1Database };
+  const env = getCloudflareEnv(context) as { DB: D1Database };
   const days = clampPulseDays(new URL(request.url).searchParams.get("days"));
   let stats: PulseStats;
   try {
@@ -63,7 +64,7 @@ export async function loader({ request, context }: LoaderFunctionArgs) {
   );
 }
 
-export const meta: MetaFunction<typeof loader> = ({ data, matches }) => {
+export const meta: MetaFunction<typeof loader> = ({ loaderData, matches }) => {
   const site = rootSiteFromMatches(matches);
   const title = `Pulse — live activity | ${site.siteName}`;
   const description =

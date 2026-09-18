@@ -1,15 +1,14 @@
-import type { AppLoadContext, EntryContext } from "react-router";
+import type { EntryContext, RouterContextProvider } from "react-router";
 import { ServerRouter } from "react-router";
 import { isbot } from "isbot";
-// @ts-ignore
-import { renderToReadableStream } from "react-dom/server.browser";
+import { renderToReadableStream } from "react-dom/server";
 
 export default async function handleRequest(
   request: Request,
   responseStatusCode: number,
   responseHeaders: Headers,
   remixContext: EntryContext,
-  loadContext: AppLoadContext
+  loadContext: RouterContextProvider
 ) {
   const body = await renderToReadableStream(
     <ServerRouter context={remixContext} url={request.url} />,

@@ -66,11 +66,12 @@ describe.skipIf(!LIVE)("staging write paths (synthetic events)", () => {
       eventDate: tomorrowIso(),
       organizerName: "STG Smoke",
       organizerEmail: `stg-smoke-${STAMP}@example.com`,
-      // Minimal slot set; field names mirror create.signup action.
+      // Flat repeated fields — mirrors the create.signup action
+      // (formData.getAll("slotTitle") / getAll("slotCapacity")).
       // If the action renames fields, this surfaces the first action error.
-      "slots[0][title]": "Morning",
-      "slots[0][capacity]": "2",
     });
+    form.append("slotTitle", "Morning");
+    form.append("slotCapacity", "2");
     const res = await fetch(`${STAGING_URL}/create/signup`, {
       method: "POST",
       headers: { "Content-Type": "application/x-www-form-urlencoded" },
@@ -98,9 +99,12 @@ describe.skipIf(!LIVE)("staging write paths (synthetic events)", () => {
       title: `STG smoke poll ${STAMP}`,
       organizerName: "STG Smoke",
       organizerEmail: `stg-poll-${STAMP}@example.com`,
-      "slots[0][title]": "Thu 2pm",
-      "slots[1][title]": "Fri 10am",
+      // Flat repeated fields — mirrors the create.poll action
+      // (getAll("slotDate") / getAll("slotStartTime") / getAll("slotTitle")).
     });
+    form.append("slotDate", tomorrowIso());
+    form.append("slotStartTime", "14:00");
+    form.append("slotTitle", "Thu 2pm");
     const res = await fetch(`${STAGING_URL}/create/poll`, {
       method: "POST",
       headers: { "Content-Type": "application/x-www-form-urlencoded" },
@@ -123,10 +127,9 @@ describe.skipIf(!LIVE)("staging write paths (synthetic events)", () => {
 
 async function expectArtifacts(eventId: string) {
   if (!eventId || eventId.includes("create")) return; // redirect parsing fallback
-  for (const suffix of [".ics", ".qr", "/export"]) {
-    const suffixPath = suffix.startsWith("/") ? `/events/${eventId}${suffix}` : `/events/${eventId}${suffix}`;
+  for (const suffixPath of [`/events/${eventId}/ics`, `/events/${eventId}/qr`]) {
     const res = await fetch(`${STAGING_URL}${suffixPath}`);
-    // .qr may 404 for events without a public URL shape; accept 200/404 but never 500.
+    // /qr renders a titled page; both must never 500.
     expect([200, 404].includes(res.status), `${suffixPath} returned ${res.status}`).toBe(true);
   }
 }

@@ -1,3 +1,4 @@
+import { getCloudflareEnv } from "~/utils/cloudflare-context";
 import type { LoaderFunctionArgs } from "react-router";
 import { eq } from "drizzle-orm";
 import { getDb, events } from "~/db";
@@ -12,7 +13,7 @@ import { eventQrValue, qrPngBytes, qrSvgString } from "~/utils/qr";
 // Public + long-cacheable: the QR encodes the unlisted event URL itself,
 // so no auth and no PII involved.
 export async function loader({ params, request, context }: LoaderFunctionArgs) {
-  const env = context.cloudflare.env;
+  const env = getCloudflareEnv(context);
   const site = getSiteConfig(env);
   const db = getDb((env as { DB: D1Database }).DB);
   const eventId = params.id;

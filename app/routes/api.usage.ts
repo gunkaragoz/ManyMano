@@ -1,3 +1,4 @@
+import { getCloudflareEnv } from "~/utils/cloudflare-context";
 import type { HeadersFunction, LoaderFunctionArgs } from "react-router";
 import { data } from "react-router";
 import { getSiteConfig } from "~/utils/site";
@@ -31,7 +32,7 @@ export const headers: HeadersFunction = ({ loaderHeaders }) => {
 };
 
 export async function loader({ context }: LoaderFunctionArgs) {
-  const env = context.cloudflare.env as {
+  const env = getCloudflareEnv(context) as {
     DB: D1Database;
     EMAIL_PROVIDER?: string;
     EMAIL_DAILY_LIMIT?: string;
