@@ -1,7 +1,6 @@
 import { reactRouter } from "@react-router/dev/vite";
 import { cloudflare } from "@cloudflare/vite-plugin";
 import { defineConfig } from "vite";
-import tsconfigPaths from "vite-tsconfig-paths";
 import { existsSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
 
@@ -65,6 +64,10 @@ function devPort(): number {
 }
 
 export default defineConfig({
+  // Vite 8 resolves tsconfig paths natively (replaces vite-tsconfig-paths).
+  resolve: {
+    tsconfigPaths: true,
+  },
   server: {
     port: devPort(),
     // Fail loudly instead of silently drifting to 5174/5175 when the
@@ -78,6 +81,5 @@ export default defineConfig({
     // worker environment and the server-manifest virtual module 404s.
     cloudflare({ viteEnvironment: { name: "ssr" } }),
     reactRouter(),
-    tsconfigPaths(),
   ],
 });
