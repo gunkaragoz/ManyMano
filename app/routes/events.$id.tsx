@@ -186,7 +186,7 @@ export function ErrorBoundary() {
   throw error;
 }
 
-export async function loader({ params, request, context }: LoaderFunctionArgs) {
+export async function loader({ params, request, context, url }: LoaderFunctionArgs) {
   const env = getCloudflareEnv(context) as {
     DB: D1Database;
     TURNSTILE_SITE_KEY?: string;
@@ -227,7 +227,10 @@ export async function loader({ params, request, context }: LoaderFunctionArgs) {
     throw new Response("This event expired and was auto-deleted.", { status: 410 });
   }
 
-  const url = new URL(request.url);
+  // NOTE: `url` (not `request.url`) — React Router v8 passes the raw URL
+  // (with single-fetch `.data` suffixes) in `request.url`. Building
+  // redirect targets from it leaks `/events/<id>.data?...` into the address
+  // bar, which then 404s (`:id` becomes `<id>.data`).
   // Background poll requests (`?poll=1` from the live-sync hook below) must
   // always hit the origin: private/no-store so neither the browser HTTP cache
   // (public max-age below) nor the CDN serves a stale roster/tallies snapshot.
@@ -273,7 +276,7 @@ export async function loader({ params, request, context }: LoaderFunctionArgs) {
   // redirect to the clean URL so the secret leaves history/logs.
   const adminQuery = url.searchParams.get("admin");
   if (isAdmin && adminQuery) {
-    const clean = new URL(request.url);
+    const clean = new URL(url.toString());
     clean.searchParams.delete("admin");
     const headers = new Headers();
     headers.append("Set-Cookie", buildAdminCookie(eventId, adminQuery));

@@ -63,6 +63,63 @@ describe.skipIf(!LIVE)("staging read-only parity", () => {
 });
 
 describe.skipIf(!LIVE)("staging write paths (synthetic events)", () => {
+  it("never leaks .data URLs into redirects (single-fetch regression)", async () => {
+    // Browser submissions go through single-fetch `.data` requests. In v8
+    // `request.url` stays raw, so building redirect targets from it used to
+    // produce `/events/<id>.data?...` — which then 404s (`:id` = `<id>.data`).
+    // The loader must redirect using the normalized URL instead.
+    assertStaging(STAGING_URL);
+    const form = new URLSearchParams({
+      title: `STG data-link ${STAMP}`,
+      eventDate: tomorrowIso(),
+      organizerName: "STG Smoke",
+      organizerEmail: `stg-data-${STAMP}@example.com`,
+    });
+    form.append("slotTitle", "Morning");
+    form.append("slotCapacity", "2");
+    const createRes = await fetch(`${STAGING_URL}/create/signup`, {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: form.toString(),
+      redirect: "manual",
+    });
+    expect([302, 303]).toContain(createRes.status);
+    const loc = new URL(createRes.headers.get("location") ?? "/", STAGING_URL);
+    expect(loc.pathname).not.toContain(".data");
+    const eventId = loc.pathname.split("/").pop() ?? "";
+    expect(eventId).toMatch(/^[A-Za-z0-9]+$/);
+    const admin = loc.searchParams.get("admin") ?? "";
+    expect(admin).not.toBe("");
+
+    // Simulate the SPA data-request the browser fires after the redirect.
+    // Single-fetch encodes loader redirects as a 202 turbo-stream
+    // SingleFetchRedirect payload (not a raw 302) — parse its target.
+    const dataRes = await fetch(
+      `${STAGING_URL}/events/${eventId}.data?admin=${encodeURIComponent(admin)}&created=1`,
+      { redirect: "manual" }
+    );
+    expect([202, 302, 303]).toContain(dataRes.status);
+    const payload = await dataRes.text();
+    const target = payload.match(/"redirect","([^"]+)"/)?.[1] ?? dataRes.headers.get("location") ?? "";
+    expect(target, "no redirect target in single-fetch payload").not.toBe("");
+    const cleanLoc = new URL(target, STAGING_URL);
+    expect(cleanLoc.pathname, "redirect leaked a .data URL").not.toContain(".data");
+    expect(cleanLoc.pathname).toBe(`/events/${eventId}`);
+    expect(cleanLoc.searchParams.get("created")).toBe("1");
+    expect(cleanLoc.searchParams.get("admin")).toBeNull();
+
+    const page = await fetch(cleanLoc.toString());
+    expect(page.status).toBe(200);
+
+    // Leave no trace: best-effort delete via the admin link.
+    await fetch(`${STAGING_URL}/events/${eventId}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({ intent: "delete_event", adminToken: admin }).toString(),
+      redirect: "manual",
+    }).catch(() => {});
+  });
+
   it("creates a signup sheet and exposes it publicly", async () => {
     assertStaging(STAGING_URL);
     const form = new URLSearchParams({
