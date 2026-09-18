@@ -9,7 +9,9 @@
     "start": "wrangler pages dev ./build/client",
     "typecheck": "tsc",
     "test:predeploy": "node tests/predeploy.mjs",
-    "test": "npm run typecheck && npm run test:predeploy",
+    "test:unit": "vitest run",
+    "test:staging": "vitest run --config vitest.staging.config.ts",
+    "test": "npm run typecheck && npm run test:unit && npm run test:predeploy",
     "db:generate": "drizzle-kit generate",
     "db:migrate:local": "wrangler d1 migrations apply manymano-db --local",
     "db:migrate:remote": "wrangler d1 migrations apply manymano-db --remote",
@@ -42,6 +44,7 @@
     "typescript": "^5.7.3",
     "vite": "^5.4.14",
     "vite-tsconfig-paths": "^5.1.4",
+    "vitest": "^3.2.7",
     "wrangler": "^3.111.0"
   }
 }
