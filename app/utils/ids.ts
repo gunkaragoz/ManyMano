@@ -12,13 +12,20 @@ const ALPHABET_SIZE = ALPHABET.length;
 
 export function generateShortId(size = 10): string {
   if (size <= 0) throw new Error("generateShortId: size must be > 0");
-  const random = crypto.getRandomValues(new Uint8Array(size));
+  // Rejection sampling: 62 * 4 = 248, so bytes 0-247 map uniformly via
+  // `% 62`. Bytes >= 248 are discarded to avoid modulo bias. This matters
+  // because the output includes secret admin/edit tokens.
+  const ACCEPT_EXCLUSIVE = 248;
   let id = "";
-  // Map each random byte to an alphabet char. Modulo bias is negligible
-  // for non-security-critical lengths here; secrets use 32 chars (~190 bits)
-  // which dwarfs the bias. Rejection sampling would waste entropy on edge.
-  for (let i = 0; i < size; i++) {
-    id += ALPHABET[random[i] % ALPHABET_SIZE];
+  while (id.length < size) {
+    // Over-sample to cover rejected bytes without extra crypto calls.
+    const needed = size - id.length;
+    const random = crypto.getRandomValues(new Uint8Array(needed * 2));
+    for (let i = 0; i < random.length && id.length < size; i++) {
+      const byte = random[i];
+      if (byte >= ACCEPT_EXCLUSIVE) continue;
+      id += ALPHABET[byte % ALPHABET_SIZE];
+    }
   }
   return id;
 }

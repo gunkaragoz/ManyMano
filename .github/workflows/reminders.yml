@@ -23,6 +23,9 @@
 
 name: Day-before reminders
 
+permissions:
+  contents: read
+
 on:
   schedule:
     # 06:00 UTC daily — organizers and participants get the reminder during
