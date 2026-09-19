@@ -3,6 +3,16 @@ allowBuilds:
   sharp: true
   workerd: true
 
+minimumReleaseAgeExclude:
+  - '@cloudflare/workerd-darwin-64@1.20260918.1'
+  - '@cloudflare/workerd-darwin-arm64@1.20260918.1'
+  - '@cloudflare/workerd-linux-64@1.20260918.1'
+  - '@cloudflare/workerd-linux-arm64@1.20260918.1'
+  - '@cloudflare/workerd-windows-64@1.20260918.1'
+  - miniflare@5.20260918.0-alpha
+  - workerd@1.20260918.1
+  - wrangler@4.135.0
+
 # Security overrides for Dependabot alerts (transitive deps).
 # - ws 8.18.0 -> 8.21.0 (memory-exhaustion DoS from tiny fragments).
 #   Scoped to v8 only so vite-node's ws@7 stays on 7.x.
