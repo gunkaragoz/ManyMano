@@ -16,8 +16,9 @@ minimumReleaseAgeExclude:
 # Security overrides for Dependabot alerts (transitive deps).
 # - ws 8.18.0 -> 8.21.0 (memory-exhaustion DoS from tiny fragments).
 #   Scoped to v8 only so vite-node's ws@7 stays on 7.x.
-# NOTE (RR7 migration): the react-router(-dom) 6.30.6 pins were removed —
-# the app itself is now on react-router 7. If a transitive dep still pulls
-# RR6, re-add a scoped override rather than a top-level pin.
+# - esbuild (dev-server CORS: any website could read dev-server responses).
+#   Transitive via drizzle-kit/vite; force the patched line. Dev-only
+#   exposure (`pnpm run dev`), but Dependabot stays red until pinned.
 overrides:
   ws@8: 8.21.0
+  esbuild: ^0.28.0
