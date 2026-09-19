@@ -19,7 +19,8 @@ function cutoffIso(now = new Date()): string {
 }
 
 /**
- * Opportunistic pruning for hosts without cron (Pages/Workers free tier).
+ * Opportunistic pruning on every event read (cheap, keeps even
+ * cron-less environments tidy; the hourly cron also covers it).
  * Called at the top of event loaders/actions and on creation.
  * Deletes children explicitly first for D1 FK safety, then parents.
  */

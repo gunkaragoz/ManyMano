@@ -36,9 +36,17 @@ ManyMano is architected to fit comfortably inside **Cloudflare's Free Tier**:
 - **Resend Transactional Email**: 3,000 free emails/month (default provider).
 - **SMTP / Amazon SES**: switch `EMAIL_PROVIDER` to `smtp` for higher volume via any SMTP server, including SES.
 
-### Step 1: Deploy with Git
-1. Click the **[Deploy to Cloudflare](https://deploy.workers.cloudflare.com/?url=https://github.com/gunkaragoz/ManyMano)** button above.
-2. Connect your GitHub account and fork the repository.
+### Step 1: Deploy the Worker
+```bash
+pnpm install
+pnpm run deploy   # typecheck + build + tests + wrangler deploy
+```
+This creates the `manymano` Worker (production). Point your domain at it
+via `[[env.production.routes]]` in `wrangler.toml`, or add a custom domain
+in the dashboard (Workers & Pages → manymano → Settings → Domains & Routes).
+
+Want a staging copy first? See `deploy:staging` (isolated worker + D1,
+no mail creds, no cron) and `tests/staging/`.
 
 ### Step 2: Create your free D1 Database
 In your Cloudflare dashboard (or via terminal with `npx wrangler`):

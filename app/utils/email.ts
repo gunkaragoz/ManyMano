@@ -247,8 +247,8 @@ async function sendViaSmtp({
     // Lazy import: `worker-mailer` needs the Workers TCP sockets API
     // (`cloudflare:sockets`), unavailable under plain `vite dev` (Node
     // runtime). The import itself succeeds there; connect() throws, which
-    // is caught below — SMTP sending requires `wrangler pages dev` or a
-    // deployed Pages build. Never throws to the caller.
+    // is caught below — SMTP sending requires the Workers runtime
+    // (`pnpm run dev` or deployed). Never throws to the caller.
     const { WorkerMailer } = await import("worker-mailer");
     await WorkerMailer.send(
       {

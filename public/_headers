@@ -1,4 +1,5 @@
-# Cloudflare Pages headers: HSTS + crawl safety + static caching.
+# Static-asset headers (Workers [assets] honors this file): HSTS + crawl safety + caching.
+# Document/security headers for app routes live in app/entry.server.tsx.
 /*
   Strict-Transport-Security: max-age=15552000; includeSubDomains
   X-Content-Type-Options: nosniff

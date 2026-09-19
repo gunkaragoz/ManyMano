@@ -74,7 +74,7 @@ export async function loader({ context }: LoaderFunctionArgs) {
         note: "Live usage lives in the Cloudflare dashboard; this app can't read it without an API token. Cloudflare emails the account owner automatically at ~90% of daily limits.",
         workersFree: { requestsPerDay: 100000, cpuMsPerRequest: 10 },
         d1Free: { rowsReadPerDay: 5000000, rowsWrittenPerDay: 100000, storageGb: 5 },
-        dashboard: "https://dash.cloudflare.com/ → Workers & Pages → Metrics; D1 → Overview",
+        dashboard: "https://dash.cloudflare.com/ → Workers & Pages → manymano → Metrics; Observability → Logs; D1 → manymano-db",
       },
       site: site.siteName,
     },
