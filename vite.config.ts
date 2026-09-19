@@ -74,6 +74,23 @@ export default defineConfig({
     // .dev.vars port is busy — drift is what desyncs canonical URLs.
     strictPort: true,
   },
+  // Pre-bundle all client deps upfront. Otherwise Vite discovers them lazily
+  // per page load (lucide-react, drizzle-orm, ...) and each discovery
+  // invalidates already-served `?v=` hashes mid-session — browsers then get
+  // 504 (Outdated Optimize Dep) and the app never hydrates (stuck on SSR
+  // defaults like UTC + dead controls). Seen in the wild Sep 2026.
+  optimizeDeps: {
+    include: [
+      "react",
+      "react-dom",
+      "react-router",
+      "react-router/dom",
+      "lucide-react",
+      "clsx",
+      "tailwind-merge",
+      "drizzle-orm",
+    ],
+  },
   plugins: [
     // Bind to React Router's ssr environment so workers/app.ts (the wrangler
     // entry, importing virtual:react-router/server-build) builds with the
