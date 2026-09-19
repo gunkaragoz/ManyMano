@@ -29,8 +29,8 @@ import {
 } from "lucide-react";
 import { getDb, events, eventSlots, signups, pollVotes, pollVoteEntries } from "~/db";
 import { generateInternalId, generateSecretToken } from "~/utils/ids";
-import { sendEmail, emailFooter, getEmailSenderConfig } from "~/utils/email";
-import { trackEmailUsage, getEmailLimits } from "~/utils/quota";
+import { sendEmail, emailFooter, getEmailSenderConfig, resolveEmailProvider } from "~/utils/email";
+import { trackEmailUsage, getEmailLimits, guestEmailAllowed } from "~/utils/quota";
 import { escapeHtml } from "~/utils/sanitize";
 import {
   buildAdminCookie,
@@ -241,7 +241,7 @@ export async function loader({ params, request, context, url }: LoaderFunctionAr
   // one-click confirm form. Actual deletion happens in the `cancel_by_token`
   // POST action below (CSRF-safe, no <img>/prefetch deletion).
   const cancelToken = url.searchParams.get("cancel_token");
-  let pendingCancel: { kind: "signup" | "vote"; name: string } | null = null;
+  let pendingCancel: { kind: "signup" | "vote"; name: string; voteId?: string } | null = null;
   if (cancelToken) {
     const candidates = await db.select().from(signups).where(eq(signups.eventId, eventId));
     let matchedSignup: typeof candidates[number] | null = null;
@@ -257,7 +257,8 @@ export async function loader({ params, request, context, url }: LoaderFunctionAr
       const voteCandidates = await db.select().from(pollVotes).where(eq(pollVotes.eventId, eventId));
       for (const v of voteCandidates) {
         if (await secretMatches(cancelToken, v.editToken)) {
-          pendingCancel = { kind: "vote", name: v.participantName };
+          // voteId lets the page load this vote into the editor.
+          pendingCancel = { kind: "vote", name: v.participantName, voteId: v.id };
           break;
         }
       }
@@ -506,6 +507,11 @@ export async function action({ request, params, context }: ActionFunctionArgs) {
   };
   const isPoll = event.type === "TIME_POLL";
   const isFinalized = event.status === "FINALIZED";
+  // Guest confirmation emails respect the daily email budget.
+  const canEmailGuest = () =>
+    guestEmailAllowed(env.DB, eventId, getEmailLimits(resolveEmailProvider(env), env));
+  const reclaimViaEmailMessage =
+    "That name already voted. If that's you, vote from your original browser or device, or open the link in your vote confirmation email. Otherwise pick a different name, e.g. \"John S.\"";
   const finalizedError = () =>
     data({ error: "This poll is finalized. Reopen it by deleting it or creating a new poll." }, { status: 409 });
 
@@ -533,6 +539,7 @@ export async function action({ request, params, context }: ActionFunctionArgs) {
     const guestCheck = assessGuestRequest(formData, {
       ip: request.headers.get("cf-connecting-ip") || "unknown",
       eventId,
+      sendsEmail: Boolean(participantEmail),
     });
     if (guestCheck.verdict === "bot") {
       // Silent fake-success: don't tip bots that the honeypot caught them.
@@ -629,7 +636,7 @@ export async function action({ request, params, context }: ActionFunctionArgs) {
     }
 
     // Send confirmation email to participant if email provided
-    if (participantEmail) {
+    if (participantEmail && (await canEmailGuest())) {
       const cancelUrl = `${url.origin}/events/${eventId}?cancel_token=${encodeURIComponent(editTokenPlain)}`;
       const eventUrl = `${url.origin}/events/${eventId}`;
       const shiftPrefix = ((targetSlot as { shiftName?: string | null }).shiftName || "").trim();
@@ -788,6 +795,7 @@ export async function action({ request, params, context }: ActionFunctionArgs) {
     const guestVoteCheck = assessGuestRequest(formData, {
       ip: request.headers.get("cf-connecting-ip") || "unknown",
       eventId,
+      sendsEmail: Boolean(participantEmail),
     });
     if (guestVoteCheck.verdict === "bot") {
       return data({ success: true, message: `Availability recorded for ${participantName}!` });
@@ -844,8 +852,7 @@ export async function action({ request, params, context }: ActionFunctionArgs) {
       }
     };
 
-    const takenMessage =
-      "That name already voted. If that's you, please vote from your original browser or device (or enter the same email address). Otherwise pick a different name, e.g. \"John S.\"";
+    const takenMessage = reclaimViaEmailMessage;
 
     if (clientVoteId && clientVoteToken) {
       const candidate = existingVotes.find((v) => v.id === clientVoteId);
@@ -882,6 +889,10 @@ export async function action({ request, params, context }: ActionFunctionArgs) {
       const reclaimable =
         normEmail !== "" &&
         (nameCollision.participantEmail || "").trim().toLowerCase() === normEmail;
+      // Voters edit from their original device or the emailed link.
+      if (reclaimable && !(await requireAdmin())) {
+        return data({ error: reclaimViaEmailMessage }, { status: 409 });
+      }
       if (reclaimable) {
         const reclaimToken = generateSecretToken();
         await db
@@ -904,6 +915,10 @@ export async function action({ request, params, context }: ActionFunctionArgs) {
         });
       }
       return data({ error: takenMessage }, { status: 409 });
+    }
+
+    if (existingVotes.length >= MAX_VOTES_PER_EVENT) {
+      return data({ error: "This poll has reached the maximum number of responses." }, { status: 400 });
     }
 
     const voteId = generateInternalId();
@@ -958,7 +973,7 @@ export async function action({ request, params, context }: ActionFunctionArgs) {
       }
     }
 
-    if (participantEmail) {
+    if (participantEmail && (await canEmailGuest())) {
       const manageUrl = `${url.origin}/events/${eventId}?cancel_token=${encodeURIComponent(editTokenPlain)}`;
       const eventUrl = `${url.origin}/events/${eventId}`;
       const voteEmailResult = await sendEmail({
@@ -973,7 +988,7 @@ export async function action({ request, params, context }: ActionFunctionArgs) {
             ${event.description ? `<p><strong>Description:</strong><br>${escapeHtml(event.description).replace(/\r?\n/g, "<br>")}</p>` : ""}
             ${consensusLine ? `<p><strong>Leading option so far:</strong> ${escapeHtml(consensusLine)}</p>` : ""}
             <p><strong>Event page:</strong> <a href="${escapeHtml(eventUrl)}" style="color: #2563eb;">${escapeHtml(eventUrl)}</a></p>
-            <p><a href="${escapeHtml(manageUrl)}" style="color: #dc2626;">Remove my vote</a></p>
+            <p><a href="${escapeHtml(manageUrl)}" style="color: #dc2626;">Edit or remove my vote</a></p>
             ${emailFooter(site)}
           </div>
         `,
@@ -1020,6 +1035,7 @@ export async function action({ request, params, context }: ActionFunctionArgs) {
     const guestProposeCheck = assessGuestRequest(formData, {
       ip: request.headers.get("cf-connecting-ip") || "unknown",
       eventId,
+      sendsEmail: Boolean(participantEmail),
     });
     if (guestProposeCheck.verdict === "bot") {
       return data({ success: true, message: `Thanks ${participantName}! Your proposed time was added.` });
@@ -1115,8 +1131,7 @@ export async function action({ request, params, context }: ActionFunctionArgs) {
     const existingVotes = await db.select().from(pollVotes).where(eq(pollVotes.eventId, eventId));
     const clientVoteId = cleanText(formData.get("clientVoteId"), 32) || null;
     const clientVoteToken = cleanText(formData.get("clientVoteToken"), 128) || null;
-    const takenMessage =
-      "That name already voted. If that's you, please vote from your original browser or device (or enter the same email address). Otherwise pick a different name, e.g. \"John S.\"";
+    const takenMessage = reclaimViaEmailMessage;
 
     // Submitted matrix values for pre-existing options (the propose form
     // mirrors the vote form's hidden slot_* inputs). Absent when the client
@@ -1163,7 +1178,7 @@ export async function action({ request, params, context }: ActionFunctionArgs) {
         .join(" · ") || title;
 
     const notifyProposer = async () => {
-      if (!participantEmail) return;
+      if (!participantEmail || !(await canEmailGuest())) return;
       const eventUrl = `${url.origin}/events/${eventId}`;
       const proposerEmailResult = await sendEmail({
         ...getEmailSenderConfig(env),
@@ -1225,6 +1240,10 @@ export async function action({ request, params, context }: ActionFunctionArgs) {
       const reclaimable =
         normEmail !== "" &&
         (nameCollision.participantEmail || "").trim().toLowerCase() === normEmail;
+      // Voters edit from their original device or the emailed link.
+      if (reclaimable && !(await requireAdmin())) {
+        return data({ error: reclaimViaEmailMessage }, { status: 409 });
+      }
       if (reclaimable) {
         const reclaimToken = generateSecretToken();
         await db
@@ -2350,6 +2369,31 @@ export default function EventView() {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // Opening the emailed vote link loads that vote into the editor.
+  useEffect(() => {
+    if (pendingCancel?.kind !== "vote" || !pendingCancel.voteId || !cancelTokenParam) return;
+    try {
+      window.localStorage.setItem(
+        voteStorageKey,
+        JSON.stringify({ id: pendingCancel.voteId, token: cancelTokenParam })
+      );
+    } catch {
+      // storage blocked: the token still works for the cancel form below
+    }
+    setClientVoteId(pendingCancel.voteId);
+    setClientVoteToken(cancelTokenParam);
+    const own = pollData?.votes.find((v) => v.id === pendingCancel.voteId);
+    if (own) {
+      setVoterName((prev) => prev || own.participantName);
+      const next: Record<string, "NO" | "YES" | "MAYBE"> = {};
+      Object.entries(own.responses).forEach(([slotId, resp]) => {
+        if (resp === "YES" || resp === "MAYBE") next[slotId] = resp;
+      });
+      setUserVotes((prev) => (Object.keys(prev).length === 0 ? next : prev));
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pendingCancel?.voteId, cancelTokenParam]);
 
   // Organizer shortcut: after creating the poll the organizer already typed
   // their name/email on the create form. Prefill the vote form for admins so

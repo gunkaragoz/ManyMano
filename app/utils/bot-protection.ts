@@ -50,7 +50,7 @@ function guestRateLimitOk(key: string): boolean {
 export type GuestAssessment =
   | { verdict: "allow" }
   | { verdict: "bot" }
-  | { verdict: "challenge"; reason: "too-fast" | "rate-limited" };
+  | { verdict: "challenge"; reason: "too-fast" | "rate-limited" | "email" };
 
 /**
  * Assess a guest write without any Turnstile token. Purely server-side
@@ -58,7 +58,7 @@ export type GuestAssessment =
  */
 export function assessGuestRequest(
   formData: FormData,
-  opts: { ip: string; eventId: string }
+  opts: { ip: string; eventId: string; sendsEmail?: boolean }
 ): GuestAssessment {
   // 1. Honeypot: real humans never see this field (offscreen + aria-hidden).
   // Bots that autofill every text input self-identify here.
@@ -85,6 +85,11 @@ export function assessGuestRequest(
     }
   }
 
+  // 4. Writes that send a confirmation email get a quick human check.
+  if (opts.sendsEmail) {
+    return { verdict: "challenge", reason: "email" };
+  }
+
   return { verdict: "allow" };
 }
 
@@ -95,7 +100,9 @@ export function needsVerification(reason: GuestAssessment & { verdict: "challeng
       error:
         reason.reason === "rate-limited"
           ? "Lots of activity from your network — one quick human check, then you're through."
-          : "That was fast — one quick human check, then you're through.",
+          : reason.reason === "email"
+            ? "One quick human check before we email you, then you're through."
+            : "That was fast — one quick human check, then you're through.",
       needsVerification: true as const,
     },
     status: 403 as const,

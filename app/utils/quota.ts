@@ -354,3 +354,42 @@ export async function trackEmailUsage(
     return null;
   }
 }
+
+// ---------------------------------------------------------------------------
+// Guest-triggered email budget
+// ---------------------------------------------------------------------------
+// Keeps guest confirmation emails within a per-event daily budget and leaves
+// headroom for organizer links, finalize notices and reminders.
+
+/** Max guest confirmation emails per event per rolling 24h. */
+export const GUEST_EMAILS_PER_EVENT_PER_DAY = 50;
+/** Guest emails stop once daily usage reaches this share of the limit. */
+export const GUEST_EMAIL_DAILY_HEADROOM_PCT = 80;
+
+export async function guestEmailAllowed(
+  d1: D1Database,
+  eventId: string,
+  limits: EmailLimits,
+  now = new Date()
+): Promise<boolean> {
+  try {
+    const since = new Date(now.getTime() - 24 * 60 * 60 * 1000).toISOString();
+    const row = await d1
+      .prepare(
+        `SELECT
+           (SELECT COUNT(*) FROM signups
+              WHERE event_id = ?1 AND participant_email IS NOT NULL AND participant_email != '' AND created_at >= ?2)
+         + (SELECT COUNT(*) FROM poll_votes
+              WHERE event_id = ?1 AND participant_email IS NOT NULL AND participant_email != '' AND updated_at >= ?2)
+           AS n`
+      )
+      .bind(eventId, since)
+      .first<{ n: number }>();
+    if ((row?.n ?? 0) > GUEST_EMAILS_PER_EVENT_PER_DAY) return false;
+    const usage = await getEmailUsage(d1, now, limits);
+    return usage.dailyPct < GUEST_EMAIL_DAILY_HEADROOM_PCT;
+  } catch {
+    // Confirmation emails are optional; the write itself already succeeded.
+    return false;
+  }
+}
