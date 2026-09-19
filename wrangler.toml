@@ -62,11 +62,12 @@ database_name = "manymano-db"
 database_id = "ab5abbfd-0d23-43ec-856a-e4fd4707e0e2"
 migrations_dir = "./drizzle/migrations"
 
-# Day-before reminder emails, daily 06:00 UTC (replaces the old GitHub
-# Actions curl — see workers/app.ts `scheduled`). Production only:
-# staging deliberately has no triggers (it also has no mail creds).
+# Reminder scan, hourly on the hour (production only — staging has no
+# triggers). Each run sends only what's due: 9:00 AM event-local, 24h ahead
+# (organizers + participants) plus a 48h understaffed alert (organizers of
+# signup sheets with open spots). Dedupe makes re-runs safe.
 [env.production.triggers]
-crons = ["0 6 * * *"]
+crons = ["0 * * * *"]
 
 # Staging (prod copy): isolated worker + D1, staging-only secrets.
 # IMPORTANT: the Cloudflare Vite plugin resolves the deploy config at

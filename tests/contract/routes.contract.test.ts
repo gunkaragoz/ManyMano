@@ -105,5 +105,10 @@ describe("deploy entry", () => {
     const wrangler = readFileSync(resolve(ROOT, "wrangler.toml"), "utf8");
     expect(wrangler).toMatch(/workers\/app\.ts/);
     expect(wrangler).not.toMatch(/pages_build_output_dir/);
+    // Hourly reminder scan in production only — staging must stay cron-free
+    // (it has no mail creds and must never send).
+    expect(wrangler).toMatch(/\[env\.production\.triggers\]/);
+    expect(wrangler).toMatch(/crons = \["0 \* \* \* \*"\]/);
+    expect(wrangler).not.toMatch(/\[env\.staging\.triggers\]/);
   });
 });

@@ -76,7 +76,7 @@ Optional branding (leave empty/unset to hide — no throw):
 - `EMAIL_DAILY_LIMIT` / `EMAIL_MONTHLY_LIMIT`: override the quota-alert baselines for your SMTP/SES limits (defaults: Resend 100/day + 3,000/month; SMTP 50,000/day + 1,500,000/month).
 - `TURNSTILE_SITE_KEY` / `TURNSTILE_SECRET_KEY` / `TURNSTILE_HOSTNAMES`: Cloudflare Turnstile bot protection. If the secret is omitted, verification is skipped (handy for local dev).
 - `ALERT_WEBHOOK_URL`: Discord or Slack incoming webhook for quota alerts. Every sent email is counted in D1 (UTC day/month); one webhook fires at 80/90/100% of the active provider quota (see above) and on Resend 429 exhaustion. `GET /api/usage` always shows the live counters. Cloudflare itself emails the account owner at ~90% of Workers/D1 daily limits — no setup needed.
-- Day-before reminder emails run on the Worker's Cron Trigger (daily 06:00 UTC, `[triggers]` in `wrangler.toml` — production only). `GET /api/reminders` remains for manual dry-runs/backfills (`?dry-run=1`, `?date=YYYY-MM-DD`) authenticated by `REMINDER_SECRET`; re-runs are deduped per event+date so retries never double-email.
+- Day-before reminder emails run on the Worker's Cron Trigger (hourly scan, `[triggers]` in `wrangler.toml` — production only). Sends fire at 9:00 AM in the event's timezone: organizers + participants 24h ahead, plus a 48h understaffed alert for organizers of sheets with open spots. `GET /api/reminders` remains for manual dry-runs/backfills (`?dry-run=1`, `?date=YYYY-MM-DD`) authenticated by `REMINDER_SECRET`; re-runs are deduped per event+date so retries never double-email.
 
 ### Step 6: Apply migrations after pulling
 ```bash
