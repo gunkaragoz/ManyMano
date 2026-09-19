@@ -28,9 +28,11 @@ ICS_PRODID = "PRODID:-//ManyMano//Open Source Scheduling//EN"
 GITHUB_REPO_URL = "https://github.com/gunkaragoz/ManyMano"
 FOOTER_CREDIT_URL = "https://gnkz.net"
 FOOTER_CREDIT_LABEL = "gnkz.net"
-EMAIL_PROVIDER = "smtp"
+EMAIL_PROVIDER = "resend"
 SMTP_HOST = "email-smtp.us-east-1.amazonaws.com"
 SMTP_PORT = "587"
+TURNSTILE_SITE_KEY = "0x4AAAAAAEw2VkyFUNDzibNI"
+TURNSTILE_HOSTNAMES = "manymano.com,www.manymano.com"
 
 # Production: inherits top-level [vars]. Requires CLOUDFLARE_ENV=production
 # at build time (see package.json deploy script) — without it the plugin
@@ -52,9 +54,11 @@ ICS_PRODID = "PRODID:-//ManyMano//Open Source Scheduling//EN"
 GITHUB_REPO_URL = "https://github.com/gunkaragoz/ManyMano"
 FOOTER_CREDIT_URL = "https://gnkz.net"
 FOOTER_CREDIT_LABEL = "gnkz.net"
-EMAIL_PROVIDER = "smtp"
+EMAIL_PROVIDER = "resend"
 SMTP_HOST = "email-smtp.us-east-1.amazonaws.com"
 SMTP_PORT = "587"
+TURNSTILE_SITE_KEY = "0x4AAAAAAEw2VkyFUNDzibNI"
+TURNSTILE_HOSTNAMES = "manymano.com,www.manymano.com"
 
 [[env.production.d1_databases]]
 binding = "DB"
