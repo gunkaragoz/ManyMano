@@ -6,34 +6,19 @@ import type {
 } from "react-router";
 import { data } from "react-router";
 import { getDb } from "~/db";
-import { getEmailSenderConfig, sendEmail } from "~/utils/email";
-import { getEmailLimits, trackEmailUsage } from "~/utils/quota";
 import { safeEqual } from "~/utils/auth";
-import { isValidEmail, isValidIsoDate } from "~/utils/validation";
+import { isValidIsoDate } from "~/utils/validation";
 import { getSiteConfig } from "~/utils/site";
-import {
-  buildMeetingOrganizerEmail,
-  buildMeetingParticipantEmail,
-  buildSignupOrganizerEmail,
-  buildSignupParticipantEmail,
-  collectReminderTargets,
-  groupMeetingRecipients,
-  groupSignupRecipients,
-  isReminderSent,
-  markReminderSent,
-  participantTasksForSignup,
-  reminderDateString,
-  type FinalizedMeetingTarget,
-  type ReminderTarget,
-  type SignupSheetTarget,
-} from "~/utils/reminders";
+import { reminderDateString } from "~/utils/reminders";
+import { runReminderFanout } from "~/utils/reminders-run";
 
-// GET /api/reminders — day-before reminder fan-out (cron entry point).
+// GET /api/reminders — day-before reminder fan-out (manual entry point).
 //
-// Cloudflare Pages Functions have no native cron trigger, so an external
-// scheduler calls this endpoint once a day (see REMINDER_SECRET in
-// .env.sample + .github/workflows/reminders.yml):
-//   GET /api/reminders  (Authorization: Bearer <REMINDER_SECRET>)
+// Production sends run on the Workers Cron Trigger (see workers/app.ts
+// `scheduled` + [triggers] in wrangler.toml) — no HTTP, no secret needed.
+// This endpoint remains for manual runs, backfills (?date=) and dry-runs:
+//
+//   GET /api/reminders?dry-run=1  (Authorization: Bearer <REMINDER_SECRET>)
 //
 // Query params:
 //   ?secret=...   alternative to the Authorization header (for cron
@@ -55,16 +40,6 @@ export const headers: HeadersFunction = ({ loaderHeaders }) => {
   if (cacheControl) headers.set("Cache-Control", cacheControl);
   return headers;
 };
-
-type ReminderStatus = "sent" | "already-sent" | "skipped" | "failed" | "dry-run" | "no-recipients";
-
-interface EventReport {
-  id: string;
-  title: string;
-  kind: "signup_sheet" | "finalized_meeting";
-  organizer: ReminderStatus;
-  participants: { status: ReminderStatus; sent: number; failed: number };
-}
 
 function isAuthorized(request: Request, secret: string): boolean {
   const url = new URL(request.url);
@@ -106,10 +81,6 @@ interface ReminderEnv {
 async function handleReminders(request: Request, env: ReminderEnv) {
   const site = getSiteConfig(env);
   const db = getDb(env.DB);
-  const nowIso = new Date().toISOString();
-  // Canonical links: the cron caller host is meaningless, so reminders
-  // always point at SITE_URL (same origin participants signed up from).
-  const origin = site.siteUrl;
 
   const secret = (env.REMINDER_SECRET ?? "").trim();
   if (!secret) {
@@ -136,124 +107,17 @@ async function handleReminders(request: Request, env: ReminderEnv) {
     date = dateRaw;
   }
 
-  let targets: ReminderTarget[];
+  let result;
   try {
-    targets = await collectReminderTargets(db, date);
+    result = await runReminderFanout(db, env.DB, site, env, { date, dryRun });
   } catch {
     return data(
       { error: "Could not load reminder targets." },
       { status: 500, headers: { "Cache-Control": "private, no-store" } }
     );
   }
-
-  const emailBase = { ...getEmailSenderConfig(env), from: site.fromEmail };
-  const limits = (provider: "resend" | "smtp") => getEmailLimits(provider, env);
-  const track = (result: Parameters<typeof trackEmailUsage>[1]["result"]) =>
-    trackEmailUsage(env.DB, {
-      webhookUrl: env.ALERT_WEBHOOK_URL,
-      appName: site.siteName,
-      result,
-      limits: limits(result.provider),
-    });
-
-  const reports: EventReport[] = [];
-  let organizerSent = 0;
-  let participantSent = 0;
-  let participantFailed = 0;
-
-  const sendOrganizer = async (
-    target: SignupSheetTarget | FinalizedMeetingTarget,
-    built: { subject: string; html: string }
-  ): Promise<ReminderStatus> => {
-    if (dryRun) return "dry-run";
-    if (await isReminderSent(db, target.event.id, date, "organizer")) return "already-sent";
-    const to = (target.event.organizerEmail || "").trim();
-    if (!to || !isValidEmail(to)) return "skipped";
-    const result = await sendEmail({ ...emailBase, to, subject: built.subject, html: built.html });
-    await track(result);
-    if (!result.success) return "failed";
-    await markReminderSent(db, target.event.id, date, "organizer", nowIso);
-    organizerSent += 1;
-    return "sent";
-  };
-
-  const sendParticipants = async (
-    target: SignupSheetTarget | FinalizedMeetingTarget,
-    recipients: Array<{ email: string; name: string; slotIds?: string[] }>
-  ): Promise<{ status: ReminderStatus; sent: number; failed: number }> => {
-    if (dryRun) return { status: "dry-run", sent: 0, failed: 0 };
-    if (await isReminderSent(db, target.event.id, date, "participants")) {
-      return { status: "already-sent", sent: 0, failed: 0 };
-    }
-    if (recipients.length === 0) return { status: "no-recipients", sent: 0, failed: 0 };
-    let sent = 0;
-    let failed = 0;
-    for (const r of recipients) {
-      const built =
-        target.kind === "signup_sheet"
-          ? buildSignupParticipantEmail(
-              site,
-              origin,
-              target,
-              r.name,
-              participantTasksForSignup(site, origin, target, r.slotIds ?? [])
-            )
-          : buildMeetingParticipantEmail(site, origin, target, r.name);
-      const result = await sendEmail({ ...emailBase, to: r.email, subject: built.subject, html: built.html });
-      await track(result);
-      if (result.success) {
-        sent += 1;
-        participantSent += 1;
-      } else {
-        failed += 1;
-        participantFailed += 1;
-      }
-    }
-    // Mark only on full success so a partial failure retries the remainder
-    // on the next run (at the cost of possible duplicates to the rest).
-    if (failed === 0) {
-      await markReminderSent(db, target.event.id, date, "participants", nowIso);
-      return { status: "sent", sent, failed };
-    }
-    return { status: "failed", sent, failed };
-  };
-
-  for (const target of targets) {
-    try {
-      if (target.kind === "signup_sheet") {
-        const organizer = await sendOrganizer(target, buildSignupOrganizerEmail(site, origin, target));
-        const participants = await sendParticipants(target, groupSignupRecipients(target));
-        reports.push({ id: target.event.id, title: target.event.title, kind: target.kind, organizer, participants });
-      } else {
-        const organizer = await sendOrganizer(target, buildMeetingOrganizerEmail(site, origin, target));
-        const participants = await sendParticipants(target, groupMeetingRecipients(target));
-        reports.push({ id: target.event.id, title: target.event.title, kind: target.kind, organizer, participants });
-      }
-    } catch {
-      // One bad event (e.g. a failing D1 write) must not abort the run.
-      reports.push({
-        id: target.event.id,
-        title: target.event.title,
-        kind: target.kind,
-        organizer: "failed",
-        participants: { status: "failed", sent: 0, failed: 0 },
-      });
-    }
-  }
-
   return data(
-    {
-      ok: true,
-      date,
-      dryRun,
-      totals: {
-        events: reports.length,
-        organizerSent,
-        participantSent,
-        participantFailed,
-      },
-      events: reports,
-    },
+    { ok: true, ...result },
     { headers: { "Cache-Control": "private, no-store" } }
   );
 }

@@ -85,19 +85,23 @@ describe.skipIf(!LIVE)("staging mail suppression (live)", () => {
     expect(body.email?.monthly ?? 0).toBe(0);
   });
 
-  it("/api/reminders dry-run sends nothing", async () => {
+  // Manual endpoint use needs a secret; production sends run on the Cron
+  // Trigger instead (no HTTP, no secret). When no secret is configured
+  // (the default — staging has none), the endpoint fail-closes with 503.
+  it("/api/reminders without secret sends nothing (503 fail-closed, or dry-run with secret)", async () => {
     assertIsStagingHost(STAGING_URL);
     const secret = process.env.REMINDER_SECRET ?? "";
-    expect(secret, "REMINDER_SECRET must be set for the staging dry-run check").not.toBe("");
     const res = await fetch(
       `${STAGING_URL}/api/reminders?dry-run=1&date=${tomorrowIso()}`,
-      { headers: { Authorization: `Bearer ${secret}` } }
+      secret ? { headers: { Authorization: `Bearer ${secret}` } } : {}
     );
-    expect([200, 503]).toContain(res.status);
-    if (res.status === 200) {
-      const body = (await res.json()) as { sent?: number; events?: unknown[] };
-      expect(body.sent ?? 0).toBe(0);
+    if (!secret) {
+      expect(res.status).toBe(503);
+      return;
     }
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { sent?: number; events?: unknown[] };
+    expect(body.sent ?? 0).toBe(0);
   });
 });
 
