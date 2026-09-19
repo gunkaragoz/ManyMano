@@ -32,6 +32,36 @@ EMAIL_PROVIDER = "smtp"
 SMTP_HOST = "email-smtp.us-east-1.amazonaws.com"
 SMTP_PORT = "587"
 
+# Production: inherits top-level [vars]. Requires CLOUDFLARE_ENV=production
+# at build time (see package.json deploy script) — without it the plugin
+# errors (there is no implicit top-level env selection).
+[env.production]
+name = "manymano"
+
+# NOTE: env sections do NOT inherit top-level [vars] in the generated deploy
+# config — vars are repeated here explicitly (kept in sync with [vars] above).
+[env.production.vars]
+SITE_URL = "https://manymano.com"
+SITE_NAME = "ManyMano"
+SITE_TAGLINE = "Free sign-up sheets and meeting polls. No accounts, no ads — create and share in seconds."
+SITE_DESCRIPTION = "Free sign-up sheets and meeting polls. No accounts, no ads — create and share in seconds. A free Doodle and SignUpGenius alternative."
+FROM_EMAIL = "ManyMano <no-reply@mail.manymano.com>"
+SECURITY_CONTACT = "https://github.com/gunkaragoz/ManyMano/issues"
+ICS_UID_DOMAIN = "manymano.com"
+ICS_PRODID = "PRODID:-//ManyMano//Open Source Scheduling//EN"
+GITHUB_REPO_URL = "https://github.com/gunkaragoz/ManyMano"
+FOOTER_CREDIT_URL = "https://gnkz.net"
+FOOTER_CREDIT_LABEL = "gnkz.net"
+EMAIL_PROVIDER = "smtp"
+SMTP_HOST = "email-smtp.us-east-1.amazonaws.com"
+SMTP_PORT = "587"
+
+[[env.production.d1_databases]]
+binding = "DB"
+database_name = "manymano-db"
+database_id = "ab5abbfd-0d23-43ec-856a-e4fd4707e0e2"
+migrations_dir = "./drizzle/migrations"
+
 # Staging (prod copy): isolated worker + D1, staging-only secrets.
 # IMPORTANT: the Cloudflare Vite plugin resolves the deploy config at
 # BUILD time — always build staging with CLOUDFLARE_ENV=staging
