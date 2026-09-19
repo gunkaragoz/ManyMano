@@ -28,7 +28,9 @@ ICS_PRODID = "PRODID:-//ManyMano//Open Source Scheduling//EN"
 GITHUB_REPO_URL = "https://github.com/gunkaragoz/ManyMano"
 FOOTER_CREDIT_URL = "https://gnkz.net"
 FOOTER_CREDIT_LABEL = "gnkz.net"
-EMAIL_PROVIDER = "resend"
+EMAIL_PROVIDER = "smtp"
+SMTP_HOST = "email-smtp.us-east-1.amazonaws.com"
+SMTP_PORT = "587"
 
 # Staging (prod copy): isolated worker + D1, staging-only secrets.
 # IMPORTANT: the Cloudflare Vite plugin resolves the deploy config at
