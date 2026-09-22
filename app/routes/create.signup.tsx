@@ -49,7 +49,12 @@ import {
   parseDayFilter,
   writeDateSpec,
 } from "~/utils/recurrence";
-import RepeatPicker, {
+import {
+  DateEndField,
+  DateModeTabs,
+  DateSummary,
+  RepeatRuleField,
+  dateFieldLabel,
   dayChoicesFor,
   defaultSelection,
   selectionToSpec,
@@ -700,14 +705,27 @@ export default function CreateSignupSheet() {
               />
             </div>
 
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            {multiDateEnabled && (
               <div>
                 <label className="block text-xs font-semibold text-slate-700 mb-1.5">
-                  {multiDateEnabled && dateSel.mode === "range"
-                    ? "First Day *"
-                    : multiDateEnabled && dateSel.mode === "repeat"
-                      ? "First Date *"
-                      : "Event Date *"}
+                  Event Type
+                </label>
+                <DateModeTabs start={startDate} value={dateSel} onChange={setDateSel} />
+              </div>
+            )}
+
+            {/* When: first date, the end of the series, and the zone they are
+                read in — one row, because they answer one question. */}
+            <div
+              className={`grid grid-cols-1 gap-4 ${
+                multiDateEnabled && dateSel.mode !== "single"
+                  ? "sm:grid-cols-2 lg:grid-cols-3"
+                  : "sm:grid-cols-2"
+              }`}
+            >
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 mb-1.5">
+                  {multiDateEnabled ? dateFieldLabel(dateSel.mode) : "Event Date *"}
                 </label>
                 <DatePicker
                   name="eventDate"
@@ -716,45 +734,40 @@ export default function CreateSignupSheet() {
                 />
               </div>
 
+              {multiDateEnabled && <DateEndField value={dateSel} onChange={setDateSel} />}
+
               <div>
-                <label className="block text-xs font-semibold text-slate-700 mb-1.5">
-                  Location (Optional)
+                <label htmlFor="signup-timezone" className="block text-xs font-semibold text-slate-700 mb-1.5">
+                  Timezone
                 </label>
-                <input
-                  type="text"
-                  name="location"
-                  value={details.location}
-                  onChange={(e) => updateDetails({ location: e.target.value })}
-                  placeholder="e.g., Meadow Creek Park (North Gate)"
-                  className="w-full px-4 py-3 rounded-xl border border-slate-200/90 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all placeholder:text-slate-400"
+                <TimezoneSelect
+                  id="signup-timezone"
+                  name="timezone"
+                  value={details.timezone || "UTC"}
+                  onChange={(timezone) => updateDetails({ timezone })}
+                  accent="blue"
                 />
               </div>
             </div>
 
             {multiDateEnabled && (
-              <div>
-                <label className="block text-xs font-semibold text-slate-700 mb-1.5">
-                  Dates
-                </label>
-                <RepeatPicker
-                  start={startDate}
-                  value={dateSel}
-                  onChange={setDateSel}
-                  dates={sheetDates}
-                />
-              </div>
+              <>
+                <RepeatRuleField start={startDate} value={dateSel} onChange={setDateSel} />
+                <DateSummary value={dateSel} dates={sheetDates} />
+              </>
             )}
 
             <div>
-              <label htmlFor="signup-timezone" className="block text-xs font-semibold text-slate-700 mb-1.5">
-                Timezone
+              <label className="block text-xs font-semibold text-slate-700 mb-1.5">
+                Location (Optional)
               </label>
-              <TimezoneSelect
-                id="signup-timezone"
-                name="timezone"
-                value={details.timezone || "UTC"}
-                onChange={(timezone) => updateDetails({ timezone })}
-                accent="blue"
+              <input
+                type="text"
+                name="location"
+                value={details.location}
+                onChange={(e) => updateDetails({ location: e.target.value })}
+                placeholder="e.g., Meadow Creek Park (North Gate)"
+                className="w-full px-4 py-3 rounded-xl border border-slate-200/90 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all placeholder:text-slate-400"
               />
             </div>
 
