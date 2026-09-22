@@ -3,7 +3,7 @@ import type { ActionFunctionArgs, LoaderFunctionArgs, MetaFunction } from "react
 import { data, redirect } from "react-router";
 import { Form, useActionData, useLoaderData, useNavigation, Link } from "react-router";
 import { useEffect, useRef, useState } from "react";
-import { ArrowLeft, ArrowRight, CalendarDays, TriangleAlert, X } from "lucide-react";
+import { ArrowLeft, ArrowRight, CalendarDays, Info, TriangleAlert, X } from "lucide-react";
 import { usePersistentState } from "~/utils/usePersistentState";
 import DatePicker from "~/components/DatePicker";
 import TimePicker from "~/components/TimePicker";
@@ -727,8 +727,18 @@ export default function CreateMeetingPoll() {
                         : "border-slate-200/90 focus:ring-green-500/20 focus:border-green-500"
                     }`}
                   />
-                  <span className="text-[11px] text-slate-500 mt-1 block">
-                    No account needed. Your email receives your private organizer link (never shown publicly or shared). Lose it and you can get a new one from the event page — the old link will stop working.
+                  <span className="text-[11px] text-slate-500 mt-1 flex items-center gap-1">
+                    No account needed. We&apos;ll email you a private organizer link.
+                    <span className="relative inline-flex group/info">
+                      <Info
+                        className="w-3.5 h-3.5 text-slate-400 hover:text-slate-600 cursor-help"
+                        tabIndex={0}
+                        aria-label="More info about organizer link"
+                      />
+                      <span className="invisible opacity-0 group-hover/info:visible group-hover/info:opacity-100 group-focus-within/info:visible group-focus-within/info:opacity-100 transition-all absolute left-1/2 -translate-x-1/2 bottom-full mb-2 w-56 p-2 rounded-lg bg-slate-900 text-white text-[11px] leading-snug shadow-lg z-10 font-normal normal-case">
+                        Never shown publicly or shared. Lose it and you can get a new one from the event page — the old link will stop working.
+                      </span>
+                    </span>
                   </span>
                 </div>
               </div>
