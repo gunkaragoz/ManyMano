@@ -90,7 +90,9 @@ export function dayChoicesFor(
 
 /** "Event Date" only stays true for a one-day sheet. */
 export function dateFieldLabel(mode: DateSelection["mode"]): string {
-  return mode === "single" ? "Event Date *" : "First Date *";
+  if (mode === "single") return "Event Date *";
+  // A run of days is first/last day; a series is first/until date.
+  return mode === "range" ? "First Day *" : "First Date *";
 }
 
 const WEEKDAY_SHORT = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
@@ -112,7 +114,7 @@ const MODES: {
   Icon: typeof CalendarDays;
 }[] = [
   { key: "single", label: "One day", short: "One day", Icon: CalendarDays },
-  { key: "range", label: "Date range", short: "Range", Icon: CalendarRange },
+  { key: "range", label: "Multiple days", short: "Multiple", Icon: CalendarRange },
   { key: "repeat", label: "Repeats", short: "Repeats", Icon: Repeat },
 ];
 
