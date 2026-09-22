@@ -19,7 +19,7 @@ migrations_dir = "./drizzle/migrations"
 [vars]
 SITE_URL = "https://manymano.com"
 SITE_NAME = "ManyMano"
-SITE_TAGLINE = "Free sign-up sheets and meeting polls. No accounts, no ads — create and share in seconds."
+SITE_TAGLINE = "Free sign-up sheets and meeting polls."
 SITE_DESCRIPTION = "Free sign-up sheets and meeting polls. No accounts, no ads — create and share in seconds. A free Doodle and SignUpGenius alternative."
 FROM_EMAIL = "ManyMano <no-reply@mail.manymano.com>"
 SECURITY_CONTACT = "https://github.com/gunkaragoz/ManyMano/issues"
