@@ -15,6 +15,12 @@ export const SHIFT_NAME_MAX = 120;
 
 /** Max options per event (poll days / signup tasks). Client also caps at 31. */
 export const MAX_SLOTS_PER_EVENT = 31;
+/** Max tasks a multi-date sign-up sheet may define per date (same cap, per day). */
+export const MAX_TASKS_PER_DATE = 31;
+/** Max dates one sheet may span (date range or repeat series). */
+export const MAX_DATES_PER_EVENT = 60;
+/** Hard cap on generated slot rows (dates x tasks) for one sheet. */
+export const MAX_SLOT_ROWS_PER_EVENT = 300;
 /** Max votes/signups listed per event write path (abuse cap). */
 export const MAX_VOTES_PER_EVENT = 1000;
 

@@ -1,7 +1,7 @@
 import type { LoaderFunctionArgs } from "@remix-run/cloudflare";
 import { eq } from "drizzle-orm";
 import { getDb, events } from "~/db";
-import { isExpired, pruneExpiredEvents } from "~/utils/retention";
+import { isExpired, latestSlotDate, pruneExpiredEvents } from "~/utils/retention";
 import { getSiteConfig } from "~/utils/site";
 import { escapeHtml } from "~/utils/sanitize";
 import { eventQrValue, qrPngBytes, qrSvgString } from "~/utils/qr";
@@ -33,7 +33,7 @@ export async function loader({ params, request, context }: LoaderFunctionArgs) {
   if (!event) {
     throw new Response("Event not found", { status: 404 });
   }
-  if (isExpired(event.createdAt)) {
+  if (isExpired(event.createdAt) && isExpired(event.createdAt, new Date(), await latestSlotDate(db, eventId))) {
     throw new Response("This event expired and was auto-deleted.", { status: 410 });
   }
 

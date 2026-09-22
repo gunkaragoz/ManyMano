@@ -23,7 +23,7 @@
 // - Dedupe lives in the reminder_sends table (one row per event + date +
 //   kind). A retried cron run never double-emails.
 
-import { and, eq } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 import {
   events,
   eventSlots,
@@ -33,7 +33,7 @@ import {
   type AppDb,
 } from "~/db";
 import { buildGoogleCalendarUrl, effectiveDateForSlot, formatLongDateLabel } from "./calendar";
-import { isExpired } from "./retention";
+import { isExpired, latestSlotDate } from "./retention";
 import { isValidEmail } from "./validation";
 import { escapeHtml } from "./sanitize";
 import { emailFooter } from "./email";
@@ -50,6 +50,8 @@ export interface ReminderSlotInfo {
   id: string;
   title: string;
   shiftName: string | null;
+  /** Per-date slot (multi-day sheets). Null on single-day sheets. */
+  slotDate: string | null;
   startTime: string | null;
   endTime: string | null;
   capacity: number;
@@ -70,6 +72,8 @@ export interface ReminderEventInfo {
 export interface SignupSheetTarget {
   kind: "signup_sheet";
   event: ReminderEventInfo;
+  /** The day being reminded about — the sheet's date, or one date of a series. */
+  reminderDate: string | null;
   slots: ReminderSlotInfo[];
 }
 
@@ -109,18 +113,40 @@ function toEventInfo(e: typeof events.$inferSelect): ReminderEventInfo {
 export async function collectReminderTargets(db: AppDb, date: string): Promise<ReminderTarget[]> {
   const targets: ReminderTarget[] = [];
 
-  // 1. Sign-up sheets dated `date` (dateless sheets can't have a day-before).
+  // 1. Sign-up sheets that have something on `date`: either the sheet's own
+  // event_date (every sheet created before multi-day existed) or a slot dated
+  // that day (multi-day / repeating sheets). Dateless sheets can't have a
+  // day-before reminder.
   const sheets = await db
     .select()
     .from(events)
     .where(and(eq(events.type, "SIGNUP_SHEET"), eq(events.eventDate, date)));
+  const datedSlotRows = await db
+    .select({ eventId: eventSlots.eventId })
+    .from(eventSlots)
+    .where(eq(eventSlots.slotDate, date))
+    .limit(500);
+  const extraIds = [...new Set(datedSlotRows.map((r) => r.eventId))].filter(
+    (id) => !sheets.some((e) => e.id === id)
+  );
+  if (extraIds.length > 0) {
+    const extras = await db
+      .select()
+      .from(events)
+      .where(and(eq(events.type, "SIGNUP_SHEET"), inArray(events.id, extraIds)));
+    sheets.push(...extras);
+  }
   for (const e of sheets) {
-    if (isExpired(e.createdAt)) continue;
-    const slots = await db
+    if (isExpired(e.createdAt) && isExpired(e.createdAt, new Date(), await latestSlotDate(db, e.id))) continue;
+    const allSlots = await db
       .select()
       .from(eventSlots)
       .where(eq(eventSlots.eventId, e.id))
       .orderBy(eventSlots.displayOrder);
+    // Only the slots that actually happen on `date`. On a single-day sheet
+    // every slot resolves to the event date, so this keeps all of them.
+    const slots = allSlots.filter((s) => effectiveDateForSlot(s, e.eventDate) === date);
+    if (slots.length === 0) continue;
     const eventSignups = await db
       .select()
       .from(signups)
@@ -134,10 +160,12 @@ export async function collectReminderTargets(db: AppDb, date: string): Promise<R
     targets.push({
       kind: "signup_sheet",
       event: toEventInfo(e),
+      reminderDate: date,
       slots: slots.map((s) => ({
         id: s.id,
         title: s.title,
         shiftName: (s as { shiftName?: string | null }).shiftName ?? null,
+        slotDate: (s as { slotDate?: string | null }).slotDate ?? null,
         startTime: s.startTime,
         endTime: s.endTime,
         capacity: s.capacity ?? 1,
@@ -288,6 +316,8 @@ function slotCalendarLinks(opts: {
   eventDate: string | null;
   startTime: string | null;
   endTime: string | null;
+  /** Dated slot of a multi-day sheet — exported as its own calendar entry. */
+  slotId?: string | null;
 }): { googleUrl: string; icsUrl: string } {
   const googleUrl = buildGoogleCalendarUrl({
     title: opts.title,
@@ -300,7 +330,10 @@ function slotCalendarLinks(opts: {
     url: eventPageUrl(opts.origin, opts.eventId),
     fallbackTitle: `${opts.site.siteName} Event`,
   });
-  return { googleUrl, icsUrl: `${opts.origin}/events/${opts.eventId}/ics` };
+  const icsUrl = opts.slotId
+    ? `${opts.origin}/events/${opts.eventId}/ics?slot=${encodeURIComponent(opts.slotId)}`
+    : `${opts.origin}/events/${opts.eventId}/ics`;
+  return { googleUrl, icsUrl };
 }
 
 function descriptionBlock(description: string | null): string {
@@ -330,21 +363,23 @@ export function participantTasksForSignup(
     const slot = target.slots.find((s) => s.id === slotId);
     if (!slot) return [];
     const label = taskLabel(slot);
+    const slotDate = slot.slotDate || target.event.eventDate;
     const { googleUrl, icsUrl } = slotCalendarLinks({
       site,
       origin,
       event: target.event,
       eventId: target.event.id,
       title: `${label} — ${target.event.title}`,
-      eventDate: target.event.eventDate,
+      eventDate: slotDate,
       startTime: slot.startTime,
       endTime: slot.endTime,
+      slotId: slot.id,
     });
     return [
       {
         label,
         whenLine: whenLineFor({
-          eventDate: target.event.eventDate,
+          eventDate: slotDate,
           startTime: slot.startTime,
           endTime: slot.endTime,
           timezone: target.event.timezone,
@@ -483,7 +518,8 @@ export function buildSignupOrganizerEmail(
     hasCapped && !hasUnlimited
       ? `${filledTotal}/${capacityTotal} spots filled`
       : `${filledTotal} signed up`;
-  const whenHeadline = e.eventDate ? formatLongDateLabel(e.eventDate) : "";
+  const headlineDate = target.reminderDate || e.eventDate;
+  const whenHeadline = headlineDate ? formatLongDateLabel(headlineDate) : "";
   return {
     subject: `Reminder: "${e.title}" is tomorrow — ${headline}`,
     html: `

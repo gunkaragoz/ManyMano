@@ -39,7 +39,7 @@ import {
   secretMatches,
   verifyAdminToken,
 } from "~/utils/auth";
-import { expiryDateFor, isExpired, pruneExpiredEvents, RETENTION_DAYS } from "~/utils/retention";
+import { expiryDateFor, isExpired, latestSlotDate, pruneExpiredEvents, RETENTION_DAYS } from "~/utils/retention";
 import { verifyTurnstile, turnstileFailure, hasTurnstileToken } from "~/utils/turnstile";
 import { assessGuestRequest, needsVerification } from "~/utils/bot-protection";
 import Turnstile from "~/components/Turnstile";
@@ -70,6 +70,7 @@ import {
   EMAIL_MAX,
   LOCATION_MAX,
   MAX_SLOTS_PER_EVENT,
+  MAX_SLOT_ROWS_PER_EVENT,
   MAX_VOTES_PER_EVENT,
   ORGANIZER_NAME_MAX,
   PARTICIPANT_NAME_MAX,
@@ -126,7 +127,7 @@ export const meta: MetaFunction<typeof loader> = ({ data, matches }) => {
   ]);
 };
 
-function publicEventShape(e: typeof events.$inferSelect) {
+function publicEventShape(e: typeof events.$inferSelect, lastSlotDate?: string | null) {
   return {
     id: e.id,
     type: e.type,
@@ -141,14 +142,16 @@ function publicEventShape(e: typeof events.$inferSelect) {
     durationMinutes: (e as { durationMinutes?: number | null }).durationMinutes ?? null,
     createdAt: e.createdAt,
     updatedAt: e.updatedAt,
-    expiresAt: expiryDateFor(e.createdAt),
+    // Multi-day sheets expire 90 days after their last date, not their
+    // creation date, so the banner shows the real deletion day.
+    expiresAt: expiryDateFor(e.createdAt, lastSlotDate),
     retentionDays: RETENTION_DAYS,
   };
 }
 
-function adminEventShape(e: typeof events.$inferSelect) {
+function adminEventShape(e: typeof events.$inferSelect, lastSlotDate?: string | null) {
   return {
-    ...publicEventShape(e),
+    ...publicEventShape(e, lastSlotDate),
     organizerEmail: e.organizerEmail,
   };
 }
@@ -222,7 +225,9 @@ export async function loader({ params, request, context }: LoaderFunctionArgs) {
     throw new Response("Event not found", { status: 404 });
   }
 
-  if (isExpired(event.createdAt)) {
+  // Multi-day sheets live until 90 days after their LAST date, so an old
+  // series is only gone once every date has passed the window.
+  if (isExpired(event.createdAt) && isExpired(event.createdAt, new Date(), await latestSlotDate(db, eventId))) {
     throw new Response("This event expired and was auto-deleted.", { status: 410 });
   }
 
@@ -287,6 +292,11 @@ export async function loader({ params, request, context }: LoaderFunctionArgs) {
     .from(eventSlots)
     .where(eq(eventSlots.eventId, eventId))
     .orderBy(eventSlots.displayOrder);
+  // Latest dated slot, for the retention banner (null on single-day sheets).
+  const lastSlotDateForEvent = rawSlots.reduce<string | null>((latest, s) => {
+    const d = (s as { slotDate?: string | null }).slotDate;
+    return d && (!latest || d > latest) ? d : latest;
+  }, null);
   const slots =
     event.type === "TIME_POLL"
       ? [...rawSlots].sort((a, b) => {
@@ -322,7 +332,7 @@ export async function loader({ params, request, context }: LoaderFunctionArgs) {
 
     return json(
       {
-        event: isAdmin ? adminEventShape(event) : publicEventShape(event),
+        event: isAdmin ? adminEventShape(event, lastSlotDateForEvent) : publicEventShape(event, lastSlotDateForEvent),
         slots,
         signups: safeSignups,
         isAdmin,
@@ -393,7 +403,7 @@ export async function loader({ params, request, context }: LoaderFunctionArgs) {
 
     return json(
       {
-        event: isAdmin ? adminEventShape(event) : publicEventShape(event),
+        event: isAdmin ? adminEventShape(event, lastSlotDateForEvent) : publicEventShape(event, lastSlotDateForEvent),
         slots,
         signups: [],
         isAdmin,
@@ -485,7 +495,7 @@ export async function action({ request, params, context }: ActionFunctionArgs) {
   if (!event) {
     return json({ error: "Event not found." }, { status: 404 });
   }
-  if (isExpired(event.createdAt)) {
+  if (isExpired(event.createdAt) && isExpired(event.createdAt, new Date(), await latestSlotDate(db, eventId))) {
     return json({ error: "This event expired and was auto-deleted." }, { status: 410 });
   }
 
@@ -630,7 +640,9 @@ export async function action({ request, params, context }: ActionFunctionArgs) {
       const eventUrl = `${url.origin}/events/${eventId}`;
       const shiftPrefix = ((targetSlot as { shiftName?: string | null }).shiftName || "").trim();
       const taskLabel = shiftPrefix ? `${shiftPrefix} – ${targetSlot.title}` : targetSlot.title;
-      const whenDatePart = event.eventDate ? formatLongDateLabel(event.eventDate) : "";
+      // Multi-day sheets: the slot's own date, not the sheet's first date.
+      const slotDate = effectiveDateForSlot(targetSlot, event.eventDate);
+      const whenDatePart = slotDate ? formatLongDateLabel(slotDate) : "";
       const whenTimePart = targetSlot.startTime
         ? `${formatTime(targetSlot.startTime)}${targetSlot.endTime ? ` – ${formatTime(targetSlot.endTime)}` : ""}`
         : targetSlot.endTime
@@ -643,7 +655,7 @@ export async function action({ request, params, context }: ActionFunctionArgs) {
         title: `${taskLabel} — ${event.title}`,
         description: event.description,
         location: event.location,
-        eventDate: event.eventDate,
+        eventDate: slotDate,
         startTime: targetSlot.startTime,
         endTime: targetSlot.endTime,
         timeZone: event.timezone,
@@ -723,7 +735,10 @@ export async function action({ request, params, context }: ActionFunctionArgs) {
             ? `${shiftPrefix} – ${slotTitle}`
             : slotTitle
           : shiftPrefix || "your spot";
-        const whenDatePart = event.eventDate ? formatLongDateLabel(event.eventDate) : "";
+        const removedDate = removedSlot
+          ? effectiveDateForSlot(removedSlot, event.eventDate)
+          : event.eventDate;
+        const whenDatePart = removedDate ? formatLongDateLabel(removedDate) : "";
         const whenTimePart = removedSlot?.startTime
           ? `${formatTime(removedSlot.startTime)}${removedSlot.endTime ? ` – ${formatTime(removedSlot.endTime)}` : ""}`
           : removedSlot?.endTime
@@ -1500,11 +1515,13 @@ export async function action({ request, params, context }: ActionFunctionArgs) {
     if (slotError) return json({ error: slotError }, { status: 400 });
 
     const existingSlots = await db.select().from(eventSlots).where(eq(eventSlots.eventId, eventId));
-    if (existingSlots.length >= MAX_SLOTS_PER_EVENT) {
-      return json(
-        { error: `Too many options — maximum ${MAX_SLOTS_PER_EVENT} per event.` },
-        { status: 400 }
-      );
+    // Multi-day sheets hold one row per (date x task), so they are capped by
+    // the total-row limit instead of the per-date task limit.
+    const hasDatedSlots = existingSlots.some((s) => (s as { slotDate?: string | null }).slotDate);
+    const slotCap =
+      event.type === "SIGNUP_SHEET" && hasDatedSlots ? MAX_SLOT_ROWS_PER_EVENT : MAX_SLOTS_PER_EVENT;
+    if (existingSlots.length >= slotCap) {
+      return json({ error: `Too many options — maximum ${slotCap} per event.` }, { status: 400 });
     }
     const maxOrder = existingSlots.reduce((m, s) => Math.max(m, s.displayOrder ?? 0), -1);
     const rawCap = parseInt(capacityRaw, 10);
@@ -1540,7 +1557,11 @@ export async function action({ request, params, context }: ActionFunctionArgs) {
     const titleRaw = cleanText(formData.get("slotTitle"), SLOT_TITLE_MAX);
     const shiftName = cleanText(formData.get("slotShiftName"), SHIFT_NAME_MAX) || null;
     const slotDateRaw = cleanText(formData.get("slotDate"), 10);
-    const slotDate = slotDateRaw === "" ? null : (/^\d{4}-\d{2}-\d{2}$/.test(slotDateRaw) ? slotDateRaw : null);
+    // Same rule as the timezone fix: a form that doesn't render the field at
+    // all must keep the stored value. Wiping it here would collapse a
+    // multi-day sheet's slot back onto the event date.
+    const slotDateOmitted = formData.get("slotDate") === null;
+    const slotDate = /^\d{4}-\d{2}-\d{2}$/.test(slotDateRaw) ? slotDateRaw : null;
     const startTime = cleanText(formData.get("slotStartTime"), 16) || null;
     const endTime = cleanText(formData.get("slotEndTime"), 16) || null;
     const capacityRaw = cleanText(formData.get("slotCapacity"), 8);
@@ -1580,7 +1601,7 @@ export async function action({ request, params, context }: ActionFunctionArgs) {
       .set({
         title,
         shiftName,
-        slotDate,
+        slotDate: slotDateOmitted ? (target as { slotDate?: string | null }).slotDate ?? null : slotDate,
         startTime,
         endTime,
         ...(event.type === "SIGNUP_SHEET" && capacityRaw
@@ -2498,6 +2519,7 @@ export default function EventView() {
   const shiftGroups = useMemo(() => {
     const groups: Array<{
       key: string;
+      date: string | null;
       shiftName: string | null;
       startTime: string | null;
       endTime: string | null;
@@ -2506,7 +2528,11 @@ export default function EventView() {
     const indexByKey = new Map<string, number>();
     slots.forEach((s) => {
       const shiftName = ((s as { shiftName?: string | null }).shiftName || "").trim();
-      const key = `${shiftName}||${s.startTime || ""}||${s.endTime || ""}`;
+      // Multi-day sheets repeat the same shift on several dates, so the date
+      // is part of the identity. Single-day sheets have no slot dates, so the
+      // key (and the grouping) is exactly what it was before.
+      const date = effectiveDateForSlot(s, event.eventDate);
+      const key = `${date || ""}||${shiftName}||${s.startTime || ""}||${s.endTime || ""}`;
       const existing = indexByKey.get(key);
       if (existing !== undefined) {
         groups[existing].tasks.push(s);
@@ -2514,6 +2540,7 @@ export default function EventView() {
         indexByKey.set(key, groups.length);
         groups.push({
           key,
+          date,
           shiftName: shiftName || null,
           startTime: s.startTime,
           endTime: s.endTime,
@@ -2522,7 +2549,38 @@ export default function EventView() {
       }
     });
     return groups;
-  }, [slots]);
+  }, [slots, event.eventDate]);
+
+  // Sign-up sheets that span several dates render one section per date. A
+  // sheet whose slots have no date (every sheet created before multi-day
+  // existed) produces a single undated section and renders exactly as before.
+  const dateSections = useMemo(() => {
+    const sections: Array<{ date: string | null; groups: typeof shiftGroups }> = [];
+    const indexByDate = new Map<string, number>();
+    shiftGroups.forEach((group) => {
+      const key = group.date || "";
+      const existing = indexByDate.get(key);
+      if (existing !== undefined) sections[existing].groups.push(group);
+      else {
+        indexByDate.set(key, sections.length);
+        sections.push({ date: group.date, groups: [group] });
+      }
+    });
+    return sections.sort((a, b) => (a.date || "").localeCompare(b.date || ""));
+  }, [shiftGroups]);
+  const isMultiDate = dateSections.length > 1;
+  const [showAllDates, setShowAllDates] = useState(false);
+  // Long series (a school year) open on the next four weeks so the page isn't
+  // an endless scroll; short ones always show every date.
+  const windowedSections = useMemo(() => {
+    if (!isMultiDate || showAllDates || dateSections.length <= 7) return dateSections;
+    const today = new Date().toISOString().slice(0, 10);
+    const horizon = new Date(Date.now() + 28 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+    const upcoming = dateSections.filter((s) => (s.date || "") >= today);
+    const windowed = upcoming.filter((s) => (s.date || "") <= horizon);
+    return windowed.length > 0 ? windowed : upcoming.slice(0, 4);
+  }, [dateSections, isMultiDate, showAllDates]);
+  const hiddenDateCount = dateSections.length - windowedSections.length;
 
   // SSR-safe absolute links: `origin` comes from the loader (request URL),
   // so server and client render identical hrefs/values (no hydration
@@ -3177,6 +3235,17 @@ export default function EventView() {
                   <input type="hidden" name="adminToken" value={adminToken || ""} />
                   <input type="hidden" name="slotId" value={s.id} />
                   <div className="flex-1 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-12 gap-2.5">
+                    {isMultiDate && (
+                      <div className="sm:col-span-2 lg:col-span-2">
+                        <label className="block text-[10px] uppercase font-bold text-slate-400 mb-1">Day</label>
+                        <input
+                          type="date"
+                          name="slotDate"
+                          defaultValue={(s as { slotDate?: string | null }).slotDate || ""}
+                          className="w-full px-3 py-2 rounded-xl border border-slate-200 text-xs bg-white focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all"
+                        />
+                      </div>
+                    )}
                     <div className="sm:col-span-2 lg:col-span-3">
                         <label className="block text-[10px] uppercase font-bold text-slate-400 mb-1">Shift (opt.)</label>
                         <input
@@ -3271,6 +3340,17 @@ export default function EventView() {
               <input type="hidden" name="intent" value="add_slot" />
               <input type="hidden" name="adminToken" value={adminToken || ""} />
               <div className="flex-1 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-12 gap-2.5">
+                {isMultiDate && (
+                  <div className="sm:col-span-2 lg:col-span-2">
+                    <label className="block text-[10px] uppercase font-bold text-slate-400 mb-1">Day</label>
+                    <input
+                      type="date"
+                      name="slotDate"
+                      defaultValue={dateSections[0]?.date || ""}
+                      className="w-full px-3 py-2 rounded-xl border border-slate-200 text-xs bg-white focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all"
+                    />
+                  </div>
+                )}
                 <div className="sm:col-span-2 lg:col-span-3">
                     <label className="block text-[10px] uppercase font-bold text-slate-400 mb-1">Shift (opt.)</label>
                     <input
@@ -3371,7 +3451,14 @@ export default function EventView() {
           </div>
 
           <div className="space-y-5">
-            {shiftGroups.map((group) => {
+            {windowedSections.map((section) => (
+              <div key={section.date || "undated"} className="space-y-5">
+                {isMultiDate && section.date && (
+                  <h3 className="text-sm font-extrabold uppercase tracking-wider text-slate-500 px-1 pt-2">
+                    {formatLongDateLabel(section.date)}
+                  </h3>
+                )}
+                {section.groups.map((group) => {
               const renderTask = (slot: SlotRow) => {
                 const slotSignups = initialSignups.filter((s) => Boolean(s && s.slotId === slot.id));
                 const isFull = slot.capacity > 0 && slotSignups.length >= slot.capacity;
@@ -3522,7 +3609,7 @@ export default function EventView() {
                         <DualSlotTime
                           organizerTz={organizerTz}
                           viewerTz={viewerTz}
-                          date={event.eventDate}
+                          date={group.date || event.eventDate}
                           startTime={group.startTime}
                           endTime={group.endTime}
                         />
@@ -3540,7 +3627,27 @@ export default function EventView() {
                   )}
                 </div>
               );
-            })}
+                })}
+              </div>
+            ))}
+            {hiddenDateCount > 0 && (
+              <button
+                type="button"
+                onClick={() => setShowAllDates(true)}
+                className="w-full px-4 py-3 rounded-2xl border border-slate-200 bg-white text-sm font-semibold text-slate-600 hover:border-blue-400 hover:text-blue-600 transition-all"
+              >
+                Show all {dateSections.length} dates ({hiddenDateCount} hidden)
+              </button>
+            )}
+            {showAllDates && dateSections.length > 7 && (
+              <button
+                type="button"
+                onClick={() => setShowAllDates(false)}
+                className="w-full px-4 py-3 rounded-2xl border border-slate-200 bg-white text-sm font-semibold text-slate-600 hover:border-blue-400 hover:text-blue-600 transition-all"
+              >
+                Show the next 4 weeks only
+              </button>
+            )}
           </div>
         </div>
       )}

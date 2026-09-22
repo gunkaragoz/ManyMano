@@ -26,7 +26,10 @@ import {
   DESCRIPTION_MAX,
   EMAIL_MAX,
   LOCATION_MAX,
+  MAX_DATES_PER_EVENT,
   MAX_SLOTS_PER_EVENT,
+  MAX_SLOT_ROWS_PER_EVENT,
+  MAX_TASKS_PER_DATE,
   ORGANIZER_NAME_MAX,
   SHIFT_NAME_MAX,
   SLOT_TITLE_MAX,
@@ -39,6 +42,19 @@ import {
   timeToMinutes,
 } from "~/utils/validation";
 import { pruneExpiredEvents } from "~/utils/retention";
+import {
+  dayFilterMatches,
+  expandDates,
+  parseDateSpec,
+  parseDayFilter,
+  writeDateSpec,
+} from "~/utils/recurrence";
+import RepeatPicker, {
+  dayChoicesFor,
+  defaultSelection,
+  selectionToSpec,
+  type DateSelection,
+} from "~/components/RepeatPicker";
 import { getSiteConfig } from "~/utils/site";
 import { verifyTurnstile, turnstileFailure } from "~/utils/turnstile";
 import Turnstile from "~/components/Turnstile";
@@ -65,11 +81,25 @@ export const meta: MetaFunction = ({ matches }) => {
   ]);
 };
 
+/**
+ * Multi-day / repeating sheets are off unless .dev.vars (or the deploy env)
+ * opts in. With the flag off the create form and action behave exactly as
+ * they did before the feature existed.
+ */
+function isMultiDateEnabled(value: string | undefined): boolean {
+  const v = (value || "").trim().toLowerCase();
+  return v === "1" || v === "true" || v === "on";
+}
+
 export async function loader({ context }: LoaderFunctionArgs) {
   const env = context.cloudflare.env as {
     TURNSTILE_SITE_KEY?: string;
+    FEATURE_MULTIDATE_SHEETS?: string;
   };
-  return json({ turnstileSiteKey: env.TURNSTILE_SITE_KEY ?? null });
+  return json({
+    turnstileSiteKey: env.TURNSTILE_SITE_KEY ?? null,
+    multiDateEnabled: isMultiDateEnabled(env.FEATURE_MULTIDATE_SHEETS),
+  });
 }
 
 export async function action({ request, context }: ActionFunctionArgs) {
@@ -98,6 +128,7 @@ export async function action({ request, context }: ActionFunctionArgs) {
     ICS_PRODID?: string;
     TURNSTILE_SECRET_KEY?: string;
     TURNSTILE_HOSTNAMES?: string;
+    FEATURE_MULTIDATE_SHEETS?: string;
   };
   const site = getSiteConfig(env);
   const db = getDb(env.DB);
@@ -151,6 +182,9 @@ export async function action({ request, context }: ActionFunctionArgs) {
   const slotStartTimes = formData.getAll("slotStartTime") as string[];
   const slotEndTimes = formData.getAll("slotEndTime") as string[];
   const slotShiftNames = formData.getAll("slotShiftName") as string[];
+  // "all" / a date list / a weekday list — which days of a multi-date sheet
+  // this task runs on. Absent (or flag off) means every date.
+  const slotDayFilters = formData.getAll("slotDays") as string[];
 
   const validSlots = slotTitles
     .map((t, idx) => {
@@ -173,10 +207,11 @@ export async function action({ request, context }: ActionFunctionArgs) {
         startTime,
         endTime,
         displayOrder: idx,
+        days: parseDayFilter(slotDayFilters[idx]),
       };
     })
     .filter((s) => s.title.length > 0)
-    .slice(0, MAX_SLOTS_PER_EVENT);
+    .slice(0, MAX_TASKS_PER_DATE);
 
   if (validSlots.length === 0) {
     return json({ error: "Please add at least one task." }, { status: 400 });
@@ -192,9 +227,56 @@ export async function action({ request, context }: ActionFunctionArgs) {
       );
     }
   }
-  if (slotTitles.length > MAX_SLOTS_PER_EVENT) {
+  if (slotTitles.length > MAX_TASKS_PER_DATE) {
     return json(
       { error: `Too many tasks — maximum ${MAX_SLOTS_PER_EVENT} per event.` },
+      { status: 400 }
+    );
+  }
+
+  // Multi-day / repeating sheets: rebuild the spec from the posted fields and
+  // expand it here — a client-supplied date list is never trusted. With the
+  // flag off (or no date fields posted) the spec is "single" and everything
+  // below takes the original single-date path, slot_date left NULL.
+  const specResult = isMultiDateEnabled(env.FEATURE_MULTIDATE_SHEETS)
+    ? parseDateSpec((name) => formData.get(name) as string | null, eventDate || "")
+    : { spec: { mode: "single" as const } };
+  if ("error" in specResult) {
+    return json({ error: specResult.error }, { status: 400 });
+  }
+  const dateSpec = specResult.spec;
+  if (dateSpec.mode !== "single" && !eventDate) {
+    return json({ error: "Please pick the first date before adding more days." }, { status: 400 });
+  }
+  const dates =
+    dateSpec.mode === "single" ? [] : expandDates(dateSpec, eventDate as string, MAX_DATES_PER_EVENT + 1);
+  if (dates.length > MAX_DATES_PER_EVENT) {
+    return json(
+      { error: `That covers more than ${MAX_DATES_PER_EVENT} dates — pick an earlier end date.` },
+      { status: 400 }
+    );
+  }
+
+  // One slot row per (date x task). Single-date sheets keep exactly one row per
+  // task with no slot_date, which is what every pre-existing sheet looks like.
+  const slotRows = (
+    dates.length === 0
+      ? validSlots.map((slot) => ({ slot, slotDate: null as string | null }))
+      : dates.flatMap((date) =>
+          validSlots
+            .filter((slot) => dayFilterMatches(slot.days, date))
+            .map((slot) => ({ slot, slotDate: date as string | null }))
+        )
+  ).map((row, idx) => ({ ...row, displayOrder: idx }));
+
+  if (slotRows.length === 0) {
+    return json({ error: "No task runs on any of those dates — check each task's days." }, { status: 400 });
+  }
+  if (slotRows.length > MAX_SLOT_ROWS_PER_EVENT) {
+    return json(
+      {
+        error: `That makes ${slotRows.length} task slots (dates x tasks) — the maximum is ${MAX_SLOT_ROWS_PER_EVENT}. Use fewer dates or fewer tasks.`,
+      },
       { status: 400 }
     );
   }
@@ -223,23 +305,30 @@ export async function action({ request, context }: ActionFunctionArgs) {
     organizerEmail,
     adminToken: adminTokenStored,
     status: "OPEN",
-    settings: JSON.stringify({}),
+    settings: writeDateSpec(null, dateSpec),
     timezone,
     createdAt: now,
     updatedAt: now,
   });
 
-  for (const slot of validSlots) {
-    await db.insert(eventSlots).values({
-      id: generateInternalId(),
-      eventId,
-      title: slot.title,
-      shiftName: slot.shiftName,
-      capacity: slot.capacity,
-      startTime: slot.startTime,
-      endTime: slot.endTime,
-      displayOrder: slot.displayOrder,
-    });
+  // D1 rejects transactions, so rows go in batches — a repeating sheet can be
+  // a few hundred rows and one INSERT each would be far too many round trips.
+  // D1 also caps a statement at 100 bound variables; each row binds 9 columns,
+  // so 10 rows per INSERT (90 variables) is the largest safe batch.
+  const slotValues = slotRows.map((row) => ({
+    id: generateInternalId(),
+    eventId,
+    title: row.slot.title,
+    shiftName: row.slot.shiftName,
+    slotDate: row.slotDate,
+    capacity: row.slot.capacity,
+    startTime: row.slot.startTime,
+    endTime: row.slot.endTime,
+    displayOrder: row.displayOrder,
+  }));
+  const SLOT_INSERT_BATCH = 10;
+  for (let i = 0; i < slotValues.length; i += SLOT_INSERT_BATCH) {
+    await db.insert(eventSlots).values(slotValues.slice(i, i + SLOT_INSERT_BATCH));
   }
 
   const url = new URL(request.url);
@@ -248,6 +337,18 @@ export async function action({ request, context }: ActionFunctionArgs) {
   // Auto-generated QR code (PNG) encoding the public link — organizers can
   // print it on flyers or show it at the door; scanning opens the event page.
   const qrUrl = `${publicUrl}/qr?format=png`;
+
+  // One date reads as a line; a series lists the first few and counts the rest,
+  // the same way the poll create email does.
+  const datesBlock =
+    dates.length > 1
+      ? `<p><strong>Dates (${dates.length}):</strong><br>${dates
+          .slice(0, 8)
+          .map((d) => escapeHtml(formatLongDateLabel(d)))
+          .join("<br>")}${dates.length > 8 ? `<br>…and ${dates.length - 8} more` : ""}</p>`
+      : eventDate
+        ? `<p><strong>Date:</strong> ${escapeHtml(formatLongDateLabel(eventDate))}</p>`
+        : "";
 
   const emailResult = await sendEmail({
     ...getEmailSenderConfig(env),
@@ -268,7 +369,7 @@ export async function action({ request, context }: ActionFunctionArgs) {
           <a href="${escapeHtml(publicUrl)}"><img src="${escapeHtml(qrUrl)}" alt="QR code linking to your event page" width="180" height="180" style="width: 180px; height: 180px; border: 1px solid #e2e8f0; border-radius: 12px; padding: 6px; background: #ffffff;" /></a>
           <p style="margin: 8px 0 0 0; font-size: 13px; color: #64748b;">Scan to open the event page — print it on flyers or show it at the door.</p>
         </div>
-        ${eventDate ? `<p><strong>Date:</strong> ${escapeHtml(formatLongDateLabel(eventDate))}</p>` : ""}
+        ${datesBlock}
         ${description ? `<p><strong>Description:</strong><br>${escapeHtml(description).replace(/\r?\n/g, "<br>")}</p>` : ""}
         <p style="font-size: 13px; color: #64748b;">Use the secret management link to view RSVPs, download CSV spreadsheets, and manage sign-ups. You can delete it anytime from Organizer Admin Mode.</p>
         ${emailFooter(site)}
@@ -304,11 +405,14 @@ type Shift = {
   name: string;
   startTime: string;
   endTime: string;
+  /** Days this shift runs on (date or weekday keys). Missing = every date. */
+  days?: string[] | null;
   tasks: Array<{ id: number; title: string; capacity: number }>;
 };
 
 const SIGNUP_DETAILS_KEY = "manymano:create-signup:details:v2";
 const SIGNUP_SHIFTS_KEY = "manymano:create-signup:shifts:v1";
+const SIGNUP_DATES_KEY = "manymano:create-signup:dates:v1";
 
 const defaultSignupShifts: Shift[] = [
   {
@@ -329,7 +433,7 @@ const defaultSignupShifts: Shift[] = [
 
 export default function CreateSignupSheet() {
   const actionData = useActionData<{ error?: string }>();
-  const { turnstileSiteKey } = useLoaderData<typeof loader>();
+  const { turnstileSiteKey, multiDateEnabled } = useLoaderData<typeof loader>();
   const navigation = useNavigation();
   const isSubmitting = navigation.state === "submitting";
   // Floating toast for validation errors. The inline banner below sits at the
@@ -378,6 +482,40 @@ export default function CreateSignupSheet() {
     SIGNUP_SHIFTS_KEY,
     defaultSignupShifts
   );
+  const [dateSel, setDateSel, clearDateSel] = usePersistentState<DateSelection>(
+    SIGNUP_DATES_KEY,
+    () => defaultSelection(new Date().toISOString().split("T")[0])
+  );
+
+  const startDate = details.eventDate || todayStr;
+  const dateSpec = multiDateEnabled ? selectionToSpec(dateSel, startDate) : { mode: "single" as const };
+  // One over the limit, so the picker can say "too many" instead of rendering
+  // a list the server would reject anyway.
+  const sheetDates =
+    dateSpec.mode === "single" ? [startDate] : expandDates(dateSpec, startDate, MAX_DATES_PER_EVENT + 1);
+  const dayChoices = multiDateEnabled ? dayChoicesFor(dateSel, sheetDates) : [];
+  const dayChoiceKeys = dayChoices.map((c) => c.key);
+  /** Drops day keys left over from an earlier date selection. */
+  const daysForShift = (shift: Shift): string[] | null => {
+    if (!shift.days || dayChoiceKeys.length === 0) return null;
+    const kept = shift.days.filter((d) => dayChoiceKeys.includes(d));
+    return kept.length === 0 || kept.length === dayChoiceKeys.length ? null : kept;
+  };
+  const toggleShiftDay = (shiftId: number, key: string) => {
+    setShifts((prev) =>
+      prev.map((s) => {
+        if (s.id !== shiftId) return s;
+        const current = daysForShift(s) ?? dayChoiceKeys;
+        const next = current.includes(key)
+          ? current.length > 1
+            ? current.filter((d) => d !== key)
+            : current
+          : [...current, key];
+        const ordered = dayChoiceKeys.filter((k) => next.includes(k));
+        return { ...s, days: ordered.length === dayChoiceKeys.length ? null : ordered };
+      })
+    );
+  };
 
   const wasSubmitting = useRef(false);
   const titleSentinelRef = useRef<HTMLDivElement>(null);
@@ -402,11 +540,12 @@ export default function CreateSignupSheet() {
       wasSubmitting.current = false;
       clearDetails();
       clearShifts();
+      clearDateSel();
     } else if (navigation.state === "idle") {
       // Validation error returns to idle without redirect -> keep draft.
       wasSubmitting.current = false;
     }
-  }, [navigation.state, clearDetails, clearShifts]);
+  }, [navigation.state, clearDetails, clearShifts, clearDateSel]);
 
   const updateDetails = (patch: Partial<SignupDetails>) =>
     setDetails((prev) => ({ ...prev, ...patch }));
@@ -414,8 +553,10 @@ export default function CreateSignupSheet() {
   const startOver = () => {
     clearDetails();
     clearShifts();
+    clearDateSel();
     setDetails((prev) => ({ ...prev, eventDate: todayStr }));
     setShifts(defaultSignupShifts);
+    setDateSel(defaultSelection(todayStr));
   };
 
   const addShift = () => {
@@ -586,6 +727,20 @@ export default function CreateSignupSheet() {
               </div>
             </div>
 
+            {multiDateEnabled && (
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 mb-1.5">
+                  Repeats
+                </label>
+                <RepeatPicker
+                  start={startDate}
+                  value={dateSel}
+                  onChange={setDateSel}
+                  dates={sheetDates}
+                />
+              </div>
+            )}
+
             <div>
               <label htmlFor="signup-timezone" className="block text-xs font-semibold text-slate-700 mb-1.5">
                 Timezone
@@ -743,6 +898,38 @@ export default function CreateSignupSheet() {
                   </div>
                 </div>
 
+                {dayChoices.length > 0 && (
+                  <div>
+                    <span className="block text-[10px] uppercase font-bold text-slate-400 mb-1">
+                      Runs on
+                    </span>
+                    <div className="flex flex-wrap gap-1.5">
+                      {dayChoices.map((choice) => {
+                        const selected = daysForShift(shift);
+                        const on = !selected || selected.includes(choice.key);
+                        return (
+                          <button
+                            key={choice.key}
+                            type="button"
+                            aria-pressed={on}
+                            onClick={() => toggleShiftDay(shift.id, choice.key)}
+                            className={`px-2.5 py-1.5 rounded-xl text-[11px] font-semibold transition-all ${
+                              on
+                                ? "bg-blue-600 text-white"
+                                : "bg-white border border-slate-200 text-slate-500 hover:border-blue-400"
+                            }`}
+                          >
+                            {choice.label}
+                          </button>
+                        );
+                      })}
+                      {daysForShift(shift) === null && (
+                        <span className="text-[11px] text-slate-400 self-center">every date</span>
+                      )}
+                    </div>
+                  </div>
+                )}
+
                 <div className="space-y-2.5 pt-1">
                   {shift.tasks.map((task) => (
                     <div
@@ -753,6 +940,13 @@ export default function CreateSignupSheet() {
                       <input type="hidden" name="slotShiftName" value={shift.name} />
                       <input type="hidden" name="slotStartTime" value={shift.startTime} />
                       <input type="hidden" name="slotEndTime" value={shift.endTime} />
+                      {multiDateEnabled && (
+                        <input
+                          type="hidden"
+                          name="slotDays"
+                          value={(daysForShift(shift) || []).join(",") || "all"}
+                        />
+                      )}
 
                       <div className="sm:col-span-8">
                         <label className="block text-[10px] uppercase font-bold text-slate-400 mb-1">
