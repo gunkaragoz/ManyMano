@@ -22,6 +22,9 @@ minimumReleaseAgeExclude:
 # - esbuild (dev-server CORS: any website could read dev-server responses).
 #   Transitive via drizzle-kit/vite; force the patched line. Dev-only
 #   exposure (`pnpm run dev`), but Dependabot stays red until pinned.
+# NOTE: overrides are mirrored in package.json ("pnpm.overrides") so frozen
+# installs still see them when the build environment doesn't load this file.
+# Keep both in sync — any change requires a lockfile update.
 overrides:
   ws@8: 8.21.0
   esbuild: ^0.28.0
