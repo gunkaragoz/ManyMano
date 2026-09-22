@@ -2,10 +2,12 @@
 // Plain node + assert, in the style of tests/test-flow.js. Run: node tests/recurrence.mjs
 import assert from "node:assert";
 import {
+  MAX_SERIES_DAYS,
   addDays,
   dayFilterMatches,
   describeSpec,
   expandDates,
+  maxSeriesEnd,
   parseDateSpec,
   parseDayFilter,
   presetsFor,
@@ -139,6 +141,17 @@ check("an empty weekday list cannot loop forever", () => {
     "2026-09-22"
   );
   assert.deepEqual(dates, ["2026-09-22"]);
+});
+
+check("a sheet runs at most one year from its first date", () => {
+  assert.equal(maxSeriesEnd("2026-09-22"), "2027-09-22");
+  assert.equal(maxSeriesEnd("2028-02-28"), "2029-02-27"); // leap year
+  // Weekly for a school year, and twice a week for one, both fit — the old
+  // flat 60-date cap rejected the second.
+  const schoolYear = { mode: "repeat", rule: { type: "weekly", interval: 1, weekdays: [2, 4] }, ends: { on: "2027-06-15" } };
+  const dates = expandDates(schoolYear, "2026-09-22", MAX_SERIES_DAYS + 1);
+  assert.ok(dates.length > 60, `expected a full school year, got ${dates.length}`);
+  assert.ok(dates[dates.length - 1] <= maxSeriesEnd("2026-09-22"));
 });
 
 console.log("\n--- Labels and presets ---");

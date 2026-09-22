@@ -26,7 +26,6 @@ import {
   DESCRIPTION_MAX,
   EMAIL_MAX,
   LOCATION_MAX,
-  MAX_DATES_PER_EVENT,
   MAX_SLOTS_PER_EVENT,
   MAX_SLOT_ROWS_PER_EVENT,
   MAX_TASKS_PER_DATE,
@@ -43,10 +42,13 @@ import {
 } from "~/utils/validation";
 import { pruneExpiredEvents } from "~/utils/retention";
 import {
+  MAX_SERIES_DAYS,
   dayFilterMatches,
   expandDates,
+  maxSeriesEnd,
   parseDateSpec,
   parseDayFilter,
+  weekdayOf,
   writeDateSpec,
 } from "~/utils/recurrence";
 import {
@@ -54,6 +56,7 @@ import {
   DateModeTabs,
   DateSummary,
   RepeatRuleField,
+  dateLimitError,
   dateFieldLabel,
   dayChoicesFor,
   defaultSelection,
@@ -254,12 +257,13 @@ export async function action({ request, context }: ActionFunctionArgs) {
     return json({ error: "Please pick the first date before adding more days." }, { status: 400 });
   }
   const dates =
-    dateSpec.mode === "single" ? [] : expandDates(dateSpec, eventDate as string, MAX_DATES_PER_EVENT + 1);
-  if (dates.length > MAX_DATES_PER_EVENT) {
-    return json(
-      { error: `That covers more than ${MAX_DATES_PER_EVENT} dates — pick an earlier end date.` },
-      { status: 400 }
-    );
+    dateSpec.mode === "single"
+      ? []
+      : expandDates(dateSpec, eventDate as string, MAX_SERIES_DAYS + 1);
+  // A sheet covers at most a year, so a runaway rule can't generate forever
+  // and the 90-day retention window still means something.
+  if (dates.length > 0 && dates[dates.length - 1] > maxSeriesEnd(eventDate as string)) {
+    return json({ error: "A sheet can run for up to one year — pick an earlier end." }, { status: 400 });
   }
 
   // One slot row per (date x task). Single-date sheets keep exactly one row per
@@ -277,13 +281,9 @@ export async function action({ request, context }: ActionFunctionArgs) {
   if (slotRows.length === 0) {
     return json({ error: "No task runs on any of those dates — check each task's days." }, { status: 400 });
   }
-  if (slotRows.length > MAX_SLOT_ROWS_PER_EVENT) {
-    return json(
-      {
-        error: `That makes ${slotRows.length} task slots (dates x tasks) — the maximum is ${MAX_SLOT_ROWS_PER_EVENT}. Use fewer dates or fewer tasks.`,
-      },
-      { status: 400 }
-    );
+  const limitError = dateLimitError(dates, slotRows.length);
+  if (limitError) {
+    return json({ error: limitError }, { status: 400 });
   }
 
   const eventId = await generateUniquePublicId(async (candidate) => {
@@ -497,7 +497,7 @@ export default function CreateSignupSheet() {
   // One over the limit, so the picker can say "too many" instead of rendering
   // a list the server would reject anyway.
   const sheetDates =
-    dateSpec.mode === "single" ? [startDate] : expandDates(dateSpec, startDate, MAX_DATES_PER_EVENT + 1);
+    dateSpec.mode === "single" ? [startDate] : expandDates(dateSpec, startDate, MAX_SERIES_DAYS + 1);
   const dayChoices = multiDateEnabled ? dayChoicesFor(dateSel, sheetDates) : [];
   const dayChoiceKeys = dayChoices.map((c) => c.key);
   /** Drops day keys left over from an earlier date selection. */
@@ -506,6 +506,19 @@ export default function CreateSignupSheet() {
     const kept = shift.days.filter((d) => dayChoiceKeys.includes(d));
     return kept.length === 0 || kept.length === dayChoiceKeys.length ? null : kept;
   };
+  /** Sign-up slots this sheet would create: one per task on each date it runs. */
+  const taskSlotCount = sheetDates.reduce(
+    (total, date) =>
+      total +
+      shifts.reduce((perDate, shift) => {
+        const days = daysForShift(shift);
+        const runs = !days || days.includes(date) || days.includes(`w${weekdayOf(date)}`);
+        return perDate + (runs ? shift.tasks.length : 0);
+      }, 0),
+    0
+  );
+  const dateError = multiDateEnabled ? dateLimitError(sheetDates, taskSlotCount) : null;
+
   const toggleShiftDay = (shiftId: number, key: string) => {
     setShifts((prev) =>
       prev.map((s) => {
@@ -735,7 +748,7 @@ export default function CreateSignupSheet() {
             {multiDateEnabled && (
               <>
                 <RepeatRuleField start={startDate} value={dateSel} onChange={setDateSel} />
-                <DateSummary value={dateSel} dates={sheetDates} />
+                <DateSummary value={dateSel} dates={sheetDates} error={dateError} />
               </>
             )}
 

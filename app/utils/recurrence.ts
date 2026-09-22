@@ -10,6 +10,14 @@
 // events.event_date is treated everywhere else) — never on local Date objects,
 // so a viewer's timezone can never shift a generated day.
 
+/**
+ * How far a sheet may run. A school year is the longest real schedule anyone
+ * asks for ("every Tuesday, September to June"), so a sheet covers at most one
+ * year from its first date — a rule an organizer can reason about, unlike a
+ * bare count of dates.
+ */
+export const MAX_SERIES_DAYS = 365;
+
 export type RepeatRule =
   | { type: "daily" }
   /** Monday–Friday. */
@@ -28,6 +36,11 @@ export type DateSpec =
   | { mode: "repeat"; rule: RepeatRule; ends: EndRule };
 
 export const SINGLE_SPEC: DateSpec = { mode: "single" };
+
+/** The last date a sheet starting on `start` is allowed to reach. */
+export function maxSeriesEnd(start: string): string {
+  return addDays(start, MAX_SERIES_DAYS);
+}
 
 const ISO_RE = /^(\d{4})-(\d{2})-(\d{2})$/;
 const WEEKDAY_NAMES = [

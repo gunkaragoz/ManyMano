@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { CalendarDays, CalendarRange, Check, ChevronDown, Repeat } from "lucide-react";
 import DatePicker from "~/components/DatePicker";
 import {
+  MAX_SERIES_DAYS,
   addDays,
   describeSpec,
   presetsFor,
@@ -9,7 +10,7 @@ import {
   type DateSpec,
 } from "~/utils/recurrence";
 import { formatSlotDateLabel } from "~/utils/calendar";
-import { MAX_DATES_PER_EVENT } from "~/utils/validation";
+import { MAX_SLOT_ROWS_PER_EVENT } from "~/utils/validation";
 
 /**
  * Form state for the event's dates. Kept flat (and JSON-serialisable) so it
@@ -76,7 +77,7 @@ export function dayChoicesFor(
   sel: DateSelection,
   dates: string[]
 ): { key: string; label: string }[] {
-  if (sel.mode === "range" && dates.length > 1 && dates.length <= MAX_DATES_PER_EVENT) {
+  if (sel.mode === "range" && dates.length > 1 && dates.length <= 31) {
     return dates.map((d) => ({ key: d, label: formatSlotDateLabel(d) }));
   }
   if (sel.mode === "repeat") {
@@ -225,11 +226,11 @@ export function DateEndField({
           <input
             type="number"
             min="1"
-            max={MAX_DATES_PER_EVENT}
+            max={MAX_SLOT_ROWS_PER_EVENT}
             value={value.count}
             onChange={(e) =>
               patch({
-                count: Math.min(Math.max(parseInt(e.target.value, 10) || 1, 1), MAX_DATES_PER_EVENT),
+                count: Math.min(Math.max(parseInt(e.target.value, 10) || 1, 1), MAX_SLOT_ROWS_PER_EVENT),
               })
             }
             className={`${NUMBER_INPUT} w-20 py-3 text-sm`}
@@ -434,22 +435,39 @@ export function RepeatRuleField({
   );
 }
 
-/** "13 dates · Tue, Sep 22 – Tue, Dec 15", or the over-the-limit warning. */
-export function DateSummary({ value, dates }: { value: DateSelection; dates: string[] }) {
+/** "13 dates · Tue, Sep 22 – Tue, Dec 15", or the reason it won't fit. */
+export function DateSummary({
+  value,
+  dates,
+  error,
+}: {
+  value: DateSelection;
+  dates: string[];
+  /** Set by the parent, which knows how many tasks each date carries. */
+  error?: string | null;
+}) {
   if (value.mode === "single" || dates.length === 0) return null;
-  const tooMany = dates.length > MAX_DATES_PER_EVENT;
-  const text = tooMany
-    ? `That's more than ${MAX_DATES_PER_EVENT} dates — pick an earlier end.`
-    : dates.length === 1
+  const text =
+    error ||
+    (dates.length === 1
       ? formatSlotDateLabel(dates[0])
-      : `${dates.length} dates · ${formatSlotDateLabel(dates[0])} – ${formatSlotDateLabel(dates[dates.length - 1])}`;
+      : `${dates.length} dates · ${formatSlotDateLabel(dates[0])} – ${formatSlotDateLabel(dates[dates.length - 1])}`);
   return (
     <p
       className={`text-xs font-semibold rounded-xl px-3 py-2 ${
-        tooMany ? "bg-rose-50 text-rose-700" : "bg-blue-50 text-blue-700"
+        error ? "bg-rose-50 text-rose-700" : "bg-blue-50 text-blue-700"
       }`}
     >
       {text}
     </p>
   );
+}
+
+/** Shared copy for the two limits, so the form and the action say the same thing. */
+export function dateLimitError(dates: string[], taskSlots: number): string | null {
+  if (dates.length > MAX_SERIES_DAYS)
+    return "A sheet can run for up to one year — pick an earlier end.";
+  if (taskSlots > MAX_SLOT_ROWS_PER_EVENT)
+    return `${dates.length} dates with these tasks makes ${taskSlots} sign-up slots. The most a sheet can hold is ${MAX_SLOT_ROWS_PER_EVENT} — use fewer dates or fewer tasks.`;
+  return null;
 }
