@@ -3162,13 +3162,13 @@ export default function EventView() {
               )}
               <div>
                 <label className="block text-xs font-semibold text-slate-700 mb-1.5">
-                  Video Link or Location
+                  Location or Link
                 </label>
                 <input
                   type="text"
                   name="location"
                   defaultValue={event.location || ""}
-                  placeholder="e.g., https://meet.google.com/xyz or Central Park"
+                  placeholder="e.g., Central Park or https://meet.google.com/xyz"
                   className="w-full px-4 py-3 rounded-xl border border-slate-200/90 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all placeholder:text-slate-400"
                 />
               </div>
