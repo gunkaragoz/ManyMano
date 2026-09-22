@@ -279,7 +279,7 @@ export async function action({ request, context }: ActionFunctionArgs) {
   ).map((row, idx) => ({ ...row, displayOrder: idx }));
 
   if (slotRows.length === 0) {
-    return json({ error: "No task runs on any of those dates — check each task's days." }, { status: 400 });
+    return json({ error: "No task runs on any of those days — check the days under each shift." }, { status: 400 });
   }
   const limitError = dateLimitError(dates, slotRows.length);
   if (limitError) {
@@ -347,7 +347,7 @@ export async function action({ request, context }: ActionFunctionArgs) {
   // the same way the poll create email does.
   const datesBlock =
     dates.length > 1
-      ? `<p><strong>Dates (${dates.length}):</strong><br>${dates
+      ? `<p><strong>Days (${dates.length}):</strong><br>${dates
           .slice(0, 8)
           .map((d) => escapeHtml(formatLongDateLabel(d)))
           .join("<br>")}${dates.length > 8 ? `<br>…and ${dates.length - 8} more` : ""}</p>`

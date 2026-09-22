@@ -435,7 +435,7 @@ export function RepeatRuleField({
   );
 }
 
-/** "13 dates · Tue, Sep 22 – Tue, Dec 15", or the reason it won't fit. */
+/** "13 days · Tue, Sep 22 – Tue, Dec 15", or the reason it won't fit. */
 export function DateSummary({
   value,
   dates,
@@ -451,7 +451,7 @@ export function DateSummary({
     error ||
     (dates.length === 1
       ? formatSlotDateLabel(dates[0])
-      : `${dates.length} dates · ${formatSlotDateLabel(dates[0])} – ${formatSlotDateLabel(dates[dates.length - 1])}`);
+      : `${dates.length} days · ${formatSlotDateLabel(dates[0])} – ${formatSlotDateLabel(dates[dates.length - 1])}`);
   return (
     <p
       className={`text-xs font-semibold rounded-xl px-3 py-2 ${
@@ -468,6 +468,6 @@ export function dateLimitError(dates: string[], taskSlots: number): string | nul
   if (dates.length > MAX_SERIES_DAYS)
     return "A sheet can run for up to one year — pick an earlier end.";
   if (taskSlots > MAX_SLOT_ROWS_PER_EVENT)
-    return `${dates.length} dates with these tasks makes ${taskSlots} sign-up slots. The most a sheet can hold is ${MAX_SLOT_ROWS_PER_EVENT} — use fewer dates or fewer tasks.`;
+    return `That adds up to ${taskSlots} tasks across ${dates.length} days. A sheet can hold ${MAX_SLOT_ROWS_PER_EVENT} — use fewer days or fewer tasks.`;
   return null;
 }

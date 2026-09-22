@@ -3656,7 +3656,7 @@ export default function EventView() {
                 onClick={() => setShowAllDates(true)}
                 className="w-full px-4 py-3 rounded-2xl border border-slate-200 bg-white text-sm font-semibold text-slate-600 hover:border-blue-400 hover:text-blue-600 transition-all"
               >
-                Show all {dateSections.length} dates ({hiddenDateCount} hidden)
+                Show all {dateSections.length} days ({hiddenDateCount} hidden)
               </button>
             )}
             {showAllDates && dateSections.length > 7 && (
