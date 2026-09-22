@@ -44,18 +44,21 @@ export default async function handleRequest(
   // <script> with no nonce support — and per-request payloads rule out
   // hashes — so script-src keeps 'unsafe-inline'. The app itself ships no inline
   // scripts/handlers; React escaping remains the XSS backstop. Turnstile
-  // CDN added for widget script + challenge iframe.
+  // CDN added for widget script + challenge iframe. Cloudflare Web Analytics
+  // beacon (auto-injected) loads from static.cloudflareinsights.com and posts
+  // to cloudflareinsights.com — both allowlisted so the browser doesn't block
+  // the beacon and log console/CSP errors (Best Practices hit).
   // frame-ancestors mirrors X-Frame-Options for CSP-aware browsers.
   if (!responseHeaders.has("Content-Security-Policy")) {
     responseHeaders.set(
       "Content-Security-Policy",
       [
         "default-src 'self'",
-        "script-src 'self' 'unsafe-inline' https://challenges.cloudflare.com",
+        "script-src 'self' 'unsafe-inline' https://challenges.cloudflare.com https://static.cloudflareinsights.com",
         "style-src 'self' 'unsafe-inline'",
         "img-src 'self' data:",
         "font-src 'self' data:",
-        "connect-src 'self' https://challenges.cloudflare.com",
+        "connect-src 'self' https://challenges.cloudflare.com https://cloudflareinsights.com https://static.cloudflareinsights.com",
         "frame-src https://challenges.cloudflare.com",
         "form-action 'self'",
         "frame-ancestors 'none'",

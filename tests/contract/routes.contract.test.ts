@@ -27,9 +27,9 @@ function routeSource(file: string): string {
 }
 
 describe("route files present", () => {
-  it("ships all 18 expected route modules", () => {
+  it("ships all 19 expected route modules", () => {
     const files = readdirSync(ROUTES_DIR).sort();
-    expect(files).toHaveLength(18);
+    expect(files).toHaveLength(19);
     for (const f of CRITICAL_ROUTES) {
       expect(files, `missing critical route ${f}`).toContain(f);
     }

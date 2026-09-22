@@ -81,9 +81,9 @@ export default function Index() {
       <div className="text-center space-y-5 max-w-2xl mx-auto">
         <div className="inline-flex items-center gap-2 px-3.5 py-1 rounded-full bg-slate-100/80 border border-slate-200/80 text-slate-600 text-xs font-medium tracking-wide">
           <span>No sign-up needed</span>
-          <span className="text-slate-300">•</span>
+          <span aria-hidden="true" className="text-slate-400">•</span>
           <span>No ads or tracking</span>
-          <span className="text-slate-300">•</span>
+          <span aria-hidden="true" className="text-slate-400">•</span>
           <span>Free forever</span>
         </div>
 
@@ -215,7 +215,7 @@ export default function Index() {
             >
               <summary className="flex items-center justify-between gap-4 cursor-pointer list-none text-sm font-semibold text-slate-800">
                 {item.question}
-                <span className="text-slate-400 group-open:rotate-45 transition-transform text-lg leading-none">
+                <span aria-hidden="true" className="text-slate-500 group-open:rotate-45 transition-transform text-lg leading-none">
                   +
                 </span>
               </summary>
