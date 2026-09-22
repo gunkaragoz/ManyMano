@@ -199,13 +199,15 @@ export function describeSpec(spec: DateSpec, start: string): string {
   return every === 1 ? `Monthly on ${suffix}` : `Every ${every} months on ${suffix}`;
 }
 
-/** Dropdown presets, written from the date the organizer picked. */
+/**
+ * Repeat presets, written from the date the organizer picked. "Does not
+ * repeat" is not one of them — that is the One day mode, not a repeat rule.
+ */
 export function presetsFor(start: string, defaultEnd: string): { key: string; label: string; spec: DateSpec }[] {
   const weekday = weekdayOf(start);
   const ordinal = ORDINAL_WORDS[Math.min(weekdayOrdinalOf(start), 5) - 1];
   const ends: EndRule = { on: defaultEnd };
   return [
-    { key: "none", label: "Does not repeat", spec: SINGLE_SPEC },
     { key: "daily", label: "Every day", spec: { mode: "repeat", rule: { type: "daily" }, ends } },
     {
       key: "weekly",
