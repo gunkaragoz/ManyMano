@@ -1,21 +1,48 @@
 import { lt, inArray } from "drizzle-orm";
 import { events, eventSlots, signups, pollVotes, pollVoteEntries } from "~/db";
 
-/** Data retention: events expire this many days after creation. */
-export const RETENTION_DAYS = 90;
+/** Default data retention: events expire this many days after creation. */
+export const DEFAULT_RETENTION_DAYS = 365;
 
-export function expiryDateFor(createdAtIso: string): string {
+/**
+ * Back-compat alias for the default (existing imports keep working).
+ * Prefer resolveRetentionDays(env) at call sites so deploys can override
+ * via the RETENTION_DAYS env var.
+ */
+export const RETENTION_DAYS = DEFAULT_RETENTION_DAYS;
+
+/** Env keys for the retention override (optional — string like other worker vars). */
+export interface RetentionEnv {
+  RETENTION_DAYS?: string | number;
+}
+
+/**
+ * Resolve the retention window: explicit RETENTION_DAYS wins, otherwise the
+ * 365-day default. Non-numeric / non-positive values fall back to default
+ * (fail-safe — never disables expiry or expires everything).
+ */
+export function resolveRetentionDays(env?: RetentionEnv): number {
+  const raw = env?.RETENTION_DAYS;
+  const n = typeof raw === "number" ? raw : parseInt(String(raw ?? "").trim(), 10);
+  return Number.isFinite(n) && (n as number) > 0 ? Math.floor(n as number) : DEFAULT_RETENTION_DAYS;
+}
+
+export function expiryDateFor(createdAtIso: string, retentionDays: number = RETENTION_DAYS): string {
   const d = new Date(createdAtIso);
-  d.setDate(d.getDate() + RETENTION_DAYS);
+  d.setDate(d.getDate() + retentionDays);
   return d.toISOString();
 }
 
-export function isExpired(createdAtIso: string, now = new Date()): boolean {
-  return new Date(createdAtIso).getTime() + RETENTION_DAYS * 86400_000 < now.getTime();
+export function isExpired(
+  createdAtIso: string,
+  now: Date = new Date(),
+  retentionDays: number = RETENTION_DAYS
+): boolean {
+  return new Date(createdAtIso).getTime() + retentionDays * 86400_000 < now.getTime();
 }
 
-function cutoffIso(now = new Date()): string {
-  return new Date(now.getTime() - RETENTION_DAYS * 86400_000).toISOString();
+function cutoffIso(now: Date = new Date(), retentionDays: number = RETENTION_DAYS): string {
+  return new Date(now.getTime() - retentionDays * 86400_000).toISOString();
 }
 
 /**
@@ -24,8 +51,12 @@ function cutoffIso(now = new Date()): string {
  * Called at the top of event loaders/actions and on creation.
  * Deletes children explicitly first for D1 FK safety, then parents.
  */
-export async function pruneExpiredEvents(db: any, now = new Date()): Promise<number> {
-  const cutoff = cutoffIso(now);
+export async function pruneExpiredEvents(
+  db: any,
+  now: Date = new Date(),
+  retentionDays: number = RETENTION_DAYS
+): Promise<number> {
+  const cutoff = cutoffIso(now, retentionDays);
   const stale = await db
     .select({ id: events.id })
     .from(events)

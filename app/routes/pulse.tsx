@@ -493,8 +493,7 @@ export default function Pulse() {
           </div>
 
           <p className="text-center text-[11px] text-slate-400 pt-2">
-            Aggregate counts only — no names, emails or event titles. Events auto-expire after 90 days,
-            so windows beyond that reflect retention, not history. Data:{" "}
+            Aggregate counts only — no names, emails or event titles. Data:{" "}
             <Link to="/api/pulse" className="underline hover:text-slate-600">/api/pulse</Link>
           </p>
         </>

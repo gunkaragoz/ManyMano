@@ -38,6 +38,7 @@ import {
 } from "~/utils/reminders";
 import { normalizeTimezone } from "~/utils/validation";
 import { isValidEmail } from "~/utils/validation";
+import { resolveRetentionDays } from "~/utils/retention";
 import type { SiteConfig } from "~/utils/site";
 
 export type ReminderStatus = "sent" | "already-sent" | "skipped" | "failed" | "dry-run" | "no-recipients";
@@ -63,6 +64,7 @@ export interface ReminderFanoutEnv {
   EMAIL_DAILY_LIMIT?: string;
   EMAIL_MONTHLY_LIMIT?: string;
   ALERT_WEBHOOK_URL?: string;
+  RETENTION_DAYS?: string | number;
 }
 
 export interface ReminderRunResult {
@@ -203,10 +205,11 @@ export async function runReminderFanout(
   opts: { date: string; dryRun: boolean }
 ): Promise<ReminderRunResult> {
   const { date, dryRun } = opts;
+  const retentionDays = resolveRetentionDays(env);
   const ctx: SenderCtx = { ...makeSenderCtx(db, d1, site, env), counters: newCounters() };
 
   const reports: EventReport[] = [];
-  const targets: ReminderTarget[] = await collectReminderTargets(db, date);
+  const targets: ReminderTarget[] = await collectReminderTargets(db, date, retentionDays);
   for (const target of targets) {
     try {
       if (target.kind === "signup_sheet") {
@@ -269,6 +272,7 @@ export async function runScheduledReminders(
   nowMs: number
 ): Promise<ReminderRunResult> {
   const ctx: SenderCtx = { ...makeSenderCtx(db, d1, site, env), counters: newCounters() };
+  const retentionDays = resolveRetentionDays(env);
   const todayUtc = new Date(nowMs).toISOString().slice(0, 10);
 
   const reports: EventReport[] = [];
@@ -277,7 +281,7 @@ export async function runScheduledReminders(
     const date = addDaysIso(todayUtc, offset);
     if (!date) continue;
     // eslint-disable-next-line no-await-in-loop
-    const targets = await collectReminderTargets(db, date);
+    const targets = await collectReminderTargets(db, date, retentionDays);
     for (const target of targets) {
       // A target matches exactly one scan date (event/effective date).
       if (seen.has(target.event.id)) continue;

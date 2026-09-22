@@ -2,7 +2,7 @@ import { getCloudflareEnv } from "~/utils/cloudflare-context";
 import type { LoaderFunctionArgs } from "react-router";
 import { eq } from "drizzle-orm";
 import { getDb, events } from "~/db";
-import { isExpired, pruneExpiredEvents } from "~/utils/retention";
+import { isExpired, pruneExpiredEvents, resolveRetentionDays } from "~/utils/retention";
 import { getSiteConfig } from "~/utils/site";
 import { escapeHtml } from "~/utils/sanitize";
 import { eventQrValue, qrPngBytes, qrSvgString } from "~/utils/qr";
@@ -22,8 +22,9 @@ export async function loader({ params, request, context }: LoaderFunctionArgs) {
     throw new Response("Event not found", { status: 404 });
   }
 
+  const retentionDays = resolveRetentionDays(env);
   try {
-    await pruneExpiredEvents(db);
+    await pruneExpiredEvents(db, new Date(), retentionDays);
   } catch {}
 
   const [event] = await db
@@ -34,7 +35,7 @@ export async function loader({ params, request, context }: LoaderFunctionArgs) {
   if (!event) {
     throw new Response("Event not found", { status: 404 });
   }
-  if (isExpired(event.createdAt)) {
+  if (isExpired(event.createdAt, new Date(), retentionDays)) {
     throw new Response("This event expired and was auto-deleted.", { status: 410 });
   }
 

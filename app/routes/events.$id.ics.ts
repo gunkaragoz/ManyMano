@@ -4,7 +4,7 @@ import { eq } from "drizzle-orm";
 import { getDb, events, eventSlots } from "~/db";
 import { generateICS, pickCalendarSlot, effectiveDateForSlot } from "~/utils/calendar";
 import { getPresentedAdminToken, secretMatches } from "~/utils/auth";
-import { isExpired, pruneExpiredEvents } from "~/utils/retention";
+import { isExpired, pruneExpiredEvents, resolveRetentionDays } from "~/utils/retention";
 import { getSiteConfig } from "~/utils/site";
 
 export async function loader({ params, request, context }: LoaderFunctionArgs) {
@@ -19,15 +19,16 @@ export async function loader({ params, request, context }: LoaderFunctionArgs) {
     throw new Response("Event not found", { status: 404 });
   }
 
+  const retentionDays = resolveRetentionDays(env);
   try {
-    await pruneExpiredEvents(db);
+    await pruneExpiredEvents(db, new Date(), retentionDays);
   } catch {}
 
   const [event] = await db.select().from(events).where(eq(events.id, eventId)).limit(1);
   if (!event) {
     throw new Response("Event not found", { status: 404 });
   }
-  if (isExpired(event.createdAt)) {
+  if (isExpired(event.createdAt, new Date(), retentionDays)) {
     throw new Response("This event expired and was auto-deleted.", { status: 410 });
   }
 

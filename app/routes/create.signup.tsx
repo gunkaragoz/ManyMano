@@ -39,7 +39,7 @@ import {
   parseTimezoneInput,
   timeToMinutes,
 } from "~/utils/validation";
-import { pruneExpiredEvents } from "~/utils/retention";
+import { pruneExpiredEvents, resolveRetentionDays } from "~/utils/retention";
 import { getSiteConfig } from "~/utils/site";
 import { verifyTurnstile, turnstileFailure } from "~/utils/turnstile";
 import Turnstile from "~/components/Turnstile";
@@ -86,6 +86,7 @@ export async function action({ request, context }: ActionFunctionArgs) {
     EMAIL_DAILY_LIMIT?: string;
     EMAIL_MONTHLY_LIMIT?: string;
     ALERT_WEBHOOK_URL?: string;
+    RETENTION_DAYS?: string;
     FROM_EMAIL: string;
     SITE_URL: string;
     SITE_NAME: string;
@@ -103,7 +104,7 @@ export async function action({ request, context }: ActionFunctionArgs) {
   const site = getSiteConfig(env);
   const db = getDb(env.DB);
   try {
-    await pruneExpiredEvents(db);
+    await pruneExpiredEvents(db, new Date(), resolveRetentionDays(env));
   } catch {}
   const formData = await request.formData();
 

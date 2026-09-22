@@ -3,10 +3,10 @@ import type { LoaderFunctionArgs } from "react-router";
 import { eq, and, inArray } from "drizzle-orm";
 import { getDb, events, eventSlots, signups, pollVotes, pollVoteEntries } from "~/db";
 import { getPresentedAdminToken, verifyAdminToken } from "~/utils/auth";
-import { isExpired, pruneExpiredEvents } from "~/utils/retention";
+import { isExpired, pruneExpiredEvents, resolveRetentionDays } from "~/utils/retention";
 
 export async function loader({ params, request, context }: LoaderFunctionArgs) {
-  const env = getCloudflareEnv(context) as { DB: D1Database };
+  const env = getCloudflareEnv(context) as { DB: D1Database; RETENTION_DAYS?: string };
   const db = getDb(env.DB);
   const eventId = params.id;
 
@@ -14,15 +14,16 @@ export async function loader({ params, request, context }: LoaderFunctionArgs) {
     throw new Response("Event not found", { status: 404 });
   }
 
+  const retentionDays = resolveRetentionDays(env);
   try {
-    await pruneExpiredEvents(db);
+    await pruneExpiredEvents(db, new Date(), retentionDays);
   } catch {}
 
   const [event] = await db.select().from(events).where(eq(events.id, eventId)).limit(1);
   if (!event) {
     throw new Response("Event not found", { status: 404 });
   }
-  if (isExpired(event.createdAt)) {
+  if (isExpired(event.createdAt, new Date(), retentionDays)) {
     throw new Response("This event expired and was auto-deleted.", { status: 410 });
   }
 

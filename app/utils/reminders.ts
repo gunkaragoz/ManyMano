@@ -34,7 +34,7 @@ import {
 } from "~/db";
 import { buildGoogleCalendarUrl, effectiveDateForSlot, formatLongDateLabel } from "./calendar";
 import { zonedWallTimeToUtc } from "./timezones";
-import { isExpired } from "./retention";
+import { isExpired, RETENTION_DAYS } from "./retention";
 import { isValidEmail } from "./validation";
 import { escapeHtml } from "./sanitize";
 import { emailFooter } from "./email";
@@ -172,7 +172,11 @@ function toEventInfo(e: typeof events.$inferSelect): ReminderEventInfo {
  * Expired events are skipped. Never throws for a missing reminder_sends
  * table — dedupe is checked separately so a pre-migration DB still sends.
  */
-export async function collectReminderTargets(db: AppDb, date: string): Promise<ReminderTarget[]> {
+export async function collectReminderTargets(
+  db: AppDb,
+  date: string,
+  retentionDays: number = RETENTION_DAYS
+): Promise<ReminderTarget[]> {
   const targets: ReminderTarget[] = [];
 
   // 1. Sign-up sheets dated `date` (dateless sheets can't have a day-before).
@@ -181,7 +185,7 @@ export async function collectReminderTargets(db: AppDb, date: string): Promise<R
     .from(events)
     .where(and(eq(events.type, "SIGNUP_SHEET"), eq(events.eventDate, date)));
   for (const e of sheets) {
-    if (isExpired(e.createdAt)) continue;
+    if (isExpired(e.createdAt, new Date(), retentionDays)) continue;
     const slots = await db
       .select()
       .from(eventSlots)
@@ -219,7 +223,7 @@ export async function collectReminderTargets(db: AppDb, date: string): Promise<R
     .where(and(eq(events.type, "TIME_POLL"), eq(events.status, "FINALIZED")))
     .limit(500);
   for (const e of finalized) {
-    if (!e.winningSlotId || isExpired(e.createdAt)) continue;
+    if (!e.winningSlotId || isExpired(e.createdAt, new Date(), retentionDays)) continue;
     const slots = await db.select().from(eventSlots).where(eq(eventSlots.eventId, e.id));
     const winning = slots.find((s) => s.id === e.winningSlotId);
     if (!winning) continue;

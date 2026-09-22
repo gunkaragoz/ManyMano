@@ -65,6 +65,7 @@ interface ReminderEnv {
   EMAIL_MONTHLY_LIMIT?: string;
   ALERT_WEBHOOK_URL?: string;
   REMINDER_SECRET?: string;
+  RETENTION_DAYS?: string | number;
   FROM_EMAIL: string;
   SITE_URL: string;
   SITE_NAME: string;

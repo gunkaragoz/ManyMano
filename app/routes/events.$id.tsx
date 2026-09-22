@@ -40,7 +40,7 @@ import {
   secretMatches,
   verifyAdminToken,
 } from "~/utils/auth";
-import { expiryDateFor, isExpired, pruneExpiredEvents, RETENTION_DAYS } from "~/utils/retention";
+import { expiryDateFor, isExpired, pruneExpiredEvents, resolveRetentionDays } from "~/utils/retention";
 import { verifyTurnstile, turnstileFailure, hasTurnstileToken } from "~/utils/turnstile";
 import { assessGuestRequest, needsVerification } from "~/utils/bot-protection";
 import Turnstile from "~/components/Turnstile";
@@ -127,7 +127,7 @@ export const meta: MetaFunction<typeof loader> = ({ loaderData, matches }) => {
   ]);
 };
 
-function publicEventShape(e: typeof events.$inferSelect) {
+function publicEventShape(e: typeof events.$inferSelect, retentionDays: number) {
   return {
     id: e.id,
     type: e.type,
@@ -142,14 +142,14 @@ function publicEventShape(e: typeof events.$inferSelect) {
     durationMinutes: (e as { durationMinutes?: number | null }).durationMinutes ?? null,
     createdAt: e.createdAt,
     updatedAt: e.updatedAt,
-    expiresAt: expiryDateFor(e.createdAt),
-    retentionDays: RETENTION_DAYS,
+    expiresAt: expiryDateFor(e.createdAt, retentionDays),
+    retentionDays,
   };
 }
 
-function adminEventShape(e: typeof events.$inferSelect) {
+function adminEventShape(e: typeof events.$inferSelect, retentionDays: number) {
   return {
-    ...publicEventShape(e),
+    ...publicEventShape(e, retentionDays),
     organizerEmail: e.organizerEmail,
   };
 }
@@ -176,7 +176,7 @@ export function ErrorBoundary() {
         title={isGone ? "This event is no longer available" : "This event couldn't be found"}
         message={
           isGone
-            ? `This event expired after ${RETENTION_DAYS} days and was automatically deleted. You'll be taken back to the main page shortly.`
+            ? "This event expired and was automatically deleted. You'll be taken back to the main page shortly."
             : "The link may be wrong, or the event was deleted or expired. You'll be taken back to the main page shortly."
         }
       />
@@ -190,6 +190,7 @@ export async function loader({ params, request, context, url }: LoaderFunctionAr
   const env = getCloudflareEnv(context) as {
     DB: D1Database;
     TURNSTILE_SITE_KEY?: string;
+    RETENTION_DAYS?: string;
     SITE_URL: string;
     SITE_NAME: string;
     SITE_TAGLINE: string;
@@ -204,6 +205,7 @@ export async function loader({ params, request, context, url }: LoaderFunctionAr
   };
   const site = getSiteConfig(env);
   const db = getDb(env.DB);
+  const retentionDays = resolveRetentionDays(env);
   const eventId = params.id;
 
   if (!eventId) {
@@ -212,7 +214,7 @@ export async function loader({ params, request, context, url }: LoaderFunctionAr
 
   // Best-effort auto-prune of long-expired events.
   try {
-    await pruneExpiredEvents(db);
+    await pruneExpiredEvents(db, new Date(), retentionDays);
   } catch {
     // pruning must never break reads
   }
@@ -223,7 +225,7 @@ export async function loader({ params, request, context, url }: LoaderFunctionAr
     throw new Response("Event not found", { status: 404 });
   }
 
-  if (isExpired(event.createdAt)) {
+  if (isExpired(event.createdAt, new Date(), retentionDays)) {
     throw new Response("This event expired and was auto-deleted.", { status: 410 });
   }
 
@@ -327,7 +329,7 @@ export async function loader({ params, request, context, url }: LoaderFunctionAr
 
     return data(
       {
-        event: isAdmin ? adminEventShape(event) : publicEventShape(event),
+        event: isAdmin ? adminEventShape(event, retentionDays) : publicEventShape(event, retentionDays),
         slots,
         signups: safeSignups,
         isAdmin,
@@ -398,7 +400,7 @@ export async function loader({ params, request, context, url }: LoaderFunctionAr
 
     return data(
       {
-        event: isAdmin ? adminEventShape(event) : publicEventShape(event),
+        event: isAdmin ? adminEventShape(event, retentionDays) : publicEventShape(event, retentionDays),
         slots,
         signups: [],
         isAdmin,
@@ -459,6 +461,7 @@ export async function action({ request, params, context }: ActionFunctionArgs) {
     EMAIL_DAILY_LIMIT?: string;
     EMAIL_MONTHLY_LIMIT?: string;
     ALERT_WEBHOOK_URL?: string;
+    RETENTION_DAYS?: string;
     FROM_EMAIL: string;
     SITE_URL: string;
     SITE_NAME: string;
@@ -476,6 +479,7 @@ export async function action({ request, params, context }: ActionFunctionArgs) {
   // Fail-fast: FROM_EMAIL / SITE_NAME / ICS_* required — no fallback.
   const site = getSiteConfig(env);
   const db = getDb(env.DB);
+  const retentionDays = resolveRetentionDays(env);
   const eventId = params.id;
 
   if (!eventId) {
@@ -483,14 +487,14 @@ export async function action({ request, params, context }: ActionFunctionArgs) {
   }
 
   try {
-    await pruneExpiredEvents(db);
+    await pruneExpiredEvents(db, new Date(), retentionDays);
   } catch {}
 
   const [event] = await db.select().from(events).where(eq(events.id, eventId)).limit(1);
   if (!event) {
     return data({ error: "Event not found." }, { status: 404 });
   }
-  if (isExpired(event.createdAt)) {
+  if (isExpired(event.createdAt, new Date(), retentionDays)) {
     return data({ error: "This event expired and was auto-deleted." }, { status: 410 });
   }
 
