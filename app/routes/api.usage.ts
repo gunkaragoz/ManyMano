@@ -1,5 +1,6 @@
-import type { HeadersFunction, LoaderFunctionArgs } from "@remix-run/cloudflare";
-import { json } from "@remix-run/cloudflare";
+import { getCloudflareEnv } from "~/utils/cloudflare-context";
+import type { HeadersFunction, LoaderFunctionArgs } from "react-router";
+import { data } from "react-router";
 import { getSiteConfig } from "~/utils/site";
 import { resolveEmailProvider, providerLabel } from "~/utils/email";
 import {
@@ -31,7 +32,7 @@ export const headers: HeadersFunction = ({ loaderHeaders }) => {
 };
 
 export async function loader({ context }: LoaderFunctionArgs) {
-  const env = context.cloudflare.env as {
+  const env = getCloudflareEnv(context) as {
     DB: D1Database;
     EMAIL_PROVIDER?: string;
     EMAIL_DAILY_LIMIT?: string;
@@ -55,7 +56,7 @@ export async function loader({ context }: LoaderFunctionArgs) {
     email = { daily: 0, monthly: 0, dailyPct: 0, monthlyPct: 0 };
   }
 
-  return json(
+  return data(
     {
       email: {
         ...email,
@@ -73,7 +74,7 @@ export async function loader({ context }: LoaderFunctionArgs) {
         note: "Live usage lives in the Cloudflare dashboard; this app can't read it without an API token. Cloudflare emails the account owner automatically at ~90% of daily limits.",
         workersFree: { requestsPerDay: 100000, cpuMsPerRequest: 10 },
         d1Free: { rowsReadPerDay: 5000000, rowsWrittenPerDay: 100000, storageGb: 5 },
-        dashboard: "https://dash.cloudflare.com/ → Workers & Pages → Metrics; D1 → Overview",
+        dashboard: "https://dash.cloudflare.com/ → Workers & Pages → manymano → Metrics; Observability → Logs; D1 → manymano-db",
       },
       site: site.siteName,
     },

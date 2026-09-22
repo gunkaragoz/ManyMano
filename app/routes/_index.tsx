@@ -1,12 +1,13 @@
-import type { MetaFunction } from "@remix-run/cloudflare";
-import { Link, useLoaderData, useSearchParams } from "@remix-run/react";
+import { getCloudflareEnv } from "~/utils/cloudflare-context";
+import type { MetaFunction } from "react-router";
+import { Link, useLoaderData, useSearchParams } from "react-router";
 import { useEffect, useState } from "react";
 import { ArrowRight, CalendarDays, Check, CircleCheck, ClipboardList, X } from "lucide-react";
 import { getHomeFaq, faqPageJsonLd, mergeParentMeta, rootSiteFromMatches } from "~/utils/seo";
 import type { FaqItem } from "~/utils/seo";
 import { getSiteConfig, toPublicSiteConfig } from "~/utils/site";
-import { json } from "@remix-run/cloudflare";
-import type { LoaderFunctionArgs } from "@remix-run/cloudflare";
+import { data } from "react-router";
+import type { LoaderFunctionArgs } from "react-router";
 
 // Brand-specific extras live here (route-level), not in getHomeFaq(),
 // so forks with a different SITE_NAME keep a clean generic FAQ.
@@ -23,15 +24,15 @@ function getFaqForSite(siteName: string): FaqItem[] {
 }
 
 export async function loader({ context }: LoaderFunctionArgs) {
-  const config = getSiteConfig(context.cloudflare.env);
-  return json({ site: toPublicSiteConfig(config), faq: getFaqForSite(config.siteName) });
+  const config = getSiteConfig(getCloudflareEnv(context));
+  return data({ site: toPublicSiteConfig(config), faq: getFaqForSite(config.siteName) });
 }
 
 // Remix renders only the deepest `meta` export, so merge parent (root)
 // descriptors and just append the home-only FAQ JSON-LD. Without this the
 // homepage would lose its <title>, description, OG tags and canonical.
-export const meta: MetaFunction<typeof loader> = ({ data, matches }) => {
-  const faq = data?.faq ?? getFaqForSite(rootSiteFromMatches(matches).siteName);
+export const meta: MetaFunction<typeof loader> = ({ loaderData, matches }) => {
+  const faq = loaderData?.faq ?? getFaqForSite(rootSiteFromMatches(matches).siteName);
   return mergeParentMeta(matches, [
     { "script:ld+json": faqPageJsonLd(faq) },
   ]);
@@ -80,9 +81,9 @@ export default function Index() {
       <div className="text-center space-y-5 max-w-2xl mx-auto">
         <div className="inline-flex items-center gap-2 px-3.5 py-1 rounded-full bg-slate-100/80 border border-slate-200/80 text-slate-600 text-xs font-medium tracking-wide">
           <span>No sign-up needed</span>
-          <span className="text-slate-300">•</span>
+          <span aria-hidden="true" className="text-slate-400">•</span>
           <span>No ads or tracking</span>
-          <span className="text-slate-300">•</span>
+          <span aria-hidden="true" className="text-slate-400">•</span>
           <span>Free forever</span>
         </div>
 
@@ -214,7 +215,7 @@ export default function Index() {
             >
               <summary className="flex items-center justify-between gap-4 cursor-pointer list-none text-sm font-semibold text-slate-800">
                 {item.question}
-                <span className="text-slate-400 group-open:rotate-45 transition-transform text-lg leading-none">
+                <span aria-hidden="true" className="text-slate-500 group-open:rotate-45 transition-transform text-lg leading-none">
                   +
                 </span>
               </summary>

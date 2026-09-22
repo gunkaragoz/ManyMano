@@ -1,8 +1,9 @@
-import type { ActionFunctionArgs, LoaderFunctionArgs, MetaFunction } from "@remix-run/cloudflare";
-import { json, redirect } from "@remix-run/cloudflare";
-import { Form, useActionData, useLoaderData, useNavigation, Link } from "@remix-run/react";
+import { getCloudflareEnv } from "~/utils/cloudflare-context";
+import type { ActionFunctionArgs, LoaderFunctionArgs, MetaFunction } from "react-router";
+import { data, redirect } from "react-router";
+import { Form, useActionData, useLoaderData, useNavigation, Link } from "react-router";
 import { useEffect, useRef, useState } from "react";
-import { ArrowLeft, ArrowRight, CalendarDays, TriangleAlert, X } from "lucide-react";
+import { ArrowLeft, ArrowRight, CalendarDays, Info, TriangleAlert, X } from "lucide-react";
 import { usePersistentState } from "~/utils/usePersistentState";
 import DatePicker from "~/components/DatePicker";
 import TimePicker from "~/components/TimePicker";
@@ -36,7 +37,7 @@ import {
   isValidIsoDate,
   parseTimezoneInput,
 } from "~/utils/validation";
-import { pruneExpiredEvents } from "~/utils/retention";
+import { pruneExpiredEvents, resolveRetentionDays } from "~/utils/retention";
 import { getSiteConfig } from "~/utils/site";
 import { addMinutesToTimeString, formatSlotDateLabel, formatLongDateLabel, formatDurationLabel } from "~/utils/calendar";
 import {
@@ -63,10 +64,10 @@ export const meta: MetaFunction = ({ matches }) => {
 };
 
 export async function loader({ context }: LoaderFunctionArgs) {
-  const env = context.cloudflare.env as {
+  const env = getCloudflareEnv(context) as {
     TURNSTILE_SITE_KEY?: string;
   };
-  return json({ turnstileSiteKey: env.TURNSTILE_SITE_KEY ?? null });
+  return data({ turnstileSiteKey: env.TURNSTILE_SITE_KEY ?? null });
 }
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
@@ -83,7 +84,7 @@ function formatTimeDisplay(t: string): string {
 }
 
 export async function action({ request, context }: ActionFunctionArgs) {
-  const env = context.cloudflare.env as {
+  const env = getCloudflareEnv(context) as {
     DB: D1Database;
     EMAIL_PROVIDER?: string;
     RESEND_API_KEY?: string;
@@ -95,6 +96,7 @@ export async function action({ request, context }: ActionFunctionArgs) {
     EMAIL_DAILY_LIMIT?: string;
     EMAIL_MONTHLY_LIMIT?: string;
     ALERT_WEBHOOK_URL?: string;
+    RETENTION_DAYS?: string;
     FROM_EMAIL: string;
     SITE_URL: string;
     SITE_NAME: string;
@@ -112,7 +114,7 @@ export async function action({ request, context }: ActionFunctionArgs) {
   const site = getSiteConfig(env);
   const db = getDb(env.DB);
   try {
-    await pruneExpiredEvents(db);
+    await pruneExpiredEvents(db, new Date(), resolveRetentionDays(env));
   } catch {}
   const formData = await request.formData();
 
@@ -124,16 +126,16 @@ export async function action({ request, context }: ActionFunctionArgs) {
   const timezone = parseTimezoneInput(formData.get("timezone") as string);
 
   if (!title) {
-    return json({ error: "Please enter a meeting title." }, { status: 400 });
+    return data({ error: "Please enter a meeting title." }, { status: 400 });
   }
   if (!timezone) {
-    return json({ error: "Please pick a timezone from the list." }, { status: 400 });
+    return data({ error: "Please pick a timezone from the list." }, { status: 400 });
   }
   if (!organizerName) {
-    return json({ error: "Please enter your name." }, { status: 400 });
+    return data({ error: "Please enter your name." }, { status: 400 });
   }
   if (!isValidEmail(organizerEmail)) {
-    return json({ error: "A valid email is required to receive your secret management link." }, { status: 400 });
+    return data({ error: "A valid email is required to receive your secret management link." }, { status: 400 });
   }
 
   // Bot protection before any DB work.
@@ -145,7 +147,7 @@ export async function action({ request, context }: ActionFunctionArgs) {
   });
   if (!turnstile.ok) {
     const f = turnstileFailure();
-    return json(f.body, { status: f.status });
+    return data(f.body, { status: f.status });
   }
 
   // Single duration for the whole poll. "allday" (or missing) => NULL = All day.
@@ -156,7 +158,7 @@ export async function action({ request, context }: ActionFunctionArgs) {
   } else {
     const parsed = parseInt(durationRaw, 10);
     if (Number.isNaN(parsed) || parsed < 5 || parsed > 1440) {
-      return json({ error: "Please pick a valid duration (5–1440 minutes) or All day." }, { status: 400 });
+      return data({ error: "Please pick a valid duration (5–1440 minutes) or All day." }, { status: 400 });
     }
     durationMinutes = parsed;
   }
@@ -175,7 +177,7 @@ export async function action({ request, context }: ActionFunctionArgs) {
   }> = [];
 
   if (slotDates.length > MAX_SLOTS_PER_EVENT) {
-    return json(
+    return data(
       { error: `Too many options — maximum ${MAX_SLOTS_PER_EVENT} per poll.` },
       { status: 400 }
     );
@@ -187,14 +189,14 @@ export async function action({ request, context }: ActionFunctionArgs) {
     const date = (slotDates[idx] || "").trim();
     if (!date) continue;
     if (!DATE_RE.test(date) || !isValidIsoDate(date)) {
-      return json({ error: `Row ${idx + 1}: please pick a valid day.` }, { status: 400 });
+      return data({ error: `Row ${idx + 1}: please pick a valid day.` }, { status: 400 });
     }
     if (isPastIsoDate(date)) {
-      return json({ error: `Row ${idx + 1}: that day has already passed.` }, { status: 400 });
+      return data({ error: `Row ${idx + 1}: that day has already passed.` }, { status: 400 });
     }
     const optionKey = `${date}|${durationMinutes === null ? "" : (slotStartTimes[idx] || "").trim()}`;
     if (seenOptions.has(optionKey)) {
-      return json({ error: `Row ${idx + 1}: this day and time is already in the poll.` }, { status: 400 });
+      return data({ error: `Row ${idx + 1}: this day and time is already in the poll.` }, { status: 400 });
     }
     seenOptions.add(optionKey);
     const label = cleanText(slotLabels[idx], SLOT_TITLE_MAX);
@@ -210,7 +212,7 @@ export async function action({ request, context }: ActionFunctionArgs) {
     }
     const start = (slotStartTimes[idx] || "").trim();
     if (!TIME_RE.test(start)) {
-      return json({ error: `Row ${idx + 1}: please pick a start time.` }, { status: 400 });
+      return data({ error: `Row ${idx + 1}: please pick a start time.` }, { status: 400 });
     }
     // One duration for the whole poll: the end is always derived from it, so
     // a posted end time can't contradict the start (overnight wrap is fine).
@@ -225,7 +227,7 @@ export async function action({ request, context }: ActionFunctionArgs) {
   }
 
   if (validSlots.length === 0) {
-    return json({ error: "Please add at least one day." }, { status: 400 });
+    return data({ error: "Please add at least one day." }, { status: 400 });
   }
 
   const sortedDates = [...validSlots].map((s) => s.slotDate).sort();
@@ -725,8 +727,18 @@ export default function CreateMeetingPoll() {
                         : "border-slate-200/90 focus:ring-green-500/20 focus:border-green-500"
                     }`}
                   />
-                  <span className="text-[11px] text-slate-500 mt-1 block">
-                    No account needed. Your email receives your private organizer link (never shown publicly or shared). Lose it and you can get a new one from the event page — the old link will stop working.
+                  <span className="text-[11px] text-slate-500 mt-1 flex items-center gap-1">
+                    No account needed. We&apos;ll email you a private organizer link.
+                    <span className="relative inline-flex group/info">
+                      <Info
+                        className="w-3.5 h-3.5 text-slate-400 hover:text-slate-600 cursor-help"
+                        tabIndex={0}
+                        aria-label="More info about organizer link"
+                      />
+                      <span className="invisible opacity-0 group-hover/info:visible group-hover/info:opacity-100 group-focus-within/info:visible group-focus-within/info:opacity-100 transition-all absolute left-1/2 -translate-x-1/2 bottom-full mb-2 w-56 p-2 rounded-lg bg-slate-900 text-white text-[11px] leading-snug shadow-lg z-10 font-normal normal-case">
+                        Never shown publicly or shared. Lose it and you can get a new one from the event page — the old link will stop working.
+                      </span>
+                    </span>
                   </span>
                 </div>
               </div>

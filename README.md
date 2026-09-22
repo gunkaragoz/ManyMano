@@ -1,6 +1,6 @@
 # ManyMano 🤝
 
-> An easy, ad-free tool for sign-up sheets and meeting time polls. No accounts — create and share in seconds. Free forever, open source. Built to run 100% free on **Cloudflare Pages & D1** with zero subscription costs.
+> An easy, ad-free tool for sign-up sheets and meeting time polls. No accounts — create and share in seconds. Free forever, open source. Built to run 100% free on **Cloudflare Workers & D1** with zero subscription costs.
 
 [![Deploy to Cloudflare](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/gunkaragoz/ManyMano)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
@@ -31,14 +31,22 @@
 ## 🚀 One-Click Deploy to Cloudflare
 
 ManyMano is architected to fit comfortably inside **Cloudflare's Free Tier**:
-- **Cloudflare Pages & Workers**: 100,000 requests/day, tiny <100KB worker bundle.
+- **Cloudflare Workers**: 100,000 requests/day, tiny worker bundle.
 - **Cloudflare D1 (SQLite)**: 5,000,000 reads/day, 100,000 writes/day, 5GB storage.
 - **Resend Transactional Email**: 3,000 free emails/month (default provider).
 - **SMTP / Amazon SES**: switch `EMAIL_PROVIDER` to `smtp` for higher volume via any SMTP server, including SES.
 
-### Step 1: Deploy with Git
-1. Click the **[Deploy to Cloudflare](https://deploy.workers.cloudflare.com/?url=https://github.com/gunkaragoz/ManyMano)** button above.
-2. Connect your GitHub account and fork the repository.
+### Step 1: Deploy the Worker
+```bash
+pnpm install
+pnpm run deploy   # typecheck + build + tests + wrangler deploy
+```
+This creates the `manymano` Worker (production). Point your domain at it
+via `[[env.production.routes]]` in `wrangler.toml`, or add a custom domain
+in the dashboard (Workers & Pages → manymano → Settings → Domains & Routes).
+
+Want a staging copy first? See `deploy:staging` (isolated worker + D1,
+no mail creds, no cron) and `tests/staging/`.
 
 ### Step 2: Create your free D1 Database
 In your Cloudflare dashboard (or via terminal with `npx wrangler`):
@@ -54,8 +62,10 @@ npx wrangler d1 migrations apply manymano-db --remote
 ```
 
 ### Step 4 (Required): Configure branding, domain & email
-In your Cloudflare Pages project settings (Settings → Environment variables),
-set **every** variable from `.env.sample` — the app throws at request time
+Plaintext vars live in `wrangler.toml` (`[vars]` for production,
+`[env.staging.vars]` for staging); secrets via `wrangler secret put`
+(see `.env.sample` for which keys are which). Set **every** variable from
+`.env.sample` — the app throws at request time
 when any is missing (no hardcoded fallbacks, so a fork can never silently
 serve the old defaults):
 - `SITE_URL`, `SITE_NAME`, `SITE_TAGLINE`, `SITE_DESCRIPTION`
@@ -70,10 +80,11 @@ Optional branding (leave empty/unset to hide — no throw):
 - `EMAIL_PROVIDER`: `resend` (default) or `smtp`.
 - `RESEND_API_KEY`: Your API key from [resend.com](https://resend.com).
 *(If omitted, ManyMano continues to work smoothly using direct in-browser `.ics` calendar downloads and direct tokenized links!)*
-- SMTP (`EMAIL_PROVIDER="smtp"`): `SMTP_HOST` / `SMTP_PORT` / `SMTP_USERNAME` / `SMTP_PASSWORD` (+ optional `SMTP_SECURE`). Works with any SMTP server, including Amazon SES via its SMTP endpoint (e.g. `email-smtp.eu-central-1.amazonaws.com:587` with SES SMTP credentials) when traffic outgrows Resend free. Notes: Workers blocks port 25 (use 587/465); SMTP sends need the Pages runtime (`wrangler pages dev` or deployed), not plain `vite dev`.
+- SMTP (`EMAIL_PROVIDER="smtp"`): `SMTP_HOST` / `SMTP_PORT` / `SMTP_USERNAME` / `SMTP_PASSWORD` (+ optional `SMTP_SECURE`). Works with any SMTP server, including Amazon SES via its SMTP endpoint (e.g. `email-smtp.eu-central-1.amazonaws.com:587` with SES SMTP credentials) when traffic outgrows Resend free. Notes: Workers blocks port 25 (use 587/465); SMTP sends need the Workers runtime (`pnpm run dev` or deployed).
 - `EMAIL_DAILY_LIMIT` / `EMAIL_MONTHLY_LIMIT`: override the quota-alert baselines for your SMTP/SES limits (defaults: Resend 100/day + 3,000/month; SMTP 50,000/day + 1,500,000/month).
 - `TURNSTILE_SITE_KEY` / `TURNSTILE_SECRET_KEY` / `TURNSTILE_HOSTNAMES`: Cloudflare Turnstile bot protection. If the secret is omitted, verification is skipped (handy for local dev).
 - `ALERT_WEBHOOK_URL`: Discord or Slack incoming webhook for quota alerts. Every sent email is counted in D1 (UTC day/month); one webhook fires at 80/90/100% of the active provider quota (see above) and on Resend 429 exhaustion. `GET /api/usage` always shows the live counters. Cloudflare itself emails the account owner at ~90% of Workers/D1 daily limits — no setup needed.
+- Day-before reminder emails run on the Worker's Cron Trigger (hourly scan, `[triggers]` in `wrangler.toml` — production only). Sends fire at 9:00 AM in the event's timezone: organizers + participants 24h ahead, plus a 48h understaffed alert for organizers of sheets with open spots. `GET /api/reminders` remains for manual dry-runs/backfills (`?dry-run=1`, `?date=YYYY-MM-DD`) authenticated by `REMINDER_SECRET`; re-runs are deduped per event+date so retries never double-email.
 
 ### Step 6: Apply migrations after pulling
 ```bash
@@ -101,14 +112,14 @@ pnpm run db:migrate:local
 pnpm run dev
 ```
 
-Open [http://localhost:5173](http://localhost:5173) in your browser.
+Open the URL from your `.dev.vars` `SITE_URL` in your browser (the dev server port follows it automatically).
 
 ---
 
 ## 🛠️ Tech Stack
 
-- **Framework**: [Remix / React Router v7](https://remix.run/) with Vite
-- **Edge Runtime**: [Cloudflare Pages & Workers](https://developers.cloudflare.com/pages/)
+- **Framework**: [React Router 8](https://reactrouter.com/) with Vite
+- **Edge Runtime**: [Cloudflare Workers](https://developers.cloudflare.com/workers/)
 - **Database**: [Cloudflare D1](https://developers.cloudflare.com/d1/) (Serverless edge SQLite)
 - **ORM & Migrations**: [Drizzle ORM](https://orm.drizzle.team/)
 - **Styling**: [Tailwind CSS](https://tailwindcss.com/)

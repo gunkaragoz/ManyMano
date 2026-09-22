@@ -1,6 +1,7 @@
-import type { HeadersFunction, LoaderFunctionArgs, MetaFunction } from "@remix-run/cloudflare";
-import { json } from "@remix-run/cloudflare";
-import { Link, useLoaderData, useNavigate, useNavigation } from "@remix-run/react";
+import { getCloudflareEnv } from "~/utils/cloudflare-context";
+import type { HeadersFunction, LoaderFunctionArgs, MetaFunction } from "react-router";
+import { data } from "react-router";
+import { Link, useLoaderData, useNavigate, useNavigation } from "react-router";
 import {
   Activity,
   ArrowRight,
@@ -49,7 +50,7 @@ export const headers: HeadersFunction = ({ loaderHeaders }) => {
 };
 
 export async function loader({ request, context }: LoaderFunctionArgs) {
-  const env = context.cloudflare.env as { DB: D1Database };
+  const env = getCloudflareEnv(context) as { DB: D1Database };
   const days = clampPulseDays(new URL(request.url).searchParams.get("days"));
   let stats: PulseStats;
   try {
@@ -57,13 +58,13 @@ export async function loader({ request, context }: LoaderFunctionArgs) {
   } catch {
     throw new Response("Stats temporarily unavailable.", { status: 500 });
   }
-  return json(
+  return data(
     { stats },
     { headers: { "Cache-Control": "public, max-age=60" } }
   );
 }
 
-export const meta: MetaFunction<typeof loader> = ({ data, matches }) => {
+export const meta: MetaFunction<typeof loader> = ({ loaderData, matches }) => {
   const site = rootSiteFromMatches(matches);
   const title = `Pulse — live activity | ${site.siteName}`;
   const description =
@@ -492,8 +493,7 @@ export default function Pulse() {
           </div>
 
           <p className="text-center text-[11px] text-slate-400 pt-2">
-            Aggregate counts only — no names, emails or event titles. Events auto-expire after 90 days,
-            so windows beyond that reflect retention, not history. Data:{" "}
+            Aggregate counts only — no names, emails or event titles. Data:{" "}
             <Link to="/api/pulse" className="underline hover:text-slate-600">/api/pulse</Link>
           </p>
         </>

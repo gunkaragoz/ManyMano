@@ -1,10 +1,11 @@
-import type { LoaderFunctionArgs } from "@remix-run/cloudflare";
+import { getCloudflareEnv } from "~/utils/cloudflare-context";
+import type { LoaderFunctionArgs } from "react-router";
 import { absoluteUrl } from "~/utils/seo";
 import { getSiteConfig } from "~/utils/site";
 
 export async function loader({ request, context }: LoaderFunctionArgs) {
   void request;
-  const site = getSiteConfig(context.cloudflare.env);
+  const site = getSiteConfig(getCloudflareEnv(context));
   const siteUrl = site.siteUrl;
   const siteName = site.siteName;
   const siteTagline = site.siteTagline;

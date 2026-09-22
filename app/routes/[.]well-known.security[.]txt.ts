@@ -1,4 +1,5 @@
-import type { LoaderFunctionArgs } from "@remix-run/cloudflare";
+import { getCloudflareEnv } from "~/utils/cloudflare-context";
+import type { LoaderFunctionArgs } from "react-router";
 import { absoluteUrl } from "~/utils/seo";
 import { getSiteConfig } from "~/utils/site";
 
@@ -8,7 +9,7 @@ import { getSiteConfig } from "~/utils/site";
 // NOTE: flat-routes escaping — `[.]` renders a literal dot, so this file
 // maps to the `/.well-known/security.txt` path.
 export async function loader({ context }: LoaderFunctionArgs) {
-  const site = getSiteConfig(context.cloudflare.env);
+  const site = getSiteConfig(getCloudflareEnv(context));
   const canonical = absoluteUrl("/.well-known/security.txt", site.siteUrl);
   const body = [
     `# ${site.siteName} security policy — responsible disclosure appreciated.`,

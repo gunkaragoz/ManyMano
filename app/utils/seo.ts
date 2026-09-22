@@ -150,9 +150,9 @@ export function breadcrumbJsonLd(
 }
 
 // ---------------------------------------------------------------------------
-// Per-page meta helpers (Remix v2 `meta` merging).
+// Per-page meta helpers (React Router `meta` merging).
 //
-// Remix renders ONLY the deepest route's `meta` export — it does NOT merge
+// React Router renders ONLY the deepest route's `meta` export — it does NOT merge
 // parent + child automatically. So every child route that exports `meta`
 // must explicitly re-include the parent descriptors it wants to keep.
 // These helpers make that override-and-keep-rest pattern trivial and keep
@@ -270,9 +270,9 @@ export function getPageMeta(siteName: string): Record<"createChooser" | "createS
 
 /** Read the public site config that the root loader injects (fail-fast). */
 export function rootSiteFromMatches(
-  matches: Array<{ id: string; data?: unknown }>
+  matches: Array<{ id: string; loaderData?: unknown }>
 ): PublicSiteConfig {
-  const root = matches.find((m) => m.id === "root")?.data as
+  const root = matches.find((m) => m.id === "root")?.loaderData as
     | { site?: PublicSiteConfig }
     | undefined;
   if (!root?.site?.siteUrl || !root?.site?.siteName) {

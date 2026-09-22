@@ -1,10 +1,122 @@
 name = "manymano"
+main = "./workers/app.ts"
 compatibility_date = "2024-09-23"
 compatibility_flags = ["nodejs_compat"]
-pages_build_output_dir = "./build/client"
+
+# React Router client assets (./build/client) are served by the Worker.
+[assets]
+directory = "./build/client"
 
 [[d1_databases]]
 binding = "DB"
 database_name = "manymano-db"
 database_id = "ab5abbfd-0d23-43ec-856a-e4fd4707e0e2"
+migrations_dir = "./drizzle/migrations"
+
+# Production vars (public brand/config — secrets go via `wrangler secret put`,
+# never in this file). Values mirror the production env; SITE_URL is
+# the canonical origin the app renders into links/meta.
+[vars]
+SITE_URL = "https://manymano.com"
+SITE_NAME = "ManyMano"
+SITE_TAGLINE = "Free sign-up sheets and meeting polls."
+SITE_DESCRIPTION = "Free sign-up sheets and meeting polls. No accounts, no ads — create and share in seconds. A free Doodle and SignUpGenius alternative."
+FROM_EMAIL = "ManyMano <no-reply@mail.manymano.com>"
+SECURITY_CONTACT = "https://github.com/gunkaragoz/ManyMano/issues"
+ICS_UID_DOMAIN = "manymano.com"
+ICS_PRODID = "PRODID:-//ManyMano//Open Source Scheduling//EN"
+GITHUB_REPO_URL = "https://github.com/gunkaragoz/ManyMano"
+FOOTER_CREDIT_URL = "https://gnkz.net"
+FOOTER_CREDIT_LABEL = "gnkz.net"
+EMAIL_PROVIDER = "resend"
+SMTP_HOST = "email-smtp.us-east-1.amazonaws.com"
+SMTP_PORT = "587"
+TURNSTILE_SITE_KEY = "0x4AAAAAAEw2VkyFUNDzibNI"
+TURNSTILE_HOSTNAMES = "manymano.com,www.manymano.com"
+# Multi-day / repeating sign-up sheets. Off in every deployed environment
+# until this is "1" — the create form then shows the Event Type switcher.
+FEATURE_MULTIDATE_SHEETS = ""
+
+# Production: inherits top-level [vars]. Requires CLOUDFLARE_ENV=production
+# at build time (see package.json deploy script) — without it the plugin
+# errors (there is no implicit top-level env selection).
+[env.production]
+name = "manymano"
+
+# NOTE: env sections do NOT inherit top-level [vars] in the generated deploy
+# config — vars are repeated here explicitly (kept in sync with [vars] above).
+[env.production.vars]
+SITE_URL = "https://manymano.com"
+SITE_NAME = "ManyMano"
+SITE_TAGLINE = "Free sign-up sheets and meeting polls. No accounts, no ads — create and share in seconds."
+SITE_DESCRIPTION = "Free sign-up sheets and meeting polls. No accounts, no ads — create and share in seconds. A free Doodle and SignUpGenius alternative."
+FROM_EMAIL = "ManyMano <no-reply@mail.manymano.com>"
+SECURITY_CONTACT = "https://github.com/gunkaragoz/ManyMano/issues"
+ICS_UID_DOMAIN = "manymano.com"
+ICS_PRODID = "PRODID:-//ManyMano//Open Source Scheduling//EN"
+GITHUB_REPO_URL = "https://github.com/gunkaragoz/ManyMano"
+FOOTER_CREDIT_URL = "https://gnkz.net"
+FOOTER_CREDIT_LABEL = "gnkz.net"
+EMAIL_PROVIDER = "resend"
+SMTP_HOST = "email-smtp.us-east-1.amazonaws.com"
+SMTP_PORT = "587"
+TURNSTILE_SITE_KEY = "0x4AAAAAAEw2VkyFUNDzibNI"
+TURNSTILE_HOSTNAMES = "manymano.com,www.manymano.com"
+
+[[env.production.d1_databases]]
+binding = "DB"
+database_name = "manymano-db"
+database_id = "ab5abbfd-0d23-43ec-856a-e4fd4707e0e2"
+migrations_dir = "./drizzle/migrations"
+
+# Custom domains are attached via routes (the API rejects this account's
+# tokens for workers/domains POSTs, so dashboard clicks are the fallback).
+# Staging intentionally has no routes — it stays on workers.dev only.
+[[env.production.routes]]
+pattern = "manymano.com/*"
+zone_name = "manymano.com"
+
+[[env.production.routes]]
+pattern = "www.manymano.com/*"
+zone_name = "manymano.com"
+
+# Reminder scan, hourly on the hour (production only — staging has no
+# triggers). Each run sends only what's due: 9:00 AM event-local, 24h ahead
+# (organizers + participants) plus a 48h understaffed alert (organizers of
+# signup sheets with open spots). Dedupe makes re-runs safe.
+[env.production.triggers]
+crons = ["0 * * * *"]
+
+# Staging (prod copy): isolated worker + D1, staging-only secrets.
+# IMPORTANT: the Cloudflare Vite plugin resolves the deploy config at
+# BUILD time — always build staging with CLOUDFLARE_ENV=staging
+# (see deploy:staging) or the deploy silently targets top-level/prod.
+# Create once: wrangler d1 create manymano-db-staging, then fill database_id.
+# Secrets: wrangler secret put --env staging (keys stay empty on purpose —
+# the no-mail gate fails the build if provider creds ever appear in staging).
+[env.staging]
+name = "manymano-staging"
+
+# Staging is a prod copy with mail + bot verification disabled (see
+# tests/staging/no-mail.test.ts — the gate fails if creds ever appear):
+# RESEND_API_KEY / SMTP_* / ALERT_WEBHOOK_URL / TURNSTILE_* all unset,
+# only REMINDER_SECRET is set (staging-only value via `wrangler secret
+# put REMINDER_SECRET --env staging`) and reminders are dry-run only.
+[env.staging.vars]
+SITE_URL = "https://manymano-staging.gunk.workers.dev"
+SITE_NAME = "ManyMano"
+SITE_TAGLINE = "Free sign-up sheets and meeting polls. No accounts, no ads — create and share in seconds."
+SITE_DESCRIPTION = "Free sign-up sheets and meeting polls. No accounts, no ads — create and share in seconds. A free Doodle and SignUpGenius alternative."
+FROM_EMAIL = "ManyMano Staging <no-reply@mail.manymano.com>"
+SECURITY_CONTACT = "https://github.com/gunkaragoz/ManyMano/issues"
+ICS_UID_DOMAIN = "manymano.com"
+ICS_PRODID = "PRODID:-//ManyMano//Open Source Scheduling//EN"
+GITHUB_REPO_URL = "https://github.com/gunkaragoz/ManyMano"
+FOOTER_CREDIT_URL = "https://gnkz.net"
+FOOTER_CREDIT_LABEL = "gnkz.net"
+
+[[env.staging.d1_databases]]
+binding = "DB"
+database_name = "manymano-db-staging"
+database_id = "f7a7ab80-4548-4a9e-9595-697091b3e18d"
 migrations_dir = "./drizzle/migrations"

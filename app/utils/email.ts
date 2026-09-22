@@ -118,16 +118,25 @@ function parseMailbox(from: string): { name?: string; email: string } {
 
 /** Minimal HTML → plain-text fallback for SMTP `text` part. */
 function htmlToText(html: string): string {
-  return html
+  let text = html
     .replace(/<br\s*\/?>/gi, "\n")
-    .replace(/<\/(p|div|h[1-6]|li|tr)>/gi, "\n")
-    .replace(/<[^>]*>/g, "")
-    .replace(/&amp;/g, "&")
+    .replace(/<\/(p|div|h[1-6]|li|tr)>/gi, "\n");
+  // Strip tags repeatedly so nested/crafted input (e.g. `<scr<script>ipt>`)
+  // can't survive a single pass and re-emerge as `<script>`.
+  let prev: string;
+  do {
+    prev = text;
+    text = text.replace(/<[^>]*>/g, "");
+  } while (text !== prev);
+  // Decode entities with `&amp;` last to avoid double-unescaping
+  // `&amp;lt;` into `<`.
+  return text
     .replace(/&lt;/g, "<")
     .replace(/&gt;/g, ">")
     .replace(/&quot;/g, '"')
     .replace(/&#39;/g, "'")
     .replace(/&nbsp;/g, " ")
+    .replace(/&amp;/g, "&")
     .split("\n")
     .map((line) => line.trim())
     .filter(Boolean)
@@ -238,8 +247,8 @@ async function sendViaSmtp({
     // Lazy import: `worker-mailer` needs the Workers TCP sockets API
     // (`cloudflare:sockets`), unavailable under plain `vite dev` (Node
     // runtime). The import itself succeeds there; connect() throws, which
-    // is caught below — SMTP sending requires `wrangler pages dev` or a
-    // deployed Pages build. Never throws to the caller.
+    // is caught below — SMTP sending requires the Workers runtime
+    // (`pnpm run dev` or deployed). Never throws to the caller.
     const { WorkerMailer } = await import("worker-mailer");
     await WorkerMailer.send(
       {

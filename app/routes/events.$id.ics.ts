@@ -1,13 +1,19 @@
-import type { LoaderFunctionArgs } from "@remix-run/cloudflare";
+import { getCloudflareEnv } from "~/utils/cloudflare-context";
+import type { LoaderFunctionArgs } from "react-router";
 import { eq } from "drizzle-orm";
 import { getDb, events, eventSlots } from "~/db";
 import { generateICS, pickCalendarSlot, effectiveDateForSlot } from "~/utils/calendar";
 import { getPresentedAdminToken, secretMatches } from "~/utils/auth";
-import { isExpired, latestSlotDate, pruneExpiredEvents } from "~/utils/retention";
+import {
+  isExpired,
+  latestSlotDate,
+  pruneExpiredEvents,
+  resolveRetentionDays,
+} from "~/utils/retention";
 import { getSiteConfig } from "~/utils/site";
 
 export async function loader({ params, request, context }: LoaderFunctionArgs) {
-  const env = context.cloudflare.env;
+  const env = getCloudflareEnv(context);
   // Site config resolves ICS_PRODID / ICS_UID_DOMAIN defaults from SITE_* —
   // never throws for those (see app/utils/site.ts).
   const site = getSiteConfig(env);
@@ -18,15 +24,21 @@ export async function loader({ params, request, context }: LoaderFunctionArgs) {
     throw new Response("Event not found", { status: 404 });
   }
 
+  const retentionDays = resolveRetentionDays(env);
   try {
-    await pruneExpiredEvents(db);
+    await pruneExpiredEvents(db, new Date(), retentionDays);
   } catch {}
 
   const [event] = await db.select().from(events).where(eq(events.id, eventId)).limit(1);
   if (!event) {
     throw new Response("Event not found", { status: 404 });
   }
-  if (isExpired(event.createdAt) && isExpired(event.createdAt, new Date(), await latestSlotDate(db, eventId))) {
+  // A multi-day sheet is measured from its LAST date, so only pay for that
+  // extra query once the event already looks expired by creation date.
+  if (
+    isExpired(event.createdAt, new Date(), retentionDays) &&
+    isExpired(event.createdAt, new Date(), retentionDays, await latestSlotDate(db, eventId))
+  ) {
     throw new Response("This event expired and was auto-deleted.", { status: 410 });
   }
 

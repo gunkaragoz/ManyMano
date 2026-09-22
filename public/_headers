@@ -1,4 +1,5 @@
-# Cloudflare Pages headers: HSTS + crawl safety + static caching.
+# Static-asset headers (Workers [assets] honors this file): HSTS + crawl safety + caching.
+# Document/security headers for app routes live in app/entry.server.tsx.
 /*
   Strict-Transport-Security: max-age=15552000; includeSubDomains
   X-Content-Type-Options: nosniff
@@ -8,6 +9,12 @@
 /assets/*
   Cache-Control: public, max-age=31536000, immutable
 /favicon.svg
+  Cache-Control: public, max-age=86400
+/favicon-16x16.png
+  Cache-Control: public, max-age=86400
+/favicon-32x32.png
+  Cache-Control: public, max-age=86400
+/apple-touch-icon.png
   Cache-Control: public, max-age=86400
 /og-cover.png
   Cache-Control: public, max-age=86400

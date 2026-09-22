@@ -1,5 +1,6 @@
-import type { LinksFunction, LoaderFunctionArgs, MetaFunction } from "@remix-run/cloudflare";
-import { json } from "@remix-run/cloudflare";
+import { getCloudflareEnv } from "~/utils/cloudflare-context";
+import type { LinksFunction, LoaderFunctionArgs, MetaFunction } from "react-router";
+import { data } from "react-router";
 import {
   Links,
   Meta,
@@ -12,7 +13,7 @@ import {
   useNavigation,
   isRouteErrorResponse,
   useRouteError,
-} from "@remix-run/react";
+} from "react-router";
 import { useEffect, useState } from "react";
 import { HeartHandshake } from "lucide-react";
 import NotFound from "~/components/NotFound";
@@ -59,8 +60,8 @@ import { getSiteConfig, toPublicSiteConfig } from "~/utils/site";
 
 export async function loader({ context }: LoaderFunctionArgs) {
   // Fail-fast: missing SITE_* env throws here instead of serving stale brand.
-  const config = getSiteConfig(context.cloudflare.env);
-  return json({ site: toPublicSiteConfig(config) });
+  const config = getSiteConfig(getCloudflareEnv(context));
+  return data({ site: toPublicSiteConfig(config) });
 }
 
 export const links: LinksFunction = () => [
@@ -72,9 +73,9 @@ export const links: LinksFunction = () => [
   { rel: "manifest", href: "/site.webmanifest" },
 ];
 
-export const meta: MetaFunction<typeof loader> = ({ data }) => {
-  if (!data?.site) throw new Error("[config] Root loader must provide `site` (SITE_URL/SITE_NAME).");
-  const { site } = data;
+export const meta: MetaFunction<typeof loader> = ({ loaderData }) => {
+  if (!loaderData?.site) throw new Error("[config] Root loader must provide `site` (SITE_URL/SITE_NAME).");
+  const { site } = loaderData;
   const siteUrl = site.siteUrl;
   const siteName = site.siteName;
   const tagline = site.siteTagline;

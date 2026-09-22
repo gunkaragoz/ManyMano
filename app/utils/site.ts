@@ -1,7 +1,7 @@
 // Central site/brand configuration — single source of truth.
 //
 // Required values come from the runtime environment
-// (Cloudflare Pages dashboard in production, `.dev.vars` locally).
+// (worker vars/secrets in production, `.dev.vars` locally).
 // Only the core brand vars are required: a missing required variable throws
 // at request time so a rebrand / fork can never silently serve stale defaults.
 //
@@ -72,7 +72,7 @@ function required(env: SiteEnv, key: keyof SiteEnv): string {
   if (!raw) {
     throw new Error(
       `[config] Missing required environment variable ${key}. ` +
-        `Set it in Cloudflare Pages dashboard (production) or .dev.vars (local). See .env.sample.`
+        `Set it as a worker var/secret (production) or in .dev.vars (local). See .env.sample.`
     );
   }
   return raw;

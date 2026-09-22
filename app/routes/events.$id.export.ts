@@ -1,12 +1,18 @@
-import type { LoaderFunctionArgs } from "@remix-run/cloudflare";
+import { getCloudflareEnv } from "~/utils/cloudflare-context";
+import type { LoaderFunctionArgs } from "react-router";
 import { eq, and, inArray } from "drizzle-orm";
 import { getDb, events, eventSlots, signups, pollVotes, pollVoteEntries } from "~/db";
 import { getPresentedAdminToken, verifyAdminToken } from "~/utils/auth";
-import { isExpired, latestSlotDate, pruneExpiredEvents } from "~/utils/retention";
+import {
+  isExpired,
+  latestSlotDate,
+  pruneExpiredEvents,
+  resolveRetentionDays,
+} from "~/utils/retention";
 import { effectiveDateForSlot } from "~/utils/calendar";
 
 export async function loader({ params, request, context }: LoaderFunctionArgs) {
-  const env = context.cloudflare.env as { DB: D1Database };
+  const env = getCloudflareEnv(context) as { DB: D1Database; RETENTION_DAYS?: string };
   const db = getDb(env.DB);
   const eventId = params.id;
 
@@ -14,15 +20,21 @@ export async function loader({ params, request, context }: LoaderFunctionArgs) {
     throw new Response("Event not found", { status: 404 });
   }
 
+  const retentionDays = resolveRetentionDays(env);
   try {
-    await pruneExpiredEvents(db);
+    await pruneExpiredEvents(db, new Date(), retentionDays);
   } catch {}
 
   const [event] = await db.select().from(events).where(eq(events.id, eventId)).limit(1);
   if (!event) {
     throw new Response("Event not found", { status: 404 });
   }
-  if (isExpired(event.createdAt) && isExpired(event.createdAt, new Date(), await latestSlotDate(db, eventId))) {
+  // A multi-day sheet is measured from its LAST date, so only pay for that
+  // extra query once the event already looks expired by creation date.
+  if (
+    isExpired(event.createdAt, new Date(), retentionDays) &&
+    isExpired(event.createdAt, new Date(), retentionDays, await latestSlotDate(db, eventId))
+  ) {
     throw new Response("This event expired and was auto-deleted.", { status: 410 });
   }
 

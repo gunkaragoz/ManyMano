@@ -1,18 +1,17 @@
-import type { AppLoadContext, EntryContext } from "@remix-run/cloudflare";
-import { RemixServer } from "@remix-run/react";
+import type { EntryContext, RouterContextProvider } from "react-router";
+import { ServerRouter } from "react-router";
 import { isbot } from "isbot";
-// @ts-ignore
-import { renderToReadableStream } from "react-dom/server.browser";
+import { renderToReadableStream } from "react-dom/server";
 
 export default async function handleRequest(
   request: Request,
   responseStatusCode: number,
   responseHeaders: Headers,
   remixContext: EntryContext,
-  loadContext: AppLoadContext
+  loadContext: RouterContextProvider
 ) {
   const body = await renderToReadableStream(
-    <RemixServer context={remixContext} url={request.url} />,
+    <ServerRouter context={remixContext} url={request.url} />,
     {
       signal: request.signal,
       onError(error: unknown) {
@@ -40,23 +39,26 @@ export default async function handleRequest(
   if (!responseHeaders.has("Permissions-Policy")) {
     responseHeaders.set("Permissions-Policy", "camera=(), microphone=(), geolocation=()");
   }
-  // CSP: lock down resource origins. Remix 2 renders its hydration runtime
-  // (ScrollRestoration, __remixContext, route manifest) as inline <script>
-  // with no nonce support — and per-request payloads rule out hashes — so
-  // script-src keeps 'unsafe-inline'. The app itself ships no inline
+  // CSP: lock down resource origins. React Router renders its hydration
+  // runtime (ScrollRestoration, route modules, context payload) as inline
+  // <script> with no nonce support — and per-request payloads rule out
+  // hashes — so script-src keeps 'unsafe-inline'. The app itself ships no inline
   // scripts/handlers; React escaping remains the XSS backstop. Turnstile
-  // CDN added for widget script + challenge iframe.
+  // CDN added for widget script + challenge iframe. Cloudflare Web Analytics
+  // beacon (auto-injected) loads from static.cloudflareinsights.com and posts
+  // to cloudflareinsights.com — both allowlisted so the browser doesn't block
+  // the beacon and log console/CSP errors (Best Practices hit).
   // frame-ancestors mirrors X-Frame-Options for CSP-aware browsers.
   if (!responseHeaders.has("Content-Security-Policy")) {
     responseHeaders.set(
       "Content-Security-Policy",
       [
         "default-src 'self'",
-        "script-src 'self' 'unsafe-inline' https://challenges.cloudflare.com",
+        "script-src 'self' 'unsafe-inline' https://challenges.cloudflare.com https://static.cloudflareinsights.com",
         "style-src 'self' 'unsafe-inline'",
         "img-src 'self' data:",
         "font-src 'self' data:",
-        "connect-src 'self' https://challenges.cloudflare.com",
+        "connect-src 'self' https://challenges.cloudflare.com https://cloudflareinsights.com https://static.cloudflareinsights.com",
         "frame-src https://challenges.cloudflare.com",
         "form-action 'self'",
         "frame-ancestors 'none'",

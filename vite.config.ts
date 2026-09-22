@@ -1,9 +1,6 @@
-import {
-  vitePlugin as remix,
-  cloudflareDevProxyVitePlugin as remixCloudflareDevProxy,
-} from "@remix-run/dev";
+import { reactRouter } from "@react-router/dev/vite";
+import { cloudflare } from "@cloudflare/vite-plugin";
 import { defineConfig } from "vite";
-import tsconfigPaths from "vite-tsconfig-paths";
 import { existsSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
 
@@ -67,23 +64,39 @@ function devPort(): number {
 }
 
 export default defineConfig({
+  // Vite 8 resolves tsconfig paths natively (replaces vite-tsconfig-paths).
+  resolve: {
+    tsconfigPaths: true,
+  },
   server: {
     port: devPort(),
     // Fail loudly instead of silently drifting to 5174/5175 when the
     // .dev.vars port is busy — drift is what desyncs canonical URLs.
     strictPort: true,
   },
+  // Pre-bundle all client deps upfront. Otherwise Vite discovers them lazily
+  // per page load (lucide-react, drizzle-orm, ...) and each discovery
+  // invalidates already-served `?v=` hashes mid-session — browsers then get
+  // 504 (Outdated Optimize Dep) and the app never hydrates (stuck on SSR
+  // defaults like UTC + dead controls). Seen in the wild Sep 2026.
+  optimizeDeps: {
+    include: [
+      "react",
+      "react-dom",
+      "react-router",
+      "react-router/dom",
+      "lucide-react",
+      "clsx",
+      "tailwind-merge",
+      "drizzle-orm",
+    ],
+  },
   plugins: [
-    remixCloudflareDevProxy(),
-    remix({
-      future: {
-        v3_fetcherPersist: true,
-        v3_relativeSplatPath: true,
-        v3_throwAbortReason: true,
-        v3_singleFetch: true,
-        v3_lazyRouteDiscovery: true,
-      },
-    }),
-    tsconfigPaths(),
+    // Bind to React Router's ssr environment so workers/app.ts (the wrangler
+    // entry, importing virtual:react-router/server-build) builds with the
+    // client manifest available. Without this the plugin spawns its own
+    // worker environment and the server-manifest virtual module 404s.
+    cloudflare({ viteEnvironment: { name: "ssr" } }),
+    reactRouter(),
   ],
 });

@@ -1,7 +1,13 @@
-import type { LoaderFunctionArgs } from "@remix-run/cloudflare";
+import { getCloudflareEnv } from "~/utils/cloudflare-context";
+import type { LoaderFunctionArgs } from "react-router";
 import { eq } from "drizzle-orm";
 import { getDb, events } from "~/db";
-import { isExpired, latestSlotDate, pruneExpiredEvents } from "~/utils/retention";
+import {
+  isExpired,
+  latestSlotDate,
+  pruneExpiredEvents,
+  resolveRetentionDays,
+} from "~/utils/retention";
 import { getSiteConfig } from "~/utils/site";
 import { escapeHtml } from "~/utils/sanitize";
 import { eventQrValue, qrPngBytes, qrSvgString } from "~/utils/qr";
@@ -12,7 +18,7 @@ import { eventQrValue, qrPngBytes, qrSvgString } from "~/utils/qr";
 // Public + long-cacheable: the QR encodes the unlisted event URL itself,
 // so no auth and no PII involved.
 export async function loader({ params, request, context }: LoaderFunctionArgs) {
-  const env = context.cloudflare.env;
+  const env = getCloudflareEnv(context);
   const site = getSiteConfig(env);
   const db = getDb((env as { DB: D1Database }).DB);
   const eventId = params.id;
@@ -21,8 +27,9 @@ export async function loader({ params, request, context }: LoaderFunctionArgs) {
     throw new Response("Event not found", { status: 404 });
   }
 
+  const retentionDays = resolveRetentionDays(env);
   try {
-    await pruneExpiredEvents(db);
+    await pruneExpiredEvents(db, new Date(), retentionDays);
   } catch {}
 
   const [event] = await db
@@ -33,7 +40,12 @@ export async function loader({ params, request, context }: LoaderFunctionArgs) {
   if (!event) {
     throw new Response("Event not found", { status: 404 });
   }
-  if (isExpired(event.createdAt) && isExpired(event.createdAt, new Date(), await latestSlotDate(db, eventId))) {
+  // A multi-day sheet is measured from its LAST date, so only pay for that
+  // extra query once the event already looks expired by creation date.
+  if (
+    isExpired(event.createdAt, new Date(), retentionDays) &&
+    isExpired(event.createdAt, new Date(), retentionDays, await latestSlotDate(db, eventId))
+  ) {
     throw new Response("This event expired and was auto-deleted.", { status: 410 });
   }
 

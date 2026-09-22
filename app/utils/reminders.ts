@@ -33,13 +33,79 @@ import {
   type AppDb,
 } from "~/db";
 import { buildGoogleCalendarUrl, effectiveDateForSlot, formatLongDateLabel } from "./calendar";
-import { isExpired, latestSlotDate } from "./retention";
+import { zonedWallTimeToUtc } from "./timezones";
+import { isExpired, latestSlotDate, RETENTION_DAYS } from "./retention";
 import { isValidEmail } from "./validation";
 import { escapeHtml, locationHtml } from "./sanitize";
 import { emailFooter } from "./email";
 import type { SiteConfig } from "./site";
 
-export type ReminderKind = "organizer" | "participants";
+export type ReminderKind = "organizer" | "participants" | "organizer_24h" | "organizer_48h";
+
+/**
+ * Pre-v8 dedupe kind for the organizer mail. The scheduled runner checks it
+ * as a fallback for organizer_24h so the kind rename can't double-send to
+ * events marked under the old name around cutover.
+ */
+export const LEGACY_ORGANIZER_KIND = "organizer";
+
+/**
+ * Reminder hour in the EVENT's timezone (9:00 AM local). Later this becomes
+ * a per-event setting defaulting to 9 — callers must go through
+ * reminderInstant() so the override plugs in at one place.
+ */
+export const REMINDER_HOUR = 9;
+
+/** YYYY-MM-DD shifted by N days (UTC calendar arithmetic — DST-safe). */
+export function addDaysIso(dateStr: string, days: number): string | null {
+  const m = dateStr.trim().match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!m) return null;
+  const y = Number(m[1]);
+  const mo = Number(m[2]);
+  const d = Number(m[3]);
+  // Reject non-days (2026-02-30): Date.UTC rolls over instead of failing.
+  const check = new Date(Date.UTC(y, mo - 1, d));
+  if (check.getUTCFullYear() !== y || check.getUTCMonth() !== mo - 1 || check.getUTCDate() !== d) {
+    return null;
+  }
+  const out = new Date(check.getTime() + days * 86400000);
+  return out.toISOString().slice(0, 10);
+}
+
+/**
+ * UTC instant when a reminder fires: 9:00 AM event-local, `daysBefore`
+ * days ahead of the event date. Null for bad dates (caller skips).
+ * Unknown zones fall back to UTC via zonedWallTimeToUtc.
+ */
+export function reminderInstant(
+  eventDate: string | null | undefined,
+  daysBefore: number,
+  timeZone: string | null | undefined
+): Date | null {
+  if (!eventDate) return null;
+  const day = addDaysIso(eventDate, -daysBefore);
+  if (!day) return null;
+  return zonedWallTimeToUtc(day, `${REMINDER_HOUR}:00`, timeZone);
+}
+
+/**
+ * The calendar day a reminder is keyed to: the event date for sheets,
+ * the winning slot's effective date for finalized meetings (it can differ
+ * on multi-day polls — keying by eventDate would double-send across the
+ * endpoint and cron paths).
+ */
+export function targetReminderDate(target: ReminderTarget): string | null {
+  if (target.kind === "signup_sheet") return target.event.eventDate;
+  return effectiveDateForSlot(target.winningSlot, target.event.eventDate);
+}
+
+/**
+ * True when a sign-up sheet still has open spots in a limited-capacity
+ * slot. Unlimited slots (capacity <= 0) can never be understaffed.
+ */
+export function isUnderstaffed(target: SignupSheetTarget): boolean {
+  return target.slots.some((s) => s.capacity > 0 && s.signups.length < s.capacity);
+}
 
 /** The event-local day being reminded about (YYYY-MM-DD). */
 export function reminderDateString(from = new Date()): string {
@@ -50,8 +116,8 @@ export interface ReminderSlotInfo {
   id: string;
   title: string;
   shiftName: string | null;
-  /** Per-date slot (multi-day sheets). Null on single-day sheets. */
-  slotDate: string | null;
+  /** Per-date slot (multi-day sheets). Absent/null on single-day sheets. */
+  slotDate?: string | null;
   startTime: string | null;
   endTime: string | null;
   capacity: number;
@@ -72,8 +138,8 @@ export interface ReminderEventInfo {
 export interface SignupSheetTarget {
   kind: "signup_sheet";
   event: ReminderEventInfo;
-  /** The day being reminded about — the sheet's date, or one date of a series. */
-  reminderDate: string | null;
+  /** The day being reminded about — the sheet's date, or one day of a series. */
+  reminderDate?: string | null;
   slots: ReminderSlotInfo[];
 }
 
@@ -110,7 +176,11 @@ function toEventInfo(e: typeof events.$inferSelect): ReminderEventInfo {
  * Expired events are skipped. Never throws for a missing reminder_sends
  * table — dedupe is checked separately so a pre-migration DB still sends.
  */
-export async function collectReminderTargets(db: AppDb, date: string): Promise<ReminderTarget[]> {
+export async function collectReminderTargets(
+  db: AppDb,
+  date: string,
+  retentionDays: number = RETENTION_DAYS
+): Promise<ReminderTarget[]> {
   const targets: ReminderTarget[] = [];
 
   // 1. Sign-up sheets that have something on `date`: either the sheet's own
@@ -137,7 +207,13 @@ export async function collectReminderTargets(db: AppDb, date: string): Promise<R
     sheets.push(...extras);
   }
   for (const e of sheets) {
-    if (isExpired(e.createdAt) && isExpired(e.createdAt, new Date(), await latestSlotDate(db, e.id))) continue;
+    // A multi-day sheet is measured from its last date; only pay for that
+    // query once the sheet already looks expired by creation date.
+    if (
+      isExpired(e.createdAt, new Date(), retentionDays) &&
+      isExpired(e.createdAt, new Date(), retentionDays, await latestSlotDate(db, e.id))
+    )
+      continue;
     const allSlots = await db
       .select()
       .from(eventSlots)
@@ -181,7 +257,7 @@ export async function collectReminderTargets(db: AppDb, date: string): Promise<R
     .where(and(eq(events.type, "TIME_POLL"), eq(events.status, "FINALIZED")))
     .limit(500);
   for (const e of finalized) {
-    if (!e.winningSlotId || isExpired(e.createdAt)) continue;
+    if (!e.winningSlotId || isExpired(e.createdAt, new Date(), retentionDays)) continue;
     const slots = await db.select().from(eventSlots).where(eq(eventSlots.eventId, e.id));
     const winning = slots.find((s) => s.id === e.winningSlotId);
     if (!winning) continue;
@@ -470,8 +546,10 @@ export function buildSignupParticipantEmail(
 export function buildSignupOrganizerEmail(
   site: SiteConfig,
   origin: string,
-  target: SignupSheetTarget
+  target: SignupSheetTarget,
+  opts?: { horizon?: "24h" | "48h" }
 ): { subject: string; html: string } {
+  const horizon = opts?.horizon ?? "24h";
   const e = target.event;
   const eventUrl = eventPageUrl(origin, e.id);
   let filledTotal = 0;
@@ -518,15 +596,20 @@ export function buildSignupOrganizerEmail(
     hasCapped && !hasUnlimited
       ? `${filledTotal}/${capacityTotal} spots filled`
       : `${filledTotal} signed up`;
+  // The day being reminded about — one date of a series, not the sheet's first.
   const headlineDate = target.reminderDate || e.eventDate;
   const whenHeadline = headlineDate ? formatLongDateLabel(headlineDate) : "";
+  const timing = horizon === "48h" ? "is in 2 days" : "is tomorrow";
   return {
-    subject: `Reminder: "${e.title}" is tomorrow — ${headline}`,
+    subject:
+      horizon === "48h"
+        ? `Only ${headline} for "${e.title}" — 2 days left to fill spots`
+        : `Reminder: "${e.title}" is tomorrow — ${headline}`,
     html: `
       <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto; padding: 24px; color: #1e293b;">
-        <h2 style="color: #0f172a; margin-top: 0;">Your event is tomorrow</h2>
+        <h2 style="color: #0f172a; margin-top: 0;">${horizon === "48h" ? "Your event needs more volunteers" : "Your event is tomorrow"}</h2>
         <p>Hi ${escapeHtml(e.organizerName)},</p>
-        <p><strong>${escapeHtml(e.title)}</strong>${whenHeadline ? ` is on <strong>${escapeHtml(whenHeadline)}</strong>` : " is tomorrow"} — ${escapeHtml(headline)}.</p>
+        <p><strong>${escapeHtml(e.title)}</strong>${whenHeadline ? ` is on <strong>${escapeHtml(whenHeadline)}</strong>` : ` ${timing}`} — ${escapeHtml(headline)}.</p>
         ${locationHtml(e.location)}
         ${descriptionBlock(e.description)}
         ${slotBlocks}

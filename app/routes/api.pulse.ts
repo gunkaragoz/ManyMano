@@ -1,5 +1,6 @@
-import type { HeadersFunction, LoaderFunctionArgs } from "@remix-run/cloudflare";
-import { json } from "@remix-run/cloudflare";
+import { getCloudflareEnv } from "~/utils/cloudflare-context";
+import type { HeadersFunction, LoaderFunctionArgs } from "react-router";
+import { data } from "react-router";
 import { clampPulseDays, getPulseStats } from "~/utils/pulse";
 
 // GET /api/pulse?days=7|30|90 — public aggregate stats, no PII.
@@ -13,13 +14,13 @@ export const headers: HeadersFunction = ({ loaderHeaders }) => {
 };
 
 export async function loader({ request, context }: LoaderFunctionArgs) {
-  const env = context.cloudflare.env as { DB: D1Database };
+  const env = getCloudflareEnv(context) as { DB: D1Database };
   const days = clampPulseDays(new URL(request.url).searchParams.get("days"));
   let stats;
   try {
     stats = await getPulseStats(env.DB, days);
   } catch {
-    return json({ error: "Stats temporarily unavailable." }, { status: 500 });
+    return data({ error: "Stats temporarily unavailable." }, { status: 500 });
   }
-  return json(stats, { headers: { "Cache-Control": "public, max-age=60" } });
+  return data(stats, { headers: { "Cache-Control": "public, max-age=60" } });
 }
