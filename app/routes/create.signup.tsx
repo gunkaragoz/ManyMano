@@ -714,15 +714,10 @@ export default function CreateSignupSheet() {
               </div>
             )}
 
-            {/* When: first date, the end of the series, and the zone they are
-                read in — one row, because they answer one question. */}
-            <div
-              className={`grid grid-cols-1 gap-4 ${
-                multiDateEnabled && dateSel.mode !== "single"
-                  ? "sm:grid-cols-2 lg:grid-cols-3"
-                  : "sm:grid-cols-2"
-              }`}
-            >
+            {/* Dates only. The timezone deliberately sits further down with
+                Location: when it shared this row it changed column (and moved
+                on screen) the moment a second date appeared. */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div>
                 <label className="block text-xs font-semibold text-slate-700 mb-1.5">
                   {multiDateEnabled ? dateFieldLabel(dateSel.mode) : "Event Date *"}
@@ -735,6 +730,29 @@ export default function CreateSignupSheet() {
               </div>
 
               {multiDateEnabled && <DateEndField value={dateSel} onChange={setDateSel} />}
+            </div>
+
+            {multiDateEnabled && (
+              <>
+                <RepeatRuleField start={startDate} value={dateSel} onChange={setDateSel} />
+                <DateSummary value={dateSel} dates={sheetDates} />
+              </>
+            )}
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 mb-1.5">
+                  Location (Optional)
+                </label>
+                <input
+                  type="text"
+                  name="location"
+                  value={details.location}
+                  onChange={(e) => updateDetails({ location: e.target.value })}
+                  placeholder="e.g., Meadow Creek Park (North Gate)"
+                  className="w-full px-4 py-3 rounded-xl border border-slate-200/90 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all placeholder:text-slate-400"
+                />
+              </div>
 
               <div>
                 <label htmlFor="signup-timezone" className="block text-xs font-semibold text-slate-700 mb-1.5">
@@ -748,27 +766,6 @@ export default function CreateSignupSheet() {
                   accent="blue"
                 />
               </div>
-            </div>
-
-            {multiDateEnabled && (
-              <>
-                <RepeatRuleField start={startDate} value={dateSel} onChange={setDateSel} />
-                <DateSummary value={dateSel} dates={sheetDates} />
-              </>
-            )}
-
-            <div>
-              <label className="block text-xs font-semibold text-slate-700 mb-1.5">
-                Location (Optional)
-              </label>
-              <input
-                type="text"
-                name="location"
-                value={details.location}
-                onChange={(e) => updateDetails({ location: e.target.value })}
-                placeholder="e.g., Meadow Creek Park (North Gate)"
-                className="w-full px-4 py-3 rounded-xl border border-slate-200/90 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all placeholder:text-slate-400"
-              />
             </div>
 
             {/* Sentinel: show title+date in nav header once Title/Date scrolled out of view */}
