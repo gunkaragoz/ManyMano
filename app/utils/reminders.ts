@@ -35,7 +35,7 @@ import {
 import { buildGoogleCalendarUrl, effectiveDateForSlot, formatLongDateLabel } from "./calendar";
 import { isExpired, latestSlotDate } from "./retention";
 import { isValidEmail } from "./validation";
-import { escapeHtml } from "./sanitize";
+import { escapeHtml, locationHtml } from "./sanitize";
 import { emailFooter } from "./email";
 import type { SiteConfig } from "./site";
 
@@ -453,7 +453,7 @@ export function buildSignupParticipantEmail(
         <p>Hi ${escapeHtml(recipientName)},</p>
         <p>Quick reminder — you're signed up for <strong>${escapeHtml(e.title)}</strong> tomorrow.</p>
         ${taskBlocks}
-        ${e.location ? `<p><strong>Location:</strong> ${escapeHtml(e.location)}</p>` : ""}
+        ${locationHtml(e.location)}
         ${descriptionBlock(e.description)}
         <p><strong>Event page:</strong> <a href="${escapeHtml(eventUrl)}" style="color: #2563eb;">${escapeHtml(eventUrl)}</a></p>
         <p style="font-size: 13px; color: #64748b;">Need to change your plans? Open the event page to manage your sign-up.</p>
@@ -527,7 +527,7 @@ export function buildSignupOrganizerEmail(
         <h2 style="color: #0f172a; margin-top: 0;">Your event is tomorrow</h2>
         <p>Hi ${escapeHtml(e.organizerName)},</p>
         <p><strong>${escapeHtml(e.title)}</strong>${whenHeadline ? ` is on <strong>${escapeHtml(whenHeadline)}</strong>` : " is tomorrow"} — ${escapeHtml(headline)}.</p>
-        ${e.location ? `<p><strong>Location:</strong> ${escapeHtml(e.location)}</p>` : ""}
+        ${locationHtml(e.location)}
         ${descriptionBlock(e.description)}
         ${slotBlocks}
         <p><strong>Event page:</strong> <a href="${escapeHtml(eventUrl)}" style="color: #2563eb;">${escapeHtml(eventUrl)}</a></p>
@@ -604,7 +604,7 @@ export function buildMeetingParticipantEmail(
         <p>Hi ${escapeHtml(recipientName)},</p>
         <p>Quick reminder — <strong>${escapeHtml(e.title)}</strong> is happening tomorrow:</p>
         ${whenLine ? `<p><strong>When:</strong> ${escapeHtml(whenLine)}</p>` : ""}
-        ${e.location ? `<p><strong>Location:</strong> ${escapeHtml(e.location)}</p>` : ""}
+        ${locationHtml(e.location)}
         ${descriptionBlock(e.description)}
         <p><strong>Event page:</strong> <a href="${escapeHtml(eventUrl)}" style="color: #2563eb;">${escapeHtml(eventUrl)}</a></p>
         <p>
@@ -644,7 +644,7 @@ export function buildMeetingOrganizerEmail(
         <p>Hi ${escapeHtml(e.organizerName)},</p>
         <p><strong>${escapeHtml(e.title)}</strong> is locked in for tomorrow (${escapeHtml(headcount)}):</p>
         ${whenLine ? `<p><strong>When:</strong> ${escapeHtml(whenLine)}</p>` : ""}
-        ${e.location ? `<p><strong>Location:</strong> ${escapeHtml(e.location)}</p>` : ""}
+        ${locationHtml(e.location)}
         ${descriptionBlock(e.description)}
         <div style="background: #f8fafc; border: 1px solid #e2e8f0; padding: 14px 16px; border-radius: 12px; margin: 12px 0;">
           <p style="margin: 0;"><strong>Attendees</strong></p>

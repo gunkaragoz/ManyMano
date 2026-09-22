@@ -30,7 +30,7 @@ import { getDb, events, eventSlots, signups, pollVotes, pollVoteEntries } from "
 import { generateInternalId, generateSecretToken } from "~/utils/ids";
 import { sendEmail, emailFooter, getEmailSenderConfig } from "~/utils/email";
 import { trackEmailUsage, getEmailLimits } from "~/utils/quota";
-import { escapeHtml } from "~/utils/sanitize";
+import { asExternalUrl, escapeHtml, locationHtml } from "~/utils/sanitize";
 import {
   buildAdminCookie,
   buildExpiredAdminCookie,
@@ -673,7 +673,7 @@ export async function action({ request, params, context }: ActionFunctionArgs) {
             <p>Hi ${escapeHtml(participantName)},</p>
             <p>You have secured your spot for <strong>${escapeHtml(taskLabel)}</strong> at <strong>${escapeHtml(event.title)}</strong>.</p>
             ${whenLine ? `<p><strong>When:</strong> ${escapeHtml(whenLine)}</p>` : ""}
-            ${event.location ? `<p><strong>Location:</strong> ${escapeHtml(event.location)}</p>` : ""}
+            ${locationHtml(event.location)}
             ${event.description ? `<p><strong>Description:</strong><br>${escapeHtml(event.description).replace(/\r?\n/g, "<br>")}</p>` : ""}
             <p><strong>Event page:</strong> <a href="${escapeHtml(eventUrl)}" style="color: #2563eb;">${escapeHtml(eventUrl)}</a></p>
             <p>
@@ -757,7 +757,7 @@ export async function action({ request, params, context }: ActionFunctionArgs) {
             <p>Hi ${escapeHtml(existing.participantName)},</p>
             <p>The organizer removed your sign-up for <strong>${escapeHtml(taskLabel)}</strong> at <strong>${escapeHtml(event.title)}</strong>.</p>
             ${whenLine ? `<p><strong>When:</strong> ${escapeHtml(whenLine)}</p>` : ""}
-            ${event.location ? `<p><strong>Location:</strong> ${escapeHtml(event.location)}</p>` : ""}
+            ${locationHtml(event.location)}
             <p><strong>Event page:</strong> <a href="${escapeHtml(eventUrl)}" style="color: #2563eb;">${escapeHtml(eventUrl)}</a></p>
             <p style="font-size: 13px; color: #64748b;">If you think this was a mistake, please contact the organizer${event.organizerName ? ` (${escapeHtml(event.organizerName)})` : ""} or sign up again if a spot is still open.</p>
             ${emailFooter(site)}
@@ -1425,7 +1425,7 @@ export async function action({ request, params, context }: ActionFunctionArgs) {
             <p>Hi ${escapeHtml(v.participantName)},</p>
             <p>The time for <strong>${escapeHtml(event.title)}</strong> has been decided:</p>
             ${lockedWhen ? `<p><strong>When:</strong> ${escapeHtml(lockedWhen)}</p>` : ""}
-            ${event.location ? `<p><strong>Location:</strong> ${escapeHtml(event.location)}</p>` : ""}
+            ${locationHtml(event.location)}
             ${event.description ? `<p><strong>Description:</strong><br>${escapeHtml(event.description).replace(/\r?\n/g, "<br>")}</p>` : ""}
             <p><strong>Event page:</strong> <a href="${escapeHtml(eventUrl)}" style="color: #2563eb;">${escapeHtml(eventUrl)}</a></p>
             <p>
@@ -2925,12 +2925,30 @@ export default function EventView() {
                 Event time: {organizerTzLabel(organizerTz, headerTzAt)}
               </span>
             )}
-            {event.location && (
-              <span className="inline-flex items-center gap-1.5 text-xs font-semibold text-slate-700 bg-slate-100/90 px-3 py-1.5 rounded-full border border-slate-200/80">
-                <MapPin className="w-3.5 h-3.5 text-slate-500" />
-                {event.location}
-              </span>
-            )}
+            {event.location &&
+              (() => {
+                // A location is often a meeting link — make it clickable
+                // instead of something people have to copy by hand.
+                const locationUrl = asExternalUrl(event.location);
+                const pill =
+                  "inline-flex items-center gap-1.5 text-xs font-semibold text-slate-700 bg-slate-100/90 px-3 py-1.5 rounded-full border border-slate-200/80 max-w-full";
+                return locationUrl ? (
+                  <a
+                    href={locationUrl}
+                    target="_blank"
+                    rel="noopener noreferrer nofollow"
+                    className={`${pill} hover:border-blue-300 hover:text-blue-700 transition-colors`}
+                  >
+                    <Link2 className="w-3.5 h-3.5 text-slate-500 shrink-0" />
+                    <span className="truncate">{event.location}</span>
+                  </a>
+                ) : (
+                  <span className={pill}>
+                    <MapPin className="w-3.5 h-3.5 text-slate-500 shrink-0" />
+                    <span className="truncate">{event.location}</span>
+                  </span>
+                );
+              })()}
             <span className="inline-flex items-center gap-1.5 text-xs font-medium text-slate-500 bg-slate-100/90 px-3 py-1.5 rounded-full border border-slate-200/80">
               <User className="w-3.5 h-3.5 text-slate-500" />
               Organized by:&nbsp;<strong className="text-slate-800 font-semibold">{event.organizerName}</strong>
@@ -3143,12 +3161,14 @@ export default function EventView() {
                 </div>
               )}
               <div>
-                <label className="block text-xs font-semibold text-slate-700 mb-1.5">Location</label>
+                <label className="block text-xs font-semibold text-slate-700 mb-1.5">
+                  Video Link or Location
+                </label>
                 <input
                   type="text"
                   name="location"
                   defaultValue={event.location || ""}
-                  placeholder="e.g. Central Park, Zoom link…"
+                  placeholder="e.g., https://meet.google.com/xyz or Central Park"
                   className="w-full px-4 py-3 rounded-xl border border-slate-200/90 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all placeholder:text-slate-400"
                 />
               </div>

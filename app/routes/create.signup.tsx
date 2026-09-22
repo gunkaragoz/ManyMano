@@ -742,14 +742,14 @@ export default function CreateSignupSheet() {
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div>
                 <label className="block text-xs font-semibold text-slate-700 mb-1.5">
-                  Location (Optional)
+                  Video Link or Location (Optional)
                 </label>
                 <input
                   type="text"
                   name="location"
                   value={details.location}
                   onChange={(e) => updateDetails({ location: e.target.value })}
-                  placeholder="e.g., Meadow Creek Park (North Gate)"
+                  placeholder="e.g., https://meet.google.com/xyz or Meadow Creek Park"
                   className="w-full px-4 py-3 rounded-xl border border-slate-200/90 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all placeholder:text-slate-400"
                 />
               </div>
