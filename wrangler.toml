@@ -33,9 +33,6 @@ SMTP_HOST = "email-smtp.us-east-1.amazonaws.com"
 SMTP_PORT = "587"
 TURNSTILE_SITE_KEY = "0x4AAAAAAEw2VkyFUNDzibNI"
 TURNSTILE_HOSTNAMES = "manymano.com,www.manymano.com"
-# Multi-day / repeating sign-up sheets. Off in every deployed environment
-# until this is "1" — the create form then shows the Event Type switcher.
-FEATURE_MULTIDATE_SHEETS = ""
 
 # Production: inherits top-level [vars]. Requires CLOUDFLARE_ENV=production
 # at build time (see package.json deploy script) — without it the plugin

@@ -90,25 +90,11 @@ export const meta: MetaFunction = ({ matches }) => {
   ]);
 };
 
-/**
- * Multi-day / repeating sheets are off unless .dev.vars (or the deploy env)
- * opts in. With the flag off the create form and action behave exactly as
- * they did before the feature existed.
- */
-function isMultiDateEnabled(value: string | undefined): boolean {
-  const v = (value || "").trim().toLowerCase();
-  return v === "1" || v === "true" || v === "on";
-}
-
 export async function loader({ context }: LoaderFunctionArgs) {
   const env = getCloudflareEnv(context) as {
     TURNSTILE_SITE_KEY?: string;
-    FEATURE_MULTIDATE_SHEETS?: string;
   };
-  return data({
-    turnstileSiteKey: env.TURNSTILE_SITE_KEY ?? null,
-    multiDateEnabled: isMultiDateEnabled(env.FEATURE_MULTIDATE_SHEETS),
-  });
+  return data({ turnstileSiteKey: env.TURNSTILE_SITE_KEY ?? null });
 }
 
 export async function action({ request, context }: ActionFunctionArgs) {
@@ -138,7 +124,6 @@ export async function action({ request, context }: ActionFunctionArgs) {
     ICS_PRODID?: string;
     TURNSTILE_SECRET_KEY?: string;
     TURNSTILE_HOSTNAMES?: string;
-    FEATURE_MULTIDATE_SHEETS?: string;
   };
   const site = getSiteConfig(env);
   const db = getDb(env.DB);
@@ -192,8 +177,8 @@ export async function action({ request, context }: ActionFunctionArgs) {
   const slotStartTimes = formData.getAll("slotStartTime") as string[];
   const slotEndTimes = formData.getAll("slotEndTime") as string[];
   const slotShiftNames = formData.getAll("slotShiftName") as string[];
-  // "all" / a date list / a weekday list — which days of a multi-date sheet
-  // this task runs on. Absent (or flag off) means every date.
+  // "all" / a date list / a weekday list — which days of a multi-day sheet
+  // this task runs on. Absent means every day.
   const slotDayFilters = formData.getAll("slotDays") as string[];
 
   const validSlots = slotTitles
@@ -245,12 +230,13 @@ export async function action({ request, context }: ActionFunctionArgs) {
   }
 
   // Multi-day / repeating sheets: rebuild the spec from the posted fields and
-  // expand it here — a client-supplied date list is never trusted. With the
-  // flag off (or no date fields posted) the spec is "single" and everything
-  // below takes the original single-date path, slot_date left NULL.
-  const specResult = isMultiDateEnabled(env.FEATURE_MULTIDATE_SHEETS)
-    ? parseDateSpec((name) => formData.get(name) as string | null, eventDate || "")
-    : { spec: { mode: "single" as const } };
+  // expand it here — a client-supplied date list is never trusted. A form that
+  // posts no date fields yields "single", which takes the original
+  // single-date path with slot_date left NULL.
+  const specResult = parseDateSpec(
+    (name) => formData.get(name) as string | null,
+    eventDate || ""
+  );
   if ("error" in specResult) {
     return data({ error: specResult.error }, { status: 400 });
   }
@@ -440,7 +426,7 @@ const defaultSignupShifts: Shift[] = [
 
 export default function CreateSignupSheet() {
   const actionData = useActionData<{ error?: string }>();
-  const { turnstileSiteKey, multiDateEnabled } = useLoaderData<typeof loader>();
+  const { turnstileSiteKey } = useLoaderData<typeof loader>();
   const navigation = useNavigation();
   const isSubmitting = navigation.state === "submitting";
   // Floating toast for validation errors. The inline banner below sits at the
@@ -495,12 +481,12 @@ export default function CreateSignupSheet() {
   );
 
   const startDate = details.eventDate || todayStr;
-  const dateSpec = multiDateEnabled ? selectionToSpec(dateSel, startDate) : { mode: "single" as const };
+  const dateSpec = selectionToSpec(dateSel, startDate);
   // One over the limit, so the picker can say "too many" instead of rendering
   // a list the server would reject anyway.
   const sheetDates =
     dateSpec.mode === "single" ? [startDate] : expandDates(dateSpec, startDate, MAX_SERIES_DAYS + 1);
-  const dayChoices = multiDateEnabled ? dayChoicesFor(dateSel, sheetDates) : [];
+  const dayChoices = dayChoicesFor(dateSel, sheetDates);
   const dayChoiceKeys = dayChoices.map((c) => c.key);
   /** Drops day keys left over from an earlier date selection. */
   const daysForShift = (shift: Shift): string[] | null => {
@@ -519,7 +505,7 @@ export default function CreateSignupSheet() {
       }, 0),
     0
   );
-  const dateError = multiDateEnabled ? dateLimitError(sheetDates, taskSlotCount) : null;
+  const dateError = dateLimitError(sheetDates, taskSlotCount);
 
   const toggleShiftDay = (shiftId: number, key: string) => {
     setShifts((prev) =>
@@ -720,14 +706,12 @@ export default function CreateSignupSheet() {
               />
             </div>
 
-            {multiDateEnabled && (
-              <div>
-                <label className="block text-xs font-semibold text-slate-700 mb-1.5">
-                  Event Type
-                </label>
-                <DateModeTabs start={startDate} value={dateSel} onChange={setDateSel} />
-              </div>
-            )}
+            <div>
+              <label className="block text-xs font-semibold text-slate-700 mb-1.5">
+                Event Type
+              </label>
+              <DateModeTabs start={startDate} value={dateSel} onChange={setDateSel} />
+            </div>
 
             {/* Dates only. The timezone deliberately sits further down with
                 Location: when it shared this row it changed column (and moved
@@ -735,7 +719,7 @@ export default function CreateSignupSheet() {
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div>
                 <label className="block text-xs font-semibold text-slate-700 mb-1.5">
-                  {multiDateEnabled ? dateFieldLabel(dateSel.mode) : "Event Date *"}
+                  {dateFieldLabel(dateSel.mode)}
                 </label>
                 <DatePicker
                   name="eventDate"
@@ -744,15 +728,11 @@ export default function CreateSignupSheet() {
                 />
               </div>
 
-              {multiDateEnabled && <DateEndField value={dateSel} onChange={setDateSel} />}
+              <DateEndField value={dateSel} onChange={setDateSel} />
             </div>
 
-            {multiDateEnabled && (
-              <>
-                <RepeatRuleField start={startDate} value={dateSel} onChange={setDateSel} />
-                <DateSummary value={dateSel} dates={sheetDates} error={dateError} />
-              </>
-            )}
+            <RepeatRuleField start={startDate} value={dateSel} onChange={setDateSel} />
+            <DateSummary value={dateSel} dates={sheetDates} error={dateError} />
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div>
@@ -979,13 +959,11 @@ export default function CreateSignupSheet() {
                       <input type="hidden" name="slotShiftName" value={shift.name} />
                       <input type="hidden" name="slotStartTime" value={shift.startTime} />
                       <input type="hidden" name="slotEndTime" value={shift.endTime} />
-                      {multiDateEnabled && (
-                        <input
-                          type="hidden"
-                          name="slotDays"
-                          value={(daysForShift(shift) || []).join(",") || "all"}
-                        />
-                      )}
+                      <input
+                        type="hidden"
+                        name="slotDays"
+                        value={(daysForShift(shift) || []).join(",") || "all"}
+                      />
 
                       <div className="sm:col-span-8">
                         <label className="block text-[10px] uppercase font-bold text-slate-400 mb-1">
