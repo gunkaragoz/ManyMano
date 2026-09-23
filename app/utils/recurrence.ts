@@ -381,3 +381,21 @@ export function parseDateSpec(
 
   return { spec: { mode: "repeat", rule, ends } };
 }
+
+/**
+ * Which existing day a day being added to a live sheet copies its tasks from:
+ * the closest one on the same weekday — so a shift that only runs on Mondays
+ * lands on the new Mondays and nowhere else — or, when no day shares its
+ * weekday, the closest earlier day, else the closest day at all. Ties go to
+ * the earlier day. Null only when there are no existing days.
+ */
+export function templateDayFor(existingDays: string[], date: string): string | null {
+  const distance = (d: string) => Math.abs(daysBetween(d, date));
+  const closest = (days: string[]) =>
+    [...days].sort((a, b) => distance(a) - distance(b) || (a < b ? -1 : 1))[0] ?? null;
+  return (
+    closest(existingDays.filter((d) => weekdayOf(d) === weekdayOf(date))) ??
+    closest(existingDays.filter((d) => d < date)) ??
+    closest(existingDays)
+  );
+}

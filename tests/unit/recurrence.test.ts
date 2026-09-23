@@ -11,6 +11,7 @@ import {
   presetsFor,
   readDateSpec,
   serializeDayFilter,
+  templateDayFor,
   weekdayOf,
   weekdayOrdinalOf,
   writeDateSpec,
@@ -331,5 +332,33 @@ describe("recurrence", () => {
     it("treats missing fields as a plain one-day sheet", () => {
       expect(parseDateSpec(form({}), "2026-09-24")).toEqual({ spec: { mode: "single" } });
     });
+  });
+});
+
+// Days added to a live sheet from the editor copy an existing day's tasks.
+describe("templateDayFor", () => {
+  // Mon/Wed series starting Wed Oct 7 2026: Wed 7, Mon 12, Wed 14, Mon 19.
+  const series = ["2026-10-07", "2026-10-12", "2026-10-14", "2026-10-19"];
+
+  it("copies the closest day on the same weekday", () => {
+    expect(templateDayFor(series, "2026-10-26")).toBe("2026-10-19"); // Monday
+    expect(templateDayFor(series, "2026-10-21")).toBe("2026-10-14"); // Wednesday
+  });
+
+  it("works when the new day is before the series (start moved earlier)", () => {
+    expect(templateDayFor(series, "2026-10-05")).toBe("2026-10-12"); // Monday
+  });
+
+  it("falls back to the closest earlier day when no weekday matches", () => {
+    // Mon–Wed range extended to Thursday.
+    expect(templateDayFor(["2026-11-16", "2026-11-17", "2026-11-18"], "2026-11-19")).toBe("2026-11-18");
+  });
+
+  it("falls back to the closest day when nothing is earlier either", () => {
+    expect(templateDayFor(["2026-11-17", "2026-11-18"], "2026-11-13")).toBe("2026-11-17");
+  });
+
+  it("returns null when there is nothing to copy", () => {
+    expect(templateDayFor([], "2026-11-13")).toBeNull();
   });
 });

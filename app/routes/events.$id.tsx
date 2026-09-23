@@ -2,7 +2,7 @@ import { getCloudflareEnv } from "~/utils/cloudflare-context";
 import type { ActionFunctionArgs, HeadersFunction, LoaderFunctionArgs, MetaFunction } from "react-router";
 import { data, redirect } from "react-router";
 import { useLoaderData, useActionData, useNavigation, useSearchParams, useFetcher, Form, isRouteErrorResponse, useRouteError } from "react-router";
-import { eq, and, inArray } from "drizzle-orm";
+import { eq, and, inArray, isNull } from "drizzle-orm";
 import { useState, useMemo, useEffect, useRef } from "react";
 import {
   ArrowRight,
@@ -42,10 +42,12 @@ import {
 } from "~/utils/auth";
 import {
   MAX_SERIES_DAYS,
+  describeSpec,
   expandDates,
   maxSeriesEnd,
   parseDateSpec,
   readDateSpec,
+  templateDayFor,
   writeDateSpec,
   type DateSpec,
 } from "~/utils/recurrence";
@@ -1583,17 +1585,21 @@ export async function action({ request, params, context }: ActionFunctionArgs) {
         );
       }
 
-      // The day the sheet used to start on, so its tasks can be the template
-      // for any day being added.
-      const currentDates = [
-        ...new Set(existing.map((s) => effectiveDateForSlot(s, event.eventDate) || "")),
-      ]
-        .filter(Boolean)
-        .sort();
-      const templateDate = currentDates[0] ?? null;
-      const template = existing.filter(
-        (s) => (effectiveDateForSlot(s, event.eventDate) || "") === templateDate
-      );
+      // The day each existing slot is on. A sheet that never had a date takes
+      // the one being picked now, so its tasks carry over instead of vanishing.
+      const dayOf = (s: (typeof existing)[number]) =>
+        effectiveDateForSlot(s, event.eventDate) || (eventDate as string) || "";
+      const currentDates = [...new Set(existing.map(dayOf))].filter(Boolean).sort();
+      const slotsByDay = new Map<string, typeof existing>();
+      for (const s of existing) {
+        const day = dayOf(s);
+        slotsByDay.set(day, [...(slotsByDay.get(day) ?? []), s]);
+      }
+      // Each day being added copies a matching existing day's tasks.
+      const templateFor = (date: string) => {
+        const day = templateDayFor(currentDates, date);
+        return day ? slotsByDay.get(day) ?? [] : [];
+      };
 
       const keptDates = new Set(spec.mode === "single" ? currentDates.slice(0, 1) : newDates);
       const droppedDates = currentDates.filter((d) => !keptDates.has(d));
@@ -1602,7 +1608,7 @@ export async function action({ request, params, context }: ActionFunctionArgs) {
         // Never delete someone's spot as a side effect of an edit: name the
         // days that are in the way and let the organizer deal with them.
         const droppedSlotIds = existing
-          .filter((s) => droppedDates.includes(effectiveDateForSlot(s, event.eventDate) || ""))
+          .filter((s) => droppedDates.includes(dayOf(s)))
           .map((s) => s.id);
         const booked = droppedSlotIds.length
           ? await db
@@ -1616,7 +1622,7 @@ export async function action({ request, params, context }: ActionFunctionArgs) {
               .filter((b) => droppedSlotIds.includes(b.slotId))
               .map((b) => {
                 const slot = existing.find((s) => s.id === b.slotId);
-                return slot ? effectiveDateForSlot(slot, event.eventDate) || "" : "";
+                return slot ? dayOf(slot) : "";
               })
               .filter(Boolean)
           ),
@@ -1636,9 +1642,8 @@ export async function action({ request, params, context }: ActionFunctionArgs) {
       const addedDates = newDates.filter((d) => !currentDates.includes(d));
       const totalRows =
         existing.length -
-        existing.filter((s) => droppedDates.includes(effectiveDateForSlot(s, event.eventDate) || ""))
-          .length +
-        addedDates.length * (template.length || 1);
+        existing.filter((s) => droppedDates.includes(dayOf(s))).length +
+        addedDates.reduce((n, d) => n + templateFor(d).length, 0);
       if (totalRows > MAX_SLOT_ROWS_PER_EVENT) {
         return data(
           {
@@ -1651,7 +1656,7 @@ export async function action({ request, params, context }: ActionFunctionArgs) {
       // Remove the days that are going away (all empty, checked above).
       if (droppedDates.length > 0) {
         const ids = existing
-          .filter((s) => droppedDates.includes(effectiveDateForSlot(s, event.eventDate) || ""))
+          .filter((s) => droppedDates.includes(dayOf(s)))
           .map((s) => s.id);
         for (let i = 0; i < ids.length; i += 20) {
           await db.delete(eventSlots).where(inArray(eventSlots.id, ids.slice(i, i + 20)));
@@ -1667,17 +1672,20 @@ export async function action({ request, params, context }: ActionFunctionArgs) {
           .set({ slotDate: null })
           .where(eq(eventSlots.eventId, eventId));
       } else {
-        // A sheet that was single-day until now: its slots become day one.
-        if (templateDate === null || existing.some((s) => !s.slotDate)) {
+        // A sheet that was single-day until now: its undated slots are the day
+        // they were read as above, so write that day down (unless it was
+        // dropped, in which case they are already gone).
+        const undatedDay = event.eventDate || (eventDate as string);
+        if (keptDates.has(undatedDay)) {
           await db
             .update(eventSlots)
-            .set({ slotDate: newDates[0] })
-            .where(eq(eventSlots.eventId, eventId));
+            .set({ slotDate: undatedDay })
+            .where(and(eq(eventSlots.eventId, eventId), isNull(eventSlots.slotDate)));
         }
-        if (addedDates.length > 0 && template.length > 0) {
+        if (addedDates.length > 0) {
           let order = existing.reduce((m, s) => Math.max(m, s.displayOrder ?? 0), -1);
           const rows = addedDates.flatMap((date) =>
-            template.map((t) => ({
+            templateFor(date).map((t) => ({
               id: generateInternalId(),
               eventId,
               title: t.title,
@@ -2427,7 +2435,7 @@ function EditDatesField({
         <div className="sm:col-span-2">
           <DateSummary value={sel} dates={dates} />
           <p className="text-[11px] text-slate-500 mt-1.5">
-            Days you remove here must have no sign-ups. New days copy the tasks from the first day.
+            Days you remove here must have no sign-ups. New days copy the tasks of the nearest day on the same weekday.
           </p>
         </div>
       )}
@@ -3578,6 +3586,21 @@ export default function EventView() {
     return sections.sort((a, b) => (a.date || "").localeCompare(b.date || ""));
   }, [shiftGroups]);
   const isMultiDate = dateSections.length > 1;
+  // Header badge: one date, or the span of a multi-day sheet and how it runs,
+  // so a 13-week series doesn't read as a one-off on its first day.
+  const headerDateLabel = useMemo(() => {
+    if (!event.eventDate) return "";
+    const long = (d: string) =>
+      new Date(d + "T00:00:00").toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric", year: "numeric" });
+    if (!isMultiDate) return long(event.eventDate);
+    const first = dateSections[0].date || event.eventDate;
+    const last = dateSections[dateSections.length - 1].date || first;
+    const short = (d: string) =>
+      new Date(d + "T00:00:00").toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" });
+    const spec = (event as { dateSpec?: DateSpec }).dateSpec;
+    const how = spec?.mode === "repeat" ? describeSpec(spec, event.eventDate) : `${dateSections.length} days`;
+    return `${short(first)} – ${long(last)} · ${how}`;
+  }, [event, isMultiDate, dateSections]);
   /**
    * The editor's shift cards: a shift is a name + time window (the identity
    * the event page groups by), holding its tasks. On a repeating sheet the
@@ -3976,7 +3999,7 @@ export default function EventView() {
                 className="inline-flex items-center gap-1.5 text-xs font-semibold text-slate-700 bg-slate-100/90 px-3 py-1.5 rounded-full border border-slate-200/80"
               >
                 <CalendarDays className="w-3.5 h-3.5 text-slate-500" />
-                {new Date(event.eventDate + "T00:00:00").toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric", year: "numeric" })}
+                {headerDateLabel}
                 {showViewerTz ? ` · ${organizerTzLabel(organizerTz, headerTzAt)}` : ""}
               </span>
             )}
@@ -4344,7 +4367,9 @@ export default function EventView() {
               />
             )}
             <p className="text-[11px] text-slate-500">
-              Deleting a task also removes its signups / votes. If it was the finalized winning time, the event reopens.
+              {event.type === "TIME_POLL"
+                ? "Deleting an option also removes its votes. If it was the finalized winning time, the event reopens."
+                : "A task or shift with volunteers signed up can't be removed — cancel those sign-ups first."}
             </p>
             <div className="pt-6 border-t border-rose-100 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
               <div className="text-xs text-slate-500">
@@ -5390,6 +5415,14 @@ export default function EventView() {
 
             <div className="bg-blue-50/70 border border-blue-100 p-4 rounded-2xl text-xs text-blue-900 space-y-0.5">
               <span className="font-bold text-sm text-blue-950 block">{selectedSlotForSignup.title}</span>
+              {/* Every day of a series has the same task names, so say which day. */}
+              {isMultiDate && (() => {
+                const slot = slots.find((s) => s.id === selectedSlotForSignup.id);
+                const date = slot ? effectiveDateForSlot(slot, event.eventDate) : null;
+                return date ? (
+                  <span className="font-semibold text-blue-900 block">{formatLongDateLabel(date)}</span>
+                ) : null;
+              })()}
               <span className="text-blue-700">at {event.title}</span>
             </div>
 
