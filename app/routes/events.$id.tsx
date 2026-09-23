@@ -1778,6 +1778,78 @@ export async function action({ request, params, context }: ActionFunctionArgs) {
     return data({ success: true, message: "New option added." });
   }
 
+  // 6b. Add a task to an existing shift (admin only). The create form thinks
+  // in shifts that hold tasks; this is that action for a live sheet, so a new
+  // task lands on every day the shift already runs on rather than one row at
+  // a time.
+  if (intent === "add_shift_task") {
+    if (!(await requireAdmin())) {
+      return data({ error: "Unauthorized." }, { status: 403 });
+    }
+    if (isPoll) return data({ error: "Polls have time options, not tasks." }, { status: 400 });
+
+    const title = cleanText(formData.get("slotTitle"), SLOT_TITLE_MAX);
+    const shiftName = cleanText(formData.get("slotShiftName"), SHIFT_NAME_MAX) || null;
+    const startTime = cleanText(formData.get("slotStartTime"), 16) || null;
+    const endTime = cleanText(formData.get("slotEndTime"), 16) || null;
+    const capacityRaw = cleanText(formData.get("slotCapacity"), 8) || "1";
+    if (!title) {
+      return data({ error: "Give the new task a name." }, { status: 400 });
+    }
+    const slotError = validateSlotFields("", startTime, endTime);
+    if (slotError) return data({ error: slotError }, { status: 400 });
+
+    const existingSlots = await db.select().from(eventSlots).where(eq(eventSlots.eventId, eventId));
+    // Every day this shift runs on, identified the same way the event page
+    // groups shifts: name + start + end.
+    const sameShift = existingSlots.filter(
+      (s) =>
+        ((s as { shiftName?: string | null }).shiftName || "") === (shiftName || "") &&
+        (s.startTime || "") === (startTime || "") &&
+        (s.endTime || "") === (endTime || "")
+    );
+    if (sameShift.length === 0) {
+      return data({ error: "That shift no longer exists — reload the page." }, { status: 400 });
+    }
+    const days = [...new Set(sameShift.map((s) => (s as { slotDate?: string | null }).slotDate ?? null))];
+    if (sameShift.some((s) => s.title.trim().toLowerCase() === title.toLowerCase())) {
+      return data({ error: `"${title}" is already a task in this shift.` }, { status: 400 });
+    }
+
+    const hasDatedSlots = existingSlots.some((s) => (s as { slotDate?: string | null }).slotDate);
+    const slotCap = hasDatedSlots ? MAX_SLOT_ROWS_PER_EVENT : MAX_SLOTS_PER_EVENT;
+    if (existingSlots.length + days.length > slotCap) {
+      return data({ error: `Too many options — maximum ${slotCap} per event.` }, { status: 400 });
+    }
+
+    const rawCap = parseInt(capacityRaw, 10);
+    const capacity = Number.isFinite(rawCap) ? Math.min(Math.max(rawCap, 1), 999) : 1;
+    let order = existingSlots.reduce((m, s) => Math.max(m, s.displayOrder ?? 0), -1);
+    const rows = days.map((day) => ({
+      id: generateInternalId(),
+      eventId,
+      title,
+      shiftName,
+      slotDate: day,
+      capacity,
+      startTime,
+      endTime,
+      displayOrder: ++order,
+    }));
+    // D1 caps a statement at 100 bound variables; 9 columns per row.
+    for (let i = 0; i < rows.length; i += 10) {
+      await db.insert(eventSlots).values(rows.slice(i, i + 10));
+    }
+
+    return data({
+      success: true,
+      message:
+        days.length > 1
+          ? `Added "${title}" on ${days.length} days.`
+          : `Added "${title}".`,
+    });
+  }
+
   // 7. Update Slot (admin only)
   if (intent === "update_slot") {
     if (!(await requireAdmin())) {
@@ -2938,6 +3010,49 @@ export default function EventView() {
     return sections.sort((a, b) => (a.date || "").localeCompare(b.date || ""));
   }, [shiftGroups]);
   const isMultiDate = dateSections.length > 1;
+  /**
+   * Distinct shifts for the admin panel: a shift is a name + time window, the
+   * same identity the event page groups by. A multi-day sheet repeats each
+   * shift across its days, so adding a task adds it to all of them.
+   */
+  const adminShifts = useMemo(() => {
+    const out: Array<{
+      key: string;
+      shiftName: string | null;
+      startTime: string | null;
+      endTime: string | null;
+      label: string;
+      days: number;
+    }> = [];
+    const byKey = new Map<string, number>();
+    slots.forEach((s) => {
+      const shiftName = ((s as { shiftName?: string | null }).shiftName || "").trim();
+      const key = `${shiftName}||${s.startTime || ""}||${s.endTime || ""}`;
+      const seen = byKey.get(key);
+      const date = effectiveDateForSlot(s, event.eventDate) || "";
+      if (seen !== undefined) {
+        const entry = out[seen] as { days: number; dates: Set<string> } & (typeof out)[number];
+        entry.dates.add(date);
+        entry.days = entry.dates.size;
+        return;
+      }
+      const time =
+        s.startTime || s.endTime
+          ? `${formatTime(s.startTime)}${s.endTime ? ` – ${formatTime(s.endTime)}` : ""}`
+          : "";
+      byKey.set(key, out.length);
+      out.push({
+        key,
+        shiftName: shiftName || null,
+        startTime: s.startTime,
+        endTime: s.endTime,
+        label: [shiftName, time].filter(Boolean).join(" · ") || "Untitled shift",
+        days: 1,
+        dates: new Set([date]),
+      } as (typeof out)[number] & { dates: Set<string> });
+    });
+    return out;
+  }, [slots, event.eventDate]);
   const [showAllDates, setShowAllDates] = useState(false);
   // Long series (a school year) open on the next four weeks so the page isn't
   // an endless scroll; short ones always show every date.
@@ -3732,6 +3847,69 @@ export default function EventView() {
             )}
 
             {/* Add new slot */}
+            {event.type === "SIGNUP_SHEET" && adminShifts.length > 0 && (
+              <div className="space-y-2.5">
+                <h4 className="text-[10px] uppercase font-bold tracking-wide text-slate-400">
+                  Add a task to a shift
+                </h4>
+                {adminShifts.map((shift) => (
+                  <Form
+                    key={shift.key}
+                    method="post"
+                    className="flex flex-wrap gap-2.5 items-end bg-slate-50/70 border border-slate-200/80 rounded-2xl p-3"
+                  >
+                    <input type="hidden" name="intent" value="add_shift_task" />
+                    <input type="hidden" name="adminToken" value={adminToken || ""} />
+                    <input type="hidden" name="slotShiftName" value={shift.shiftName || ""} />
+                    <input type="hidden" name="slotStartTime" value={shift.startTime || ""} />
+                    <input type="hidden" name="slotEndTime" value={shift.endTime || ""} />
+                    <div className="min-w-[150px]">
+                      <span className="block text-[10px] uppercase font-bold text-slate-400 mb-1">
+                        Shift
+                      </span>
+                      <p className="text-xs font-semibold text-slate-700 py-2">
+                        {shift.label}
+                        {shift.days > 1 && (
+                          <span className="font-medium text-slate-400"> · {shift.days} days</span>
+                        )}
+                      </p>
+                    </div>
+                    <div className="grow min-w-[170px]">
+                      <label className="block text-[10px] uppercase font-bold text-slate-400 mb-1">
+                        New task
+                      </label>
+                      <input
+                        type="text"
+                        name="slotTitle"
+                        required
+                        placeholder="e.g. Setup crew"
+                        className="w-full px-3 py-2 rounded-xl border border-slate-200 text-xs bg-white focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all placeholder:text-slate-400"
+                      />
+                    </div>
+                    <div className="w-24">
+                      <label className="block text-[10px] uppercase font-bold text-slate-400 mb-1">
+                        Spots
+                      </label>
+                      <input
+                        type="number"
+                        name="slotCapacity"
+                        min={1}
+                        defaultValue={1}
+                        className="w-full px-3 py-2 rounded-xl border border-slate-200 text-xs bg-white focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all"
+                      />
+                    </div>
+                    <button
+                      type="submit"
+                      disabled={isSubmitting}
+                      className="px-4 py-2 rounded-2xl bg-white border border-slate-200 hover:border-blue-400 hover:text-blue-600 text-slate-700 text-xs font-semibold shadow-sm transition-all disabled:opacity-50"
+                    >
+                      + Add task
+                    </button>
+                  </Form>
+                ))}
+              </div>
+            )}
+
             {event.type === "TIME_POLL" ? (
               <PollTimeNewOptionRow
                 durationMinutes={(event as { durationMinutes?: number | null }).durationMinutes ?? null}
