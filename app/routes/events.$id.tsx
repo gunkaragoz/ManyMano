@@ -1997,12 +1997,30 @@ export async function action({ request, params, context }: ActionFunctionArgs) {
     const titles = formData.getAll("taskTitle") as string[];
     const originals = formData.getAll("taskOriginalTitle") as string[];
     const capacities = formData.getAll("taskCapacity") as string[];
-    for (let i = 0; i < originals.length; i++) {
+    const days = daysOf(inShift);
+    // Rows the card added have no original title: they are new tasks, created
+    // on every day of the shift — the same thing "+ Add Task to this shift"
+    // means on the create form.
+    const added: Array<{ title: string; capacity: number }> = [];
+
+    for (let i = 0; i < titles.length; i++) {
       const original = cleanText(originals[i], SLOT_TITLE_MAX);
       const title = cleanText(titles[i], SLOT_TITLE_MAX) || original;
       if (!title) continue;
       const capRaw = parseInt(capacities[i] || "1", 10);
       const capacity = Number.isFinite(capRaw) ? Math.min(Math.max(capRaw, 1), 999) : 1;
+
+      if (!original) {
+        const clashes =
+          inShift.some((s) => s.title.toLowerCase() === title.toLowerCase()) ||
+          added.some((a) => a.title.toLowerCase() === title.toLowerCase());
+        if (clashes) {
+          return data({ error: `"${title}" is already a task in this shift.` }, { status: 400 });
+        }
+        added.push({ title, capacity });
+        continue;
+      }
+
       const ids = inShift.filter((s) => s.title === original).map((s) => s.id);
       for (let j = 0; j < ids.length; j += 20) {
         await db
@@ -2012,10 +2030,40 @@ export async function action({ request, params, context }: ActionFunctionArgs) {
       }
     }
 
-    const days = daysOf(inShift).length;
+    if (added.length > 0) {
+      const hasDated = allSlots.some((s) => (s as { slotDate?: string | null }).slotDate);
+      const cap = hasDated ? MAX_SLOT_ROWS_PER_EVENT : MAX_SLOTS_PER_EVENT;
+      if (allSlots.length + added.length * days.length > cap) {
+        return data({ error: `Too many options — maximum ${cap} per event.` }, { status: 400 });
+      }
+      let order = allSlots.reduce((m, s) => Math.max(m, s.displayOrder ?? 0), -1);
+      const rows = added.flatMap((task) =>
+        days.map((day) => ({
+          id: generateInternalId(),
+          eventId,
+          title: task.title,
+          shiftName,
+          slotDate: day,
+          capacity: task.capacity,
+          startTime,
+          endTime,
+          displayOrder: ++order,
+        }))
+      );
+      // D1 caps a statement at 100 bound variables; 9 columns per row.
+      for (let i = 0; i < rows.length; i += 10) {
+        await db.insert(eventSlots).values(rows.slice(i, i + 10));
+      }
+    }
+
+    const dayCount = days.length;
+    const addedNote = added.length
+      ? ` Added ${added.length === 1 ? `"${added[0].title}"` : `${added.length} tasks`}.`
+      : "";
     return data({
       success: true,
-      message: days > 1 ? `Shift updated on ${days} days.` : "Shift updated.",
+      message:
+        (dayCount > 1 ? `Shift updated on ${dayCount} days.` : "Shift updated.") + addedNote,
     });
   }
 
@@ -2384,6 +2432,357 @@ function EditDatesField({
         </div>
       )}
     </>
+  );
+}
+
+type EditShift = {
+  key: string;
+  shiftName: string | null;
+  startTime: string | null;
+  endTime: string | null;
+  days: number;
+  tasks: Array<{ title: string; capacity: number; days: number; signups: number }>;
+};
+
+const EDIT_INPUT =
+  "w-full px-3 py-2 text-xs rounded-xl border border-slate-200 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 placeholder:text-slate-400";
+const EDIT_SUBLABEL = "block text-[10px] uppercase font-bold text-slate-400 mb-1";
+
+/**
+ * One shift card in the editor — the same layout as the create form's shift
+ * card, with the same TimePickers and dashed "add task" button. The only
+ * additions are what a live sheet knows and a draft doesn't: how many days the
+ * shift covers, and who has signed up.
+ *
+ * A card is one form. The intent rides on the submit BUTTONS, never on a
+ * hidden input, because a hidden intent wins formData.get() over the clicked
+ * button's value — which is exactly how remove-task silently saved instead of
+ * deleting. Removing an existing task posts its own little form (referenced by
+ * id) so the row being removed is unambiguous.
+ */
+function EditShiftCard({
+  shift,
+  index,
+  adminToken,
+  isSubmitting,
+}: {
+  shift: EditShift;
+  index: number;
+  adminToken: string | null;
+  isSubmitting: boolean;
+  }) {
+  const [start, setStart] = useState(shift.startTime || "");
+  const [end, setEnd] = useState(shift.endTime || "");
+  // Tasks added here are saved with the card, exactly like create.
+  const [newTasks, setNewTasks] = useState<number[]>([]);
+  const formId = `shift-${index}`;
+  // Once the server has the new tasks they arrive as real rows, so the draft
+  // rows must go — otherwise a saved task shows twice.
+  const taskCount = shift.tasks.length;
+  useEffect(() => {
+    setNewTasks([]);
+  }, [taskCount]);
+
+  return (
+    <div className="p-4 bg-slate-50/70 rounded-2xl border border-slate-200/80 transition-all space-y-3">
+      <div className="flex items-center justify-between">
+        <span className="text-xs font-bold text-slate-700">
+          Shift {index + 1}
+          {shift.days > 1 && (
+            <span className="font-medium text-slate-400"> · every one of {shift.days} days</span>
+          )}
+        </span>
+        <button
+          type="submit"
+          form={`${formId}-remove`}
+          disabled={isSubmitting}
+          className="text-slate-400 hover:text-rose-500 font-bold text-xs disabled:opacity-20 transition-colors inline-flex items-center gap-1"
+          onClick={(e) => {
+            const where = shift.days > 1 ? ` from all ${shift.days} days` : "";
+            const label = shift.shiftName || `Shift ${index + 1}`;
+            if (!window.confirm(`Remove ${label}${where}, with its ${shift.tasks.length === 1 ? "task" : `${shift.tasks.length} tasks`}?`)) {
+              e.preventDefault();
+            }
+          }}
+        >
+          Remove <X className="w-3 h-3" />
+        </button>
+      </div>
+
+      <Form method="post" id={formId} className="space-y-3">
+        <input type="hidden" name="adminToken" value={adminToken || ""} />
+        <input type="hidden" name="shiftKey" value={shift.key} />
+        <input type="hidden" name="slotStartTime" value={start} />
+        <input type="hidden" name="slotEndTime" value={end} />
+        {/* Enter-to-submit uses the first submit button; make that Save. */}
+        <button type="submit" name="intent" value="update_shift" className="hidden" tabIndex={-1} aria-hidden="true">
+          Save
+        </button>
+
+        <div className="grid grid-cols-1 sm:grid-cols-12 gap-3 items-center">
+          <div className="sm:col-span-6">
+            <label className={EDIT_SUBLABEL}>Shift Name (Optional)</label>
+            <input
+              type="text"
+              name="slotShiftName"
+              defaultValue={shift.shiftName || ""}
+              placeholder="e.g., Morning"
+              className={EDIT_INPUT}
+            />
+          </div>
+          <div className="sm:col-span-3">
+            <label className={EDIT_SUBLABEL}>Start Time</label>
+            <TimePicker value={start} onChange={setStart} size="sm" />
+          </div>
+          <div className="sm:col-span-3">
+            <label className={EDIT_SUBLABEL}>End Time</label>
+            <TimePicker value={end} onChange={setEnd} size="sm" />
+          </div>
+        </div>
+
+        <div className="space-y-2.5 pt-1">
+          {shift.tasks.map((task) => (
+            <div
+              key={task.title}
+              className="grid grid-cols-1 sm:grid-cols-12 gap-3 items-end bg-white rounded-xl border border-slate-200/80 p-3"
+            >
+              <input type="hidden" name="taskOriginalTitle" value={task.title} />
+              <div className="sm:col-span-8">
+                <label className={EDIT_SUBLABEL}>Task *</label>
+                <input type="text" name="taskTitle" required defaultValue={task.title} className={EDIT_INPUT} />
+              </div>
+              <div className="sm:col-span-3">
+                <label className={EDIT_SUBLABEL}>Spots Needed</label>
+                <input
+                  type="number"
+                  name="taskCapacity"
+                  min={1}
+                  max={999}
+                  defaultValue={task.capacity}
+                  className={EDIT_INPUT}
+                />
+              </div>
+              <div className="sm:col-span-1 flex sm:justify-end">
+                <button
+                  type="submit"
+                  form={`${formId}-del-${encodeURIComponent(task.title)}`}
+                  title={`Remove "${task.title}"`}
+                  className="text-slate-400 hover:text-rose-500 font-bold text-xs transition-colors inline-flex items-center gap-1 p-2"
+                  onClick={(e) => {
+                    const where = task.days > 1 ? ` from all ${task.days} days` : "";
+                    if (!window.confirm(`Remove "${task.title}"${where}?`)) e.preventDefault();
+                  }}
+                >
+                  <X className="w-3.5 h-3.5" />
+                </button>
+              </div>
+              {(shift.days > 1 || task.signups > 0) && (
+                <span className="sm:col-span-12 text-[10px] text-slate-400 -mt-1">
+                  {task.days < shift.days
+                    ? `On ${task.days} of ${shift.days} days`
+                    : shift.days > 1
+                      ? `On all ${shift.days} days`
+                      : ""}
+                  {task.signups > 0
+                    ? `${shift.days > 1 ? " · " : ""}${task.signups} signed up`
+                    : ""}
+                </span>
+              )}
+            </div>
+          ))}
+
+          {newTasks.map((id) => (
+            <div
+              key={id}
+              className="grid grid-cols-1 sm:grid-cols-12 gap-3 items-end bg-white rounded-xl border border-dashed border-slate-300 p-3"
+            >
+              {/* Empty original marks it as new; saving the card creates it. */}
+              <input type="hidden" name="taskOriginalTitle" value="" />
+              <div className="sm:col-span-8">
+                <label className={EDIT_SUBLABEL}>Task *</label>
+                <input type="text" name="taskTitle" required placeholder="e.g., Setup Crew" className={EDIT_INPUT} />
+              </div>
+              <div className="sm:col-span-3">
+                <label className={EDIT_SUBLABEL}>Spots Needed</label>
+                <input type="number" name="taskCapacity" min={1} max={999} defaultValue={1} className={EDIT_INPUT} />
+              </div>
+              <div className="sm:col-span-1 flex sm:justify-end">
+                <button
+                  type="button"
+                  onClick={() => setNewTasks((prev) => prev.filter((n) => n !== id))}
+                  title="Discard this task"
+                  className="text-slate-400 hover:text-rose-500 font-bold text-xs transition-colors inline-flex items-center gap-1 p-2"
+                >
+                  <X className="w-3.5 h-3.5" />
+                </button>
+              </div>
+            </div>
+          ))}
+
+          <button
+            type="button"
+            onClick={() => setNewTasks((prev) => [...prev, Date.now()])}
+            className="px-3 py-1.5 text-xs font-semibold rounded-2xl border border-dashed border-slate-300 hover:border-blue-400 hover:text-blue-600 bg-white transition-all flex items-center gap-1"
+          >
+            <span>+ Add Task to this shift</span>
+          </button>
+        </div>
+
+        <button
+          type="submit"
+          name="intent"
+          value="update_shift"
+          disabled={isSubmitting}
+          className="px-4 py-2 rounded-2xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold shadow-sm transition-all disabled:opacity-50"
+        >
+          {isSubmitting ? "Saving…" : "Save shift"}
+        </button>
+      </Form>
+
+      {/* Targets for the remove buttons above — kept out of the card's form so
+          a removal never carries half-finished edits with it. */}
+      <Form method="post" id={`${formId}-remove`} className="hidden">
+        <input type="hidden" name="intent" value="delete_shift" />
+        <input type="hidden" name="adminToken" value={adminToken || ""} />
+        <input type="hidden" name="shiftKey" value={shift.key} />
+      </Form>
+      {shift.tasks.map((task) => (
+        <Form
+          key={`del-${task.title}`}
+          method="post"
+          id={`${formId}-del-${encodeURIComponent(task.title)}`}
+          className="hidden"
+        >
+          <input type="hidden" name="intent" value="delete_shift_task" />
+          <input type="hidden" name="adminToken" value={adminToken || ""} />
+          <input type="hidden" name="shiftKey" value={shift.key} />
+          <input type="hidden" name="slotTitle" value={task.title} />
+        </Form>
+      ))}
+    </div>
+  );
+}
+
+/** A brand-new shift, laid out like create's card; saving adds it to every day. */
+function NewShiftCard({
+  index,
+  adminToken,
+  isSubmitting,
+  multiDay,
+  onDiscard,
+}: {
+  index: number;
+  adminToken: string | null;
+  isSubmitting: boolean;
+  multiDay: boolean;
+  onDiscard: () => void;
+}) {
+  const [start, setStart] = useState("");
+  const [end, setEnd] = useState("");
+  return (
+    <Form method="post" className="p-4 bg-slate-50/70 rounded-2xl border border-dashed border-slate-300 space-y-3">
+      <input type="hidden" name="intent" value="add_shift" />
+      <input type="hidden" name="adminToken" value={adminToken || ""} />
+      <input type="hidden" name="slotStartTime" value={start} />
+      <input type="hidden" name="slotEndTime" value={end} />
+      <div className="flex items-center justify-between">
+        <span className="text-xs font-bold text-slate-700">
+          Shift {index + 1}
+          {multiDay && <span className="font-medium text-slate-400"> · added to every day</span>}
+        </span>
+        <button
+          type="button"
+          onClick={onDiscard}
+          className="text-slate-400 hover:text-rose-500 font-bold text-xs transition-colors inline-flex items-center gap-1"
+        >
+          Remove <X className="w-3 h-3" />
+        </button>
+      </div>
+      <div className="grid grid-cols-1 sm:grid-cols-12 gap-3 items-center">
+        <div className="sm:col-span-6">
+          <label className={EDIT_SUBLABEL}>Shift Name (Optional)</label>
+          <input type="text" name="slotShiftName" placeholder="e.g., Afternoon" className={EDIT_INPUT} />
+        </div>
+        <div className="sm:col-span-3">
+          <label className={EDIT_SUBLABEL}>Start Time</label>
+          <TimePicker value={start} onChange={setStart} size="sm" />
+        </div>
+        <div className="sm:col-span-3">
+          <label className={EDIT_SUBLABEL}>End Time</label>
+          <TimePicker value={end} onChange={setEnd} size="sm" />
+        </div>
+      </div>
+      <div className="grid grid-cols-1 sm:grid-cols-12 gap-3 items-end bg-white rounded-xl border border-slate-200/80 p-3">
+        <div className="sm:col-span-8">
+          <label className={EDIT_SUBLABEL}>Task *</label>
+          <input type="text" name="slotTitle" required placeholder="e.g., Clean-up Crew" className={EDIT_INPUT} />
+        </div>
+        <div className="sm:col-span-3">
+          <label className={EDIT_SUBLABEL}>Spots Needed</label>
+          <input type="number" name="slotCapacity" min={1} max={999} defaultValue={1} className={EDIT_INPUT} />
+        </div>
+      </div>
+      <button
+        type="submit"
+        disabled={isSubmitting}
+        className="px-4 py-2 rounded-2xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold shadow-sm transition-all disabled:opacity-50"
+      >
+        {isSubmitting ? "Saving…" : "Save shift"}
+      </button>
+    </Form>
+  );
+}
+
+/** The editor's whole shifts section: cards plus create's "+ Add Shift". */
+function EditShiftsPanel({
+  shifts,
+  adminToken,
+  isSubmitting,
+  multiDay,
+}: {
+  shifts: EditShift[];
+  adminToken: string | null;
+  isSubmitting: boolean;
+  multiDay: boolean;
+}) {
+  const [drafts, setDrafts] = useState<number[]>([]);
+  return (
+    <div className="space-y-3.5">
+      <div className="flex items-center justify-between gap-3">
+        <p className="text-xs text-slate-500">
+          Name each shift (optional), set its time, then add one or more tasks sharing that time.
+          {multiDay && " Changes apply to every day the shift runs on."}
+        </p>
+        <button
+          type="button"
+          onClick={() => setDrafts((prev) => [...prev, Date.now()])}
+          className="px-3.5 py-1.5 text-xs font-semibold rounded-2xl border border-slate-200 hover:border-blue-400 hover:text-blue-600 bg-white transition-all shadow-sm flex items-center gap-1 shrink-0"
+        >
+          <span>+ Add Shift</span>
+        </button>
+      </div>
+
+      {shifts.map((shift, index) => (
+        <EditShiftCard
+          key={shift.key}
+          shift={shift}
+          index={index}
+          adminToken={adminToken}
+          isSubmitting={isSubmitting}
+        />
+      ))}
+
+      {drafts.map((id, i) => (
+        <NewShiftCard
+          key={id}
+          index={shifts.length + i}
+          adminToken={adminToken}
+          isSubmitting={isSubmitting}
+          multiDay={multiDay}
+          onDiscard={() => setDrafts((prev) => prev.filter((d) => d !== id))}
+        />
+      ))}
+    </div>
   );
 }
 
@@ -3937,304 +4336,12 @@ export default function EventView() {
                 />
               </div>
             ) : (
-            <div className="space-y-3.5">
-              {/* Shift cards, the same shape as the create form: a shift holds
-                  its tasks. On a repeating sheet a card covers every day that
-                  shift runs on, so edits here apply to all of them. */}
-              {adminShifts.map((shift, index) => (
-                <div
-                  key={shift.key}
-                  className="p-4 bg-slate-50/70 rounded-2xl border border-slate-200/80 space-y-3"
-                >
-                  <div className="flex items-center justify-between gap-2">
-                    <span className="text-xs font-bold text-slate-700">
-                      Shift {index + 1}
-                      {shift.days > 1 && (
-                        <span className="font-medium text-slate-400"> · every one of {shift.days} days</span>
-                      )}
-                    </span>
-                    {/* Its own form: removing a shift must not carry the
-                        card's edits along with it. */}
-                    <Form method="post">
-                      <input type="hidden" name="intent" value="delete_shift" />
-                      <input type="hidden" name="adminToken" value={adminToken || ""} />
-                      <input type="hidden" name="shiftKey" value={shift.key} />
-                      <button
-                        type="submit"
-                        disabled={adminShifts.length <= 1}
-                        title={
-                          adminShifts.length <= 1
-                            ? "A sheet needs at least one shift"
-                            : "Remove this shift"
-                        }
-                        onClick={(e) => {
-                          const where = shift.days > 1 ? ` from all ${shift.days} days` : "";
-                          const label = shift.shiftName || `Shift ${index + 1}`;
-                          if (!window.confirm(`Remove ${label}${where}, with its ${shift.tasks.length === 1 ? "task" : `${shift.tasks.length} tasks`}?`)) {
-                            e.preventDefault();
-                          }
-                        }}
-                        className="text-slate-400 hover:text-rose-500 font-bold text-xs disabled:opacity-20 disabled:hover:text-slate-400 transition-colors inline-flex items-center gap-1"
-                      >
-                        Remove <X className="w-3 h-3" />
-                      </button>
-                    </Form>
-                  </div>
-
-                  <Form method="post" className="space-y-3">
-                    <input type="hidden" name="intent" value="update_shift" />
-                    <input type="hidden" name="adminToken" value={adminToken || ""} />
-                    <input type="hidden" name="shiftKey" value={shift.key} />
-                    {/* The per-task remove buttons are submits too, and the
-                        browser uses the FIRST one for Enter-to-submit — which
-                        would delete a task while you were typing. This hidden
-                        save claims that slot. */}
-                    <button type="submit" className="hidden" tabIndex={-1} aria-hidden="true">
-                      Save shift
-                    </button>
-
-                    <div className="grid grid-cols-1 sm:grid-cols-12 gap-3 items-center">
-                      <div className="sm:col-span-6">
-                        <label className="block text-[10px] uppercase font-bold text-slate-400 mb-1">
-                          Shift Name (Optional)
-                        </label>
-                        <input
-                          type="text"
-                          name="slotShiftName"
-                          defaultValue={shift.shiftName || ""}
-                          placeholder="e.g., Morning"
-                          className="w-full px-3 py-2 text-xs rounded-xl border border-slate-200 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 placeholder:text-slate-400"
-                        />
-                      </div>
-                      <div className="sm:col-span-3">
-                        <label className="block text-[10px] uppercase font-bold text-slate-400 mb-1">
-                          Start Time
-                        </label>
-                        <input
-                          type="text"
-                          name="slotStartTime"
-                          defaultValue={shift.startTime || ""}
-                          placeholder="9:00 AM"
-                          className="w-full px-3 py-2 text-xs rounded-xl border border-slate-200 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 placeholder:text-slate-400"
-                        />
-                      </div>
-                      <div className="sm:col-span-3">
-                        <label className="block text-[10px] uppercase font-bold text-slate-400 mb-1">
-                          End Time
-                        </label>
-                        <input
-                          type="text"
-                          name="slotEndTime"
-                          defaultValue={shift.endTime || ""}
-                          placeholder="11:00 AM"
-                          className="w-full px-3 py-2 text-xs rounded-xl border border-slate-200 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 placeholder:text-slate-400"
-                        />
-                      </div>
-                    </div>
-
-                    <div className="space-y-2.5 pt-1">
-                      {shift.tasks.map((task) => (
-                        <div
-                          key={task.title}
-                          className="grid grid-cols-1 sm:grid-cols-12 gap-3 items-end bg-white rounded-xl border border-slate-200/80 p-3"
-                        >
-                          <input type="hidden" name="taskOriginalTitle" value={task.title} />
-                          <div className="sm:col-span-8">
-                            <label className="block text-[10px] uppercase font-bold text-slate-400 mb-1">
-                              Task *
-                            </label>
-                            <input
-                              type="text"
-                              name="taskTitle"
-                              required
-                              defaultValue={task.title}
-                              className="w-full px-3 py-2 text-xs rounded-xl border border-slate-200 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500"
-                            />
-                          </div>
-                          <div className="sm:col-span-3">
-                            <label className="block text-[10px] uppercase font-bold text-slate-400 mb-1">
-                              Spots Needed
-                            </label>
-                            <input
-                              type="number"
-                              name="taskCapacity"
-                              min={1}
-                              max={999}
-                              defaultValue={task.capacity}
-                              className="w-full px-3 py-2 text-xs rounded-xl border border-slate-200 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500"
-                            />
-                          </div>
-                          <div className="sm:col-span-1 flex sm:justify-end sm:pb-1">
-                            <button
-                              type="submit"
-                              name="intent"
-                              value="delete_shift_task"
-                              formNoValidate
-                              title={`Remove "${task.title}" from this shift`}
-                              onClick={(e) => {
-                                const where =
-                                  task.days > 1 ? ` from all ${task.days} days` : "";
-                                if (!window.confirm(`Remove "${task.title}"${where}?`)) e.preventDefault();
-                              }}
-                              className="text-slate-400 hover:text-rose-500 font-bold text-xs transition-colors inline-flex items-center gap-1 p-2"
-                            >
-                              <X className="w-3.5 h-3.5" />
-                            </button>
-                          </div>
-                          {/* Its own row, so the note can't push the Spots
-                              column out of line with the Task field. */}
-                          {(shift.days > 1 || task.signups > 0) && (
-                            <span className="sm:col-span-12 text-[10px] text-slate-400 -mt-1">
-                              {task.days < shift.days
-                                ? `On ${task.days} of ${shift.days} days`
-                                : shift.days > 1
-                                  ? `On all ${shift.days} days`
-                                  : ""}
-                              {task.signups > 0
-                                ? `${shift.days > 1 ? " · " : ""}${task.signups} signed up`
-                                : ""}
-                            </span>
-                          )}
-                          {/* Carries the task being removed for delete_shift_task. */}
-                          <input type="hidden" name="slotTitle" value={task.title} />
-                        </div>
-                      ))}
-                    </div>
-
-                    <div className="flex flex-wrap gap-2 pt-1">
-                      <button
-                        type="submit"
-                        disabled={isSubmitting}
-                        className="px-4 py-2 rounded-2xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold shadow-sm transition-all disabled:opacity-50"
-                      >
-                        {isSubmitting ? "Saving…" : "Save shift"}
-                      </button>
-                    </div>
-                  </Form>
-
-                  {/* Adding a task is its own form so it posts only the new row. */}
-                  <Form method="post" className="flex flex-wrap gap-2.5 items-end pt-1">
-                    <input type="hidden" name="intent" value="add_shift_task" />
-                    <input type="hidden" name="adminToken" value={adminToken || ""} />
-                    <input type="hidden" name="slotShiftName" value={shift.shiftName || ""} />
-                    <input type="hidden" name="slotStartTime" value={shift.startTime || ""} />
-                    <input type="hidden" name="slotEndTime" value={shift.endTime || ""} />
-                    <div className="grow min-w-[170px]">
-                      <label className="block text-[10px] uppercase font-bold text-slate-400 mb-1">
-                        Add task to this shift
-                      </label>
-                      <input
-                        type="text"
-                        name="slotTitle"
-                        required
-                        placeholder="e.g., Setup Crew"
-                        className="w-full px-3 py-2 text-xs rounded-xl border border-slate-200 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 placeholder:text-slate-400"
-                      />
-                    </div>
-                    <div className="w-24">
-                      <label className="block text-[10px] uppercase font-bold text-slate-400 mb-1">
-                        Spots
-                      </label>
-                      <input
-                        type="number"
-                        name="slotCapacity"
-                        min={1}
-                        defaultValue={1}
-                        className="w-full px-3 py-2 text-xs rounded-xl border border-slate-200 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500"
-                      />
-                    </div>
-                    <button
-                      type="submit"
-                      disabled={isSubmitting}
-                      className="px-3.5 py-2 text-xs font-semibold rounded-2xl border border-slate-200 hover:border-blue-400 hover:text-blue-600 bg-white transition-all shadow-sm disabled:opacity-50"
-                    >
-                      + Add Task
-                    </button>
-                  </Form>
-                </div>
-              ))}
-
-              {/* A whole new shift, on every day the sheet runs. */}
-              <Form
-                method="post"
-                className="p-4 bg-white rounded-2xl border border-dashed border-slate-300 space-y-3"
-              >
-                <input type="hidden" name="intent" value="add_shift" />
-                <input type="hidden" name="adminToken" value={adminToken || ""} />
-                <span className="text-xs font-bold text-slate-700">
-                  Add Shift
-                  {isMultiDate && (
-                    <span className="font-medium text-slate-400"> · added to every day</span>
-                  )}
-                </span>
-                <div className="grid grid-cols-1 sm:grid-cols-12 gap-3">
-                  <div className="sm:col-span-6">
-                    <label className="block text-[10px] uppercase font-bold text-slate-400 mb-1">
-                      Shift Name (Optional)
-                    </label>
-                    <input
-                      type="text"
-                      name="slotShiftName"
-                      placeholder="e.g., Afternoon"
-                      className="w-full px-3 py-2 text-xs rounded-xl border border-slate-200 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 placeholder:text-slate-400"
-                    />
-                  </div>
-                  <div className="sm:col-span-3">
-                    <label className="block text-[10px] uppercase font-bold text-slate-400 mb-1">
-                      Start Time
-                    </label>
-                    <input
-                      type="text"
-                      name="slotStartTime"
-                      placeholder="1:00 PM"
-                      className="w-full px-3 py-2 text-xs rounded-xl border border-slate-200 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 placeholder:text-slate-400"
-                    />
-                  </div>
-                  <div className="sm:col-span-3">
-                    <label className="block text-[10px] uppercase font-bold text-slate-400 mb-1">
-                      End Time
-                    </label>
-                    <input
-                      type="text"
-                      name="slotEndTime"
-                      placeholder="3:00 PM"
-                      className="w-full px-3 py-2 text-xs rounded-xl border border-slate-200 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 placeholder:text-slate-400"
-                    />
-                  </div>
-                  <div className="sm:col-span-8">
-                    <label className="block text-[10px] uppercase font-bold text-slate-400 mb-1">
-                      First Task *
-                    </label>
-                    <input
-                      type="text"
-                      name="slotTitle"
-                      required
-                      placeholder="e.g., Clean-up Crew"
-                      className="w-full px-3 py-2 text-xs rounded-xl border border-slate-200 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 placeholder:text-slate-400"
-                    />
-                  </div>
-                  <div className="sm:col-span-3">
-                    <label className="block text-[10px] uppercase font-bold text-slate-400 mb-1">
-                      Spots
-                    </label>
-                    <input
-                      type="number"
-                      name="slotCapacity"
-                      min={1}
-                      defaultValue={1}
-                      className="w-full px-3 py-2 text-xs rounded-xl border border-slate-200 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500"
-                    />
-                  </div>
-                </div>
-                <button
-                  type="submit"
-                  disabled={isSubmitting}
-                  className="px-3.5 py-1.5 text-xs font-semibold rounded-2xl border border-slate-200 hover:border-blue-400 hover:text-blue-600 bg-white transition-all shadow-sm disabled:opacity-50"
-                >
-                  + Add Shift
-                </button>
-              </Form>
-            </div>
+              <EditShiftsPanel
+                shifts={adminShifts}
+                adminToken={adminToken}
+                isSubmitting={isSubmitting}
+                multiDay={isMultiDate}
+              />
             )}
             <p className="text-[11px] text-slate-500">
               Deleting a task also removes its signups / votes. If it was the finalized winning time, the event reopens.
