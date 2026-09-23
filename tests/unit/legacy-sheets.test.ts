@@ -32,7 +32,7 @@ describe("sheets created before multi-day existed", () => {
   });
 
   it("falls back to the event date for a slot with no date of its own", () => {
-    const legacySlot = { slotDate: null, startTime: "09:00", endTime: "10:00" };
+    const legacySlot = { id: "legacyslot01", slotDate: null, startTime: "09:00", endTime: "10:00" };
     expect(effectiveDateForSlot(legacySlot, "2026-10-17")).toBe("2026-10-17");
     // A sheet with no date at all (allowed today) stays dateless.
     expect(effectiveDateForSlot(legacySlot, null)).toBeNull();

@@ -72,6 +72,49 @@ export function selectionToSpec(sel: DateSelection, start: string): DateSpec {
   return { ...preset.spec, ends };
 }
 
+/**
+ * Rebuilds the form state from a stored spec, so the edit screen opens on
+ * what the sheet actually is rather than on defaults.
+ */
+export function selectionFromSpec(spec: DateSpec, start: string): DateSelection {
+  const base = defaultSelection(start);
+  if (spec.mode === "range") return { ...base, mode: "range", end: spec.end };
+  if (spec.mode !== "repeat") return base;
+
+  const ends =
+    "after" in spec.ends
+      ? { endMode: "after" as const, count: spec.ends.after }
+      : { endMode: "on" as const, endDate: spec.ends.on };
+  const rule = spec.rule;
+
+  if (rule.type === "weekly") {
+    // A plain weekly rule on the start date's own weekday is the "Weekly on X"
+    // preset; anything else needs the custom panel to be shown.
+    const weekdays = rule.weekdays.length ? rule.weekdays : [weekdayOf(start)];
+    const isPreset = rule.interval === 1 && weekdays.length === 1 && weekdays[0] === weekdayOf(start);
+    return {
+      ...base,
+      ...ends,
+      mode: "repeat",
+      repeatKey: isPreset ? "weekly" : "custom",
+      unit: "week",
+      interval: rule.interval,
+      weekdays,
+    };
+  }
+  if (rule.type === "monthlyNth") {
+    return {
+      ...base,
+      ...ends,
+      mode: "repeat",
+      repeatKey: rule.interval === 1 ? "monthly" : "custom",
+      unit: "month",
+      interval: rule.interval,
+    };
+  }
+  return { ...base, ...ends, mode: "repeat", repeatKey: rule.type };
+}
+
 /** The days a shift can be limited to: dates for a range, weekdays for a repeat. */
 export function dayChoicesFor(
   sel: DateSelection,

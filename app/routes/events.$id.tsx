@@ -41,6 +41,25 @@ import {
   verifyAdminToken,
 } from "~/utils/auth";
 import {
+  MAX_SERIES_DAYS,
+  expandDates,
+  maxSeriesEnd,
+  parseDateSpec,
+  readDateSpec,
+  writeDateSpec,
+  type DateSpec,
+} from "~/utils/recurrence";
+import {
+  DateEndField,
+  DateModeTabs,
+  DateSummary,
+  RepeatRuleField,
+  dateFieldLabel,
+  selectionFromSpec,
+  selectionToSpec,
+  type DateSelection,
+} from "~/components/RepeatPicker";
+import {
   expiryDateFor,
   isExpired,
   latestSlotDate,
@@ -153,6 +172,9 @@ function publicEventShape(
     durationMinutes: (e as { durationMinutes?: number | null }).durationMinutes ?? null,
     createdAt: e.createdAt,
     updatedAt: e.updatedAt,
+    // The stored date rule, so the edit form can open on what the sheet
+    // actually is instead of on defaults.
+    dateSpec: readDateSpec(e.settings),
     // A multi-day sheet is measured from its last date, not its creation
     // date, so the banner shows the real deletion day.
     expiresAt: expiryDateFor(e.createdAt, retentionDays, lastSlotDate),
@@ -1529,12 +1551,170 @@ export async function action({ request, params, context }: ActionFunctionArgs) {
       return data({ error: "Please pick a valid event date." }, { status: 400 });
     }
 
+    // Dates: the edit form posts the same fields as create, so a sheet can
+    // become multi-day (or stop being one) here. Slots are reconciled rather
+    // than rebuilt, so days that survive keep their tasks and sign-ups.
+    let dateMessage = "";
+    if (event.type === "SIGNUP_SHEET" && formData.get("dateMode") !== null) {
+      const specResult = parseDateSpec(
+        (name) => formData.get(name) as string | null,
+        eventDate || ""
+      );
+      if ("error" in specResult) {
+        return data({ error: specResult.error }, { status: 400 });
+      }
+      const spec = specResult.spec;
+      if (spec.mode !== "single" && !eventDate) {
+        return data({ error: "Pick the first date before adding more days." }, { status: 400 });
+      }
+
+      const existing = await db
+        .select()
+        .from(eventSlots)
+        .where(eq(eventSlots.eventId, eventId))
+        .orderBy(eventSlots.displayOrder);
+
+      const newDates =
+        spec.mode === "single" ? [] : expandDates(spec, eventDate as string, MAX_SERIES_DAYS + 1);
+      if (newDates.length > 0 && newDates[newDates.length - 1] > maxSeriesEnd(eventDate as string)) {
+        return data(
+          { error: "A sheet can run for up to one year — pick an earlier end." },
+          { status: 400 }
+        );
+      }
+
+      // The day the sheet used to start on, so its tasks can be the template
+      // for any day being added.
+      const currentDates = [
+        ...new Set(existing.map((s) => effectiveDateForSlot(s, event.eventDate) || "")),
+      ]
+        .filter(Boolean)
+        .sort();
+      const templateDate = currentDates[0] ?? null;
+      const template = existing.filter(
+        (s) => (effectiveDateForSlot(s, event.eventDate) || "") === templateDate
+      );
+
+      const keptDates = new Set(spec.mode === "single" ? currentDates.slice(0, 1) : newDates);
+      const droppedDates = currentDates.filter((d) => !keptDates.has(d));
+
+      if (droppedDates.length > 0) {
+        // Never delete someone's spot as a side effect of an edit: name the
+        // days that are in the way and let the organizer deal with them.
+        const droppedSlotIds = existing
+          .filter((s) => droppedDates.includes(effectiveDateForSlot(s, event.eventDate) || ""))
+          .map((s) => s.id);
+        const booked = droppedSlotIds.length
+          ? await db
+              .select({ slotId: signups.slotId })
+              .from(signups)
+              .where(and(eq(signups.eventId, eventId), eq(signups.status, "CONFIRMED")))
+          : [];
+        const bookedDays = [
+          ...new Set(
+            booked
+              .filter((b) => droppedSlotIds.includes(b.slotId))
+              .map((b) => {
+                const slot = existing.find((s) => s.id === b.slotId);
+                return slot ? effectiveDateForSlot(slot, event.eventDate) || "" : "";
+              })
+              .filter(Boolean)
+          ),
+        ].sort();
+        if (bookedDays.length > 0) {
+          const listed = bookedDays.slice(0, 3).map(formatSlotDateLabel).join(", ");
+          const rest = bookedDays.length > 3 ? ` and ${bookedDays.length - 3} more` : "";
+          return data(
+            {
+              error: `${listed}${rest} already ${bookedDays.length === 1 ? "has" : "have"} volunteers signed up. Remove those sign-ups first, or keep those days.`,
+            },
+            { status: 400 }
+          );
+        }
+      }
+
+      const addedDates = newDates.filter((d) => !currentDates.includes(d));
+      const totalRows =
+        existing.length -
+        existing.filter((s) => droppedDates.includes(effectiveDateForSlot(s, event.eventDate) || ""))
+          .length +
+        addedDates.length * (template.length || 1);
+      if (totalRows > MAX_SLOT_ROWS_PER_EVENT) {
+        return data(
+          {
+            error: `That would make ${totalRows} tasks across ${newDates.length} days. A sheet can hold ${MAX_SLOT_ROWS_PER_EVENT} — use fewer days or fewer tasks.`,
+          },
+          { status: 400 }
+        );
+      }
+
+      // Remove the days that are going away (all empty, checked above).
+      if (droppedDates.length > 0) {
+        const ids = existing
+          .filter((s) => droppedDates.includes(effectiveDateForSlot(s, event.eventDate) || ""))
+          .map((s) => s.id);
+        for (let i = 0; i < ids.length; i += 20) {
+          await db.delete(eventSlots).where(inArray(eventSlots.id, ids.slice(i, i + 20)));
+        }
+      }
+
+      if (spec.mode === "single") {
+        // Back to a one-day sheet: the surviving slots lose their per-day date
+        // and read from events.event_date again, exactly like a sheet that
+        // never used this feature.
+        await db
+          .update(eventSlots)
+          .set({ slotDate: null })
+          .where(eq(eventSlots.eventId, eventId));
+      } else {
+        // A sheet that was single-day until now: its slots become day one.
+        if (templateDate === null || existing.some((s) => !s.slotDate)) {
+          await db
+            .update(eventSlots)
+            .set({ slotDate: newDates[0] })
+            .where(eq(eventSlots.eventId, eventId));
+        }
+        if (addedDates.length > 0 && template.length > 0) {
+          let order = existing.reduce((m, s) => Math.max(m, s.displayOrder ?? 0), -1);
+          const rows = addedDates.flatMap((date) =>
+            template.map((t) => ({
+              id: generateInternalId(),
+              eventId,
+              title: t.title,
+              shiftName: (t as { shiftName?: string | null }).shiftName ?? null,
+              slotDate: date,
+              capacity: t.capacity,
+              startTime: t.startTime,
+              endTime: t.endTime,
+              displayOrder: ++order,
+            }))
+          );
+          // D1 caps a statement at 100 bound variables; 9 columns per row.
+          for (let i = 0; i < rows.length; i += 10) {
+            await db.insert(eventSlots).values(rows.slice(i, i + 10));
+          }
+        }
+      }
+
+      const removed = droppedDates.length;
+      const added = addedDates.length;
+      dateMessage =
+        added || removed
+          ? ` ${added ? `Added ${added} day${added === 1 ? "" : "s"}.` : ""}${removed ? ` Removed ${removed} day${removed === 1 ? "" : "s"}.` : ""}`
+          : "";
+
+      await db
+        .update(events)
+        .set({ settings: writeDateSpec(event.settings, spec) })
+        .where(eq(events.id, eventId));
+    }
+
     await db
       .update(events)
       .set({ title, description, eventDate, location, organizerName, timezone, updatedAt: now })
       .where(eq(events.id, eventId));
 
-    return data({ success: true, message: "Event details updated." });
+    return data({ success: true, message: `Event details updated.${dateMessage}` });
   }
 
   // 6. Add Slot (admin only)
@@ -1915,6 +2095,57 @@ function endForDuration(start: string, durationMinutes: number | null | undefine
  * Timezone field for the edit-details form — same TimezoneSelect as create.
  * Local state seeds from the stored value; the edit panel remounts on open.
  */
+/**
+ * The same date controls as the create form, so an organizer can turn a
+ * one-day sheet into a series (or back) from here. The action reconciles the
+ * slots; this only decides what gets posted.
+ */
+function EditDatesField({
+  initialSpec,
+  initialDate,
+}: {
+  initialSpec: DateSpec;
+  initialDate: string;
+}) {
+  const today = new Date().toISOString().split("T")[0];
+  const [startDate, setStartDate] = useState(initialDate || today);
+  const [sel, setSel] = useState<DateSelection>(() =>
+    selectionFromSpec(initialSpec, initialDate || today)
+  );
+  const spec = selectionToSpec(sel, startDate);
+  const dates =
+    spec.mode === "single" ? [startDate] : expandDates(spec, startDate, MAX_SERIES_DAYS + 1);
+
+  return (
+    <>
+      <div className="sm:col-span-2">
+        <label className="block text-xs font-semibold text-slate-700 mb-1.5">Event Type</label>
+        <DateModeTabs start={startDate} value={sel} onChange={setSel} />
+      </div>
+      <div>
+        <label className="block text-xs font-semibold text-slate-700 mb-1.5">
+          {dateFieldLabel(sel.mode)}
+        </label>
+        <DatePicker name="eventDate" value={startDate} onChange={setStartDate} />
+      </div>
+      <DateEndField value={sel} onChange={setSel} />
+      {sel.mode === "repeat" && (
+        <div className="sm:col-span-2">
+          <RepeatRuleField start={startDate} value={sel} onChange={setSel} />
+        </div>
+      )}
+      {sel.mode !== "single" && (
+        <div className="sm:col-span-2">
+          <DateSummary value={sel} dates={dates} />
+          <p className="text-[11px] text-slate-500 mt-1.5">
+            Days you remove here must have no sign-ups. New days copy the tasks from the first day.
+          </p>
+        </div>
+      )}
+    </>
+  );
+}
+
 function EditTimezoneField({ initial }: { initial: string }) {
   const [tz, setTz] = useState(initial || "UTC");
   return (
@@ -3262,13 +3493,10 @@ export default function EventView() {
                   <EditTimezoneField initial={(event as { timezone?: string | null }).timezone || "UTC"} />
                 </div>
               ) : (
-                <div>
-                  <label className="block text-xs font-semibold text-slate-700 mb-1.5">Date</label>
-                  <DatePicker
-                    name="eventDate"
-                    defaultValue={event.eventDate || ""}
-                  />
-                </div>
+                <EditDatesField
+                  initialSpec={(event as { dateSpec?: DateSpec }).dateSpec ?? { mode: "single" }}
+                  initialDate={event.eventDate || ""}
+                />
               )}
               <div>
                 <label className="block text-xs font-semibold text-slate-700 mb-1.5">
