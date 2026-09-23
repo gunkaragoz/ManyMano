@@ -3992,16 +3992,6 @@ export default function EventView() {
                               defaultValue={task.title}
                               className="w-full px-3 py-2 text-xs rounded-xl border border-slate-200 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500"
                             />
-                            <span className="text-[10px] text-slate-400 mt-1 block">
-                              {task.days < shift.days
-                                ? `On ${task.days} of ${shift.days} days`
-                                : shift.days > 1
-                                  ? `On all ${shift.days} days`
-                                  : ""}
-                              {task.signups > 0
-                                ? `${task.days < shift.days || shift.days > 1 ? " · " : ""}${task.signups} signed up`
-                                : ""}
-                            </span>
                           </div>
                           <div className="sm:col-span-3">
                             <label className="block text-[10px] uppercase font-bold text-slate-400 mb-1">
@@ -4016,7 +4006,7 @@ export default function EventView() {
                               className="w-full px-3 py-2 text-xs rounded-xl border border-slate-200 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500"
                             />
                           </div>
-                          <div className="sm:col-span-1 flex sm:justify-end">
+                          <div className="sm:col-span-1 flex sm:justify-end sm:pb-1">
                             <button
                               type="submit"
                               name="intent"
@@ -4033,6 +4023,20 @@ export default function EventView() {
                               <X className="w-3.5 h-3.5" />
                             </button>
                           </div>
+                          {/* Its own row, so the note can't push the Spots
+                              column out of line with the Task field. */}
+                          {(shift.days > 1 || task.signups > 0) && (
+                            <span className="sm:col-span-12 text-[10px] text-slate-400 -mt-1">
+                              {task.days < shift.days
+                                ? `On ${task.days} of ${shift.days} days`
+                                : shift.days > 1
+                                  ? `On all ${shift.days} days`
+                                  : ""}
+                              {task.signups > 0
+                                ? `${shift.days > 1 ? " · " : ""}${task.signups} signed up`
+                                : ""}
+                            </span>
+                          )}
                           {/* Carries the task being removed for delete_shift_task. */}
                           <input type="hidden" name="slotTitle" value={task.title} />
                         </div>
