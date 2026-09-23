@@ -1850,6 +1850,143 @@ export async function action({ request, params, context }: ActionFunctionArgs) {
     });
   }
 
+  // 6c. Shift-level actions for the editor's shift cards. A shift is a name
+  // plus a time window — the identity the event page groups by — and on a
+  // repeating sheet it exists on every day the series runs, so these apply
+  // across all of them. Sign-ups are never deleted as a side effect.
+  if (intent === "update_shift" || intent === "delete_shift_task" || intent === "add_shift") {
+    if (!(await requireAdmin())) {
+      return data({ error: "Unauthorized." }, { status: 403 });
+    }
+    if (isPoll) return data({ error: "Polls have time options, not shifts." }, { status: 400 });
+
+    const allSlots = await db.select().from(eventSlots).where(eq(eventSlots.eventId, eventId));
+    const shiftKey = (slot: { shiftName?: string | null; startTime: string | null; endTime: string | null }) =>
+      `${(slot.shiftName || "").trim()}||${slot.startTime || ""}||${slot.endTime || ""}`;
+    const targetKey = cleanText(formData.get("shiftKey"), 400);
+    const inShift = allSlots.filter((s) => shiftKey(s) === targetKey);
+    const sheetDays = [
+      ...new Set(allSlots.map((s) => (s as { slotDate?: string | null }).slotDate ?? null)),
+    ];
+
+    /** The days (or the single undated row) a set of slots covers. */
+    const daysOf = (rows: typeof allSlots) => [
+      ...new Set(rows.map((r) => (r as { slotDate?: string | null }).slotDate ?? null)),
+    ];
+    const signupCount = async (ids: string[]) => {
+      if (ids.length === 0) return 0;
+      const rows = await db
+        .select({ slotId: signups.slotId })
+        .from(signups)
+        .where(and(eq(signups.eventId, eventId), eq(signups.status, "CONFIRMED")));
+      return rows.filter((r) => ids.includes(r.slotId)).length;
+    };
+
+    if (intent === "add_shift") {
+      const shiftName = cleanText(formData.get("slotShiftName"), SHIFT_NAME_MAX) || null;
+      const startTime = cleanText(formData.get("slotStartTime"), 16) || null;
+      const endTime = cleanText(formData.get("slotEndTime"), 16) || null;
+      const title = cleanText(formData.get("slotTitle"), SLOT_TITLE_MAX);
+      const capRaw = parseInt(cleanText(formData.get("slotCapacity"), 8) || "1", 10);
+      if (!title) return data({ error: "Give the first task a name." }, { status: 400 });
+      const slotError = validateSlotFields("", startTime, endTime);
+      if (slotError) return data({ error: slotError }, { status: 400 });
+
+      const days = sheetDays.length ? sheetDays : [null];
+      const hasDated = allSlots.some((s) => (s as { slotDate?: string | null }).slotDate);
+      const cap = hasDated ? MAX_SLOT_ROWS_PER_EVENT : MAX_SLOTS_PER_EVENT;
+      if (allSlots.length + days.length > cap) {
+        return data({ error: `Too many options — maximum ${cap} per event.` }, { status: 400 });
+      }
+      let order = allSlots.reduce((m, s) => Math.max(m, s.displayOrder ?? 0), -1);
+      const rows = days.map((day) => ({
+        id: generateInternalId(),
+        eventId,
+        title,
+        shiftName,
+        slotDate: day,
+        capacity: Number.isFinite(capRaw) ? Math.min(Math.max(capRaw, 1), 999) : 1,
+        startTime,
+        endTime,
+        displayOrder: ++order,
+      }));
+      for (let i = 0; i < rows.length; i += 10) {
+        await db.insert(eventSlots).values(rows.slice(i, i + 10));
+      }
+      return data({
+        success: true,
+        message: days.length > 1 ? `Shift added on ${days.length} days.` : "Shift added.",
+      });
+    }
+
+    if (inShift.length === 0) {
+      return data({ error: "That shift no longer exists — reload the page." }, { status: 400 });
+    }
+
+    if (intent === "delete_shift_task") {
+      const title = cleanText(formData.get("slotTitle"), SLOT_TITLE_MAX);
+      const victims = inShift.filter((s) => s.title === title);
+      if (victims.length === 0) {
+        return data({ error: "That task no longer exists — reload the page." }, { status: 400 });
+      }
+      const booked = await signupCount(victims.map((v) => v.id));
+      if (booked > 0) {
+        return data(
+          {
+            error: `"${title}" has ${booked} ${booked === 1 ? "volunteer" : "volunteers"} signed up. Cancel ${booked === 1 ? "that sign-up" : "those sign-ups"} first.`,
+          },
+          { status: 400 }
+        );
+      }
+      if (inShift.length === victims.length) {
+        return data(
+          { error: "A shift needs at least one task — rename it instead, or remove the shift." },
+          { status: 400 }
+        );
+      }
+      const ids = victims.map((v) => v.id);
+      for (let i = 0; i < ids.length; i += 20) {
+        await db.delete(eventSlots).where(inArray(eventSlots.id, ids.slice(i, i + 20)));
+      }
+      const days = daysOf(victims).length;
+      return data({
+        success: true,
+        message: days > 1 ? `Removed "${title}" from ${days} days.` : `Removed "${title}".`,
+      });
+    }
+
+    // update_shift: name / times for the whole shift, and each task's spots.
+    const shiftName = cleanText(formData.get("slotShiftName"), SHIFT_NAME_MAX) || null;
+    const startTime = cleanText(formData.get("slotStartTime"), 16) || null;
+    const endTime = cleanText(formData.get("slotEndTime"), 16) || null;
+    const slotError = validateSlotFields("", startTime, endTime);
+    if (slotError) return data({ error: slotError }, { status: 400 });
+
+    const titles = formData.getAll("taskTitle") as string[];
+    const originals = formData.getAll("taskOriginalTitle") as string[];
+    const capacities = formData.getAll("taskCapacity") as string[];
+    for (let i = 0; i < originals.length; i++) {
+      const original = cleanText(originals[i], SLOT_TITLE_MAX);
+      const title = cleanText(titles[i], SLOT_TITLE_MAX) || original;
+      if (!title) continue;
+      const capRaw = parseInt(capacities[i] || "1", 10);
+      const capacity = Number.isFinite(capRaw) ? Math.min(Math.max(capRaw, 1), 999) : 1;
+      const ids = inShift.filter((s) => s.title === original).map((s) => s.id);
+      for (let j = 0; j < ids.length; j += 20) {
+        await db
+          .update(eventSlots)
+          .set({ title, shiftName, startTime, endTime, capacity })
+          .where(inArray(eventSlots.id, ids.slice(j, j + 20)));
+      }
+    }
+
+    const days = daysOf(inShift).length;
+    return data({
+      success: true,
+      message: days > 1 ? `Shift updated on ${days} days.` : "Shift updated.",
+    });
+  }
+
   // 7. Update Slot (admin only)
   if (intent === "update_slot") {
     if (!(await requireAdmin())) {
@@ -3011,48 +3148,66 @@ export default function EventView() {
   }, [shiftGroups]);
   const isMultiDate = dateSections.length > 1;
   /**
-   * Distinct shifts for the admin panel: a shift is a name + time window, the
-   * same identity the event page groups by. A multi-day sheet repeats each
-   * shift across its days, so adding a task adds it to all of them.
+   * The editor's shift cards: a shift is a name + time window (the identity
+   * the event page groups by), holding its tasks. On a repeating sheet the
+   * same shift exists on every day of the series, so a card covers all of
+   * them and says so; a task that runs on only some days says that too.
    */
   const adminShifts = useMemo(() => {
-    const out: Array<{
+    type Task = { title: string; capacity: number; days: number; signups: number };
+    type Shift = {
       key: string;
       shiftName: string | null;
       startTime: string | null;
       endTime: string | null;
-      label: string;
       days: number;
-    }> = [];
+      tasks: Task[];
+    };
+    const shifts: Shift[] = [];
     const byKey = new Map<string, number>();
-    slots.forEach((s) => {
-      const shiftName = ((s as { shiftName?: string | null }).shiftName || "").trim();
-      const key = `${shiftName}||${s.startTime || ""}||${s.endTime || ""}`;
-      const seen = byKey.get(key);
-      const date = effectiveDateForSlot(s, event.eventDate) || "";
-      if (seen !== undefined) {
-        const entry = out[seen] as { days: number; dates: Set<string> } & (typeof out)[number];
-        entry.dates.add(date);
-        entry.days = entry.dates.size;
-        return;
+    const dayBuckets = new Map<string, Set<string>>();
+    const taskDays = new Map<string, Set<string>>();
+
+    slots.forEach((slot) => {
+      const shiftName = ((slot as { shiftName?: string | null }).shiftName || "").trim();
+      const key = `${shiftName}||${slot.startTime || ""}||${slot.endTime || ""}`;
+      const date = effectiveDateForSlot(slot, event.eventDate) || "";
+      let index = byKey.get(key);
+      if (index === undefined) {
+        index = shifts.length;
+        byKey.set(key, index);
+        shifts.push({
+          key,
+          shiftName: shiftName || null,
+          startTime: slot.startTime,
+          endTime: slot.endTime,
+          days: 0,
+          tasks: [],
+        });
+        dayBuckets.set(key, new Set());
       }
-      const time =
-        s.startTime || s.endTime
-          ? `${formatTime(s.startTime)}${s.endTime ? ` – ${formatTime(s.endTime)}` : ""}`
-          : "";
-      byKey.set(key, out.length);
-      out.push({
-        key,
-        shiftName: shiftName || null,
-        startTime: s.startTime,
-        endTime: s.endTime,
-        label: [shiftName, time].filter(Boolean).join(" · ") || "Untitled shift",
-        days: 1,
-        dates: new Set([date]),
-      } as (typeof out)[number] & { dates: Set<string> });
+      dayBuckets.get(key)!.add(date);
+      const taskKey = `${key}||${slot.title}`;
+      if (!taskDays.has(taskKey)) {
+        taskDays.set(taskKey, new Set());
+        shifts[index].tasks.push({
+          title: slot.title,
+          capacity: slot.capacity,
+          days: 0,
+          signups: 0,
+        });
+      }
+      taskDays.get(taskKey)!.add(date);
+      const task = shifts[index].tasks.find((t) => t.title === slot.title)!;
+      task.days = taskDays.get(taskKey)!.size;
+      task.signups += initialSignups.filter((su) => su && su.slotId === slot.id).length;
     });
-    return out;
-  }, [slots, event.eventDate]);
+
+    shifts.forEach((shift) => {
+      shift.days = dayBuckets.get(shift.key)!.size;
+    });
+    return shifts;
+  }, [slots, event.eventDate, initialSignups]);
   const [showAllDates, setShowAllDates] = useState(false);
   // Long series (a school year) open on the next four weeks so the page isn't
   // an endless scroll; short ones always show every date.
@@ -3743,147 +3898,175 @@ export default function EventView() {
                     isSubmitting={isSubmitting}
                   />
                 ))}
+                <PollTimeNewOptionRow
+                  durationMinutes={(event as { durationMinutes?: number | null }).durationMinutes ?? null}
+                  adminToken={adminToken}
+                  isSubmitting={isSubmitting}
+                />
               </div>
             ) : (
             <div className="space-y-3.5">
-              {slots.map((s) => (
-                <Form
-                  key={s.id}
-                  method="post"
-                  className="flex flex-col lg:flex-row gap-2.5 items-stretch lg:items-end bg-slate-50/70 border border-slate-200/80 rounded-2xl p-4 transition-all"
+              {/* Shift cards, the same shape as the create form: a shift holds
+                  its tasks. On a repeating sheet a card covers every day that
+                  shift runs on, so edits here apply to all of them. */}
+              {adminShifts.map((shift, index) => (
+                <div
+                  key={shift.key}
+                  className="p-4 bg-slate-50/70 rounded-2xl border border-slate-200/80 space-y-3"
                 >
-                  <input type="hidden" name="intent" value="update_slot" />
-                  <input type="hidden" name="adminToken" value={adminToken || ""} />
-                  <input type="hidden" name="slotId" value={s.id} />
-                  <div className="flex-1 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-12 gap-2.5">
-                    {isMultiDate && (
-                      <div className="sm:col-span-2 lg:col-span-2">
-                        <label className="block text-[10px] uppercase font-bold text-slate-400 mb-1">Day</label>
-                        <input
-                          type="date"
-                          name="slotDate"
-                          defaultValue={(s as { slotDate?: string | null }).slotDate || ""}
-                          className="w-full px-3 py-2 rounded-xl border border-slate-200 text-xs bg-white focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all"
-                        />
-                      </div>
-                    )}
-                    <div className="sm:col-span-2 lg:col-span-3">
-                        <label className="block text-[10px] uppercase font-bold text-slate-400 mb-1">Shift (opt.)</label>
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-xs font-bold text-slate-700">
+                      Shift {index + 1}
+                      {shift.days > 1 && (
+                        <span className="font-medium text-slate-400"> · every one of {shift.days} days</span>
+                      )}
+                    </span>
+                  </div>
+
+                  <Form method="post" className="space-y-3">
+                    <input type="hidden" name="intent" value="update_shift" />
+                    <input type="hidden" name="adminToken" value={adminToken || ""} />
+                    <input type="hidden" name="shiftKey" value={shift.key} />
+                    {/* The per-task remove buttons are submits too, and the
+                        browser uses the FIRST one for Enter-to-submit — which
+                        would delete a task while you were typing. This hidden
+                        save claims that slot. */}
+                    <button type="submit" className="hidden" tabIndex={-1} aria-hidden="true">
+                      Save shift
+                    </button>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-12 gap-3 items-center">
+                      <div className="sm:col-span-6">
+                        <label className="block text-[10px] uppercase font-bold text-slate-400 mb-1">
+                          Shift Name (Optional)
+                        </label>
                         <input
                           type="text"
                           name="slotShiftName"
-                          defaultValue={(s as { shiftName?: string | null }).shiftName || ""}
-                          placeholder="e.g. Morning"
-                          className="w-full px-3 py-2 rounded-xl border border-slate-200 text-xs bg-white focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all placeholder:text-slate-400"
+                          defaultValue={shift.shiftName || ""}
+                          placeholder="e.g., Morning"
+                          className="w-full px-3 py-2 text-xs rounded-xl border border-slate-200 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 placeholder:text-slate-400"
                         />
                       </div>
-                    <div className="sm:col-span-2 lg:col-span-3">
-                      <label className="block text-[10px] uppercase font-bold text-slate-400 mb-1">Task *</label>
-                      <input
-                        type="text"
-                        name="slotTitle"
-                        required
-                        defaultValue={s.title}
-                        className="w-full px-3 py-2 rounded-xl border border-slate-200 text-xs bg-white focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all"
-                      />
-                    </div>
-                    <div className="lg:col-span-2">
-                      <label className="block text-[10px] uppercase font-bold text-slate-400 mb-1">Start</label>
-                      <input
-                        type="text"
-                        name="slotStartTime"
-                        defaultValue={s.startTime || ""}
-                        placeholder="9:00 AM"
-                        className="w-full px-3 py-2 rounded-xl border border-slate-200 text-xs bg-white focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all placeholder:text-slate-400"
-                      />
-                    </div>
-                    <div className="lg:col-span-2">
-                      <label className="block text-[10px] uppercase font-bold text-slate-400 mb-1">End</label>
-                      <input
-                        type="text"
-                        name="slotEndTime"
-                        defaultValue={s.endTime || ""}
-                        placeholder="11:00 AM"
-                        className="w-full px-3 py-2 rounded-xl border border-slate-200 text-xs bg-white focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all placeholder:text-slate-400"
-                      />
-                    </div>
-                    <div className="lg:col-span-2">
-                        <label className="block text-[10px] uppercase font-bold text-slate-400 mb-1">Capacity</label>
+                      <div className="sm:col-span-3">
+                        <label className="block text-[10px] uppercase font-bold text-slate-400 mb-1">
+                          Start Time
+                        </label>
                         <input
-                          type="number"
-                          name="slotCapacity"
-                          min={1}
-                          defaultValue={s.capacity}
-                          className="w-full px-3 py-2 rounded-xl border border-slate-200 text-xs bg-white focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all"
+                          type="text"
+                          name="slotStartTime"
+                          defaultValue={shift.startTime || ""}
+                          placeholder="9:00 AM"
+                          className="w-full px-3 py-2 text-xs rounded-xl border border-slate-200 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 placeholder:text-slate-400"
                         />
                       </div>
-                  </div>
-                  <div className="flex gap-2 shrink-0">
-                    <button
-                      type="submit"
-                      disabled={isSubmitting}
-                      className="px-4 py-2 rounded-2xl bg-white border border-slate-200 hover:border-slate-300 text-slate-700 text-xs font-semibold shadow-sm transition-all disabled:opacity-50"
-                    >
-                      Save
-                    </button>
-                    <button
-                      type="submit"
-                      name="intent"
-                      value="delete_slot"
-                      formMethod="post"
-                      onClick={(e) => {
-                        if (!window.confirm(`Delete "${s.title}"? Existing signups/votes for it will be removed.`)) {
-                          e.preventDefault();
-                        }
-                      }}
-                      className="px-4 py-2 rounded-2xl bg-white border border-rose-200 hover:border-rose-300 text-rose-600 hover:bg-rose-50 text-xs font-semibold shadow-sm transition-all"
-                    >
-                      Delete
-                    </button>
-                  </div>
-                </Form>
-              ))}
-            </div>
-            )}
+                      <div className="sm:col-span-3">
+                        <label className="block text-[10px] uppercase font-bold text-slate-400 mb-1">
+                          End Time
+                        </label>
+                        <input
+                          type="text"
+                          name="slotEndTime"
+                          defaultValue={shift.endTime || ""}
+                          placeholder="11:00 AM"
+                          className="w-full px-3 py-2 text-xs rounded-xl border border-slate-200 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 placeholder:text-slate-400"
+                        />
+                      </div>
+                    </div>
 
-            {/* Add new slot */}
-            {event.type === "SIGNUP_SHEET" && adminShifts.length > 0 && (
-              <div className="space-y-2.5">
-                <h4 className="text-[10px] uppercase font-bold tracking-wide text-slate-400">
-                  Add a task to a shift
-                </h4>
-                {adminShifts.map((shift) => (
-                  <Form
-                    key={shift.key}
-                    method="post"
-                    className="flex flex-wrap gap-2.5 items-end bg-slate-50/70 border border-slate-200/80 rounded-2xl p-3"
-                  >
+                    <div className="space-y-2.5 pt-1">
+                      {shift.tasks.map((task) => (
+                        <div
+                          key={task.title}
+                          className="grid grid-cols-1 sm:grid-cols-12 gap-3 items-end bg-white rounded-xl border border-slate-200/80 p-3"
+                        >
+                          <input type="hidden" name="taskOriginalTitle" value={task.title} />
+                          <div className="sm:col-span-8">
+                            <label className="block text-[10px] uppercase font-bold text-slate-400 mb-1">
+                              Task *
+                            </label>
+                            <input
+                              type="text"
+                              name="taskTitle"
+                              required
+                              defaultValue={task.title}
+                              className="w-full px-3 py-2 text-xs rounded-xl border border-slate-200 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500"
+                            />
+                            <span className="text-[10px] text-slate-400 mt-1 block">
+                              {task.days < shift.days
+                                ? `On ${task.days} of ${shift.days} days`
+                                : shift.days > 1
+                                  ? `On all ${shift.days} days`
+                                  : ""}
+                              {task.signups > 0
+                                ? `${task.days < shift.days || shift.days > 1 ? " · " : ""}${task.signups} signed up`
+                                : ""}
+                            </span>
+                          </div>
+                          <div className="sm:col-span-3">
+                            <label className="block text-[10px] uppercase font-bold text-slate-400 mb-1">
+                              Spots Needed
+                            </label>
+                            <input
+                              type="number"
+                              name="taskCapacity"
+                              min={1}
+                              max={999}
+                              defaultValue={task.capacity}
+                              className="w-full px-3 py-2 text-xs rounded-xl border border-slate-200 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500"
+                            />
+                          </div>
+                          <div className="sm:col-span-1 flex sm:justify-end">
+                            <button
+                              type="submit"
+                              name="intent"
+                              value="delete_shift_task"
+                              formNoValidate
+                              title={`Remove "${task.title}" from this shift`}
+                              onClick={(e) => {
+                                const where =
+                                  task.days > 1 ? ` from all ${task.days} days` : "";
+                                if (!window.confirm(`Remove "${task.title}"${where}?`)) e.preventDefault();
+                              }}
+                              className="text-slate-400 hover:text-rose-500 font-bold text-xs transition-colors inline-flex items-center gap-1 p-2"
+                            >
+                              <X className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
+                          {/* Carries the task being removed for delete_shift_task. */}
+                          <input type="hidden" name="slotTitle" value={task.title} />
+                        </div>
+                      ))}
+                    </div>
+
+                    <div className="flex flex-wrap gap-2 pt-1">
+                      <button
+                        type="submit"
+                        disabled={isSubmitting}
+                        className="px-4 py-2 rounded-2xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold shadow-sm transition-all disabled:opacity-50"
+                      >
+                        {isSubmitting ? "Saving…" : "Save shift"}
+                      </button>
+                    </div>
+                  </Form>
+
+                  {/* Adding a task is its own form so it posts only the new row. */}
+                  <Form method="post" className="flex flex-wrap gap-2.5 items-end pt-1">
                     <input type="hidden" name="intent" value="add_shift_task" />
                     <input type="hidden" name="adminToken" value={adminToken || ""} />
                     <input type="hidden" name="slotShiftName" value={shift.shiftName || ""} />
                     <input type="hidden" name="slotStartTime" value={shift.startTime || ""} />
                     <input type="hidden" name="slotEndTime" value={shift.endTime || ""} />
-                    <div className="min-w-[150px]">
-                      <span className="block text-[10px] uppercase font-bold text-slate-400 mb-1">
-                        Shift
-                      </span>
-                      <p className="text-xs font-semibold text-slate-700 py-2">
-                        {shift.label}
-                        {shift.days > 1 && (
-                          <span className="font-medium text-slate-400"> · {shift.days} days</span>
-                        )}
-                      </p>
-                    </div>
                     <div className="grow min-w-[170px]">
                       <label className="block text-[10px] uppercase font-bold text-slate-400 mb-1">
-                        New task
+                        Add task to this shift
                       </label>
                       <input
                         type="text"
                         name="slotTitle"
                         required
-                        placeholder="e.g. Setup crew"
-                        className="w-full px-3 py-2 rounded-xl border border-slate-200 text-xs bg-white focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all placeholder:text-slate-400"
+                        placeholder="e.g., Setup Crew"
+                        className="w-full px-3 py-2 text-xs rounded-xl border border-slate-200 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 placeholder:text-slate-400"
                       />
                     </div>
                     <div className="w-24">
@@ -3895,101 +4078,101 @@ export default function EventView() {
                         name="slotCapacity"
                         min={1}
                         defaultValue={1}
-                        className="w-full px-3 py-2 rounded-xl border border-slate-200 text-xs bg-white focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all"
+                        className="w-full px-3 py-2 text-xs rounded-xl border border-slate-200 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500"
                       />
                     </div>
                     <button
                       type="submit"
                       disabled={isSubmitting}
-                      className="px-4 py-2 rounded-2xl bg-white border border-slate-200 hover:border-blue-400 hover:text-blue-600 text-slate-700 text-xs font-semibold shadow-sm transition-all disabled:opacity-50"
+                      className="px-3.5 py-2 text-xs font-semibold rounded-2xl border border-slate-200 hover:border-blue-400 hover:text-blue-600 bg-white transition-all shadow-sm disabled:opacity-50"
                     >
-                      + Add task
+                      + Add Task
                     </button>
                   </Form>
-                ))}
-              </div>
-            )}
+                </div>
+              ))}
 
-            {event.type === "TIME_POLL" ? (
-              <PollTimeNewOptionRow
-                durationMinutes={(event as { durationMinutes?: number | null }).durationMinutes ?? null}
-                adminToken={adminToken}
-                isSubmitting={isSubmitting}
-              />
-            ) : (
-            <Form
-              method="post"
-              className="flex flex-col lg:flex-row gap-2.5 items-stretch lg:items-end bg-slate-50/70 border border-slate-200/80 rounded-2xl p-4 transition-all"
-            >
-              <input type="hidden" name="intent" value="add_slot" />
-              <input type="hidden" name="adminToken" value={adminToken || ""} />
-              <div className="flex-1 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-12 gap-2.5">
-                {isMultiDate && (
-                  <div className="sm:col-span-2 lg:col-span-2">
-                    <label className="block text-[10px] uppercase font-bold text-slate-400 mb-1">Day</label>
-                    <input
-                      type="date"
-                      name="slotDate"
-                      defaultValue={dateSections[0]?.date || ""}
-                      className="w-full px-3 py-2 rounded-xl border border-slate-200 text-xs bg-white focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all"
-                    />
-                  </div>
-                )}
-                <div className="sm:col-span-2 lg:col-span-3">
-                    <label className="block text-[10px] uppercase font-bold text-slate-400 mb-1">Shift (opt.)</label>
+              {/* A whole new shift, on every day the sheet runs. */}
+              <Form
+                method="post"
+                className="p-4 bg-white rounded-2xl border border-dashed border-slate-300 space-y-3"
+              >
+                <input type="hidden" name="intent" value="add_shift" />
+                <input type="hidden" name="adminToken" value={adminToken || ""} />
+                <span className="text-xs font-bold text-slate-700">
+                  Add Shift
+                  {isMultiDate && (
+                    <span className="font-medium text-slate-400"> · added to every day</span>
+                  )}
+                </span>
+                <div className="grid grid-cols-1 sm:grid-cols-12 gap-3">
+                  <div className="sm:col-span-6">
+                    <label className="block text-[10px] uppercase font-bold text-slate-400 mb-1">
+                      Shift Name (Optional)
+                    </label>
                     <input
                       type="text"
                       name="slotShiftName"
-                      placeholder="e.g. Morning"
-                      className="w-full px-3 py-2 rounded-xl border border-slate-200 text-xs bg-white focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all placeholder:text-slate-400"
+                      placeholder="e.g., Afternoon"
+                      className="w-full px-3 py-2 text-xs rounded-xl border border-slate-200 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 placeholder:text-slate-400"
                     />
                   </div>
-                <div className="sm:col-span-2 lg:col-span-3">
-                  <label className="block text-[10px] uppercase font-bold text-slate-400 mb-1">New task</label>
-                  <input
-                    type="text"
-                    name="slotTitle"
-                    placeholder="e.g. Setup crew"
-                    className="w-full px-3 py-2 rounded-xl border border-slate-200 text-xs bg-white focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all placeholder:text-slate-400"
-                  />
-                </div>
-                <div className="lg:col-span-2">
-                  <label className="block text-[10px] uppercase font-bold text-slate-400 mb-1">Start (opt.)</label>
-                  <input
-                    type="text"
-                    name="slotStartTime"
-                    placeholder="9:00 AM"
-                    className="w-full px-3 py-2 rounded-xl border border-slate-200 text-xs bg-white focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all placeholder:text-slate-400"
-                  />
-                </div>
-                <div className="lg:col-span-2">
-                  <label className="block text-[10px] uppercase font-bold text-slate-400 mb-1">End (opt.)</label>
-                  <input
-                    type="text"
-                    name="slotEndTime"
-                    placeholder="11:00 AM"
-                    className="w-full px-3 py-2 rounded-xl border border-slate-200 text-xs bg-white focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all placeholder:text-slate-400"
-                  />
-                </div>
-                <div className="lg:col-span-2">
-                    <label className="block text-[10px] uppercase font-bold text-slate-400 mb-1">Capacity</label>
+                  <div className="sm:col-span-3">
+                    <label className="block text-[10px] uppercase font-bold text-slate-400 mb-1">
+                      Start Time
+                    </label>
+                    <input
+                      type="text"
+                      name="slotStartTime"
+                      placeholder="1:00 PM"
+                      className="w-full px-3 py-2 text-xs rounded-xl border border-slate-200 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 placeholder:text-slate-400"
+                    />
+                  </div>
+                  <div className="sm:col-span-3">
+                    <label className="block text-[10px] uppercase font-bold text-slate-400 mb-1">
+                      End Time
+                    </label>
+                    <input
+                      type="text"
+                      name="slotEndTime"
+                      placeholder="3:00 PM"
+                      className="w-full px-3 py-2 text-xs rounded-xl border border-slate-200 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 placeholder:text-slate-400"
+                    />
+                  </div>
+                  <div className="sm:col-span-8">
+                    <label className="block text-[10px] uppercase font-bold text-slate-400 mb-1">
+                      First Task *
+                    </label>
+                    <input
+                      type="text"
+                      name="slotTitle"
+                      required
+                      placeholder="e.g., Clean-up Crew"
+                      className="w-full px-3 py-2 text-xs rounded-xl border border-slate-200 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 placeholder:text-slate-400"
+                    />
+                  </div>
+                  <div className="sm:col-span-3">
+                    <label className="block text-[10px] uppercase font-bold text-slate-400 mb-1">
+                      Spots
+                    </label>
                     <input
                       type="number"
                       name="slotCapacity"
                       min={1}
                       defaultValue={1}
-                      className="w-full px-3 py-2 rounded-xl border border-slate-200 text-xs bg-white focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all"
+                      className="w-full px-3 py-2 text-xs rounded-xl border border-slate-200 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500"
                     />
                   </div>
-              </div>
-              <button
-                type="submit"
-                disabled={isSubmitting}
-                className="px-5 py-2.5 rounded-2xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold shadow-sm transition-all hover:scale-[1.02] active:scale-[0.98] shrink-0 disabled:opacity-50"
-              >
-                + Add Option
-              </button>
-            </Form>
+                </div>
+                <button
+                  type="submit"
+                  disabled={isSubmitting}
+                  className="px-3.5 py-1.5 text-xs font-semibold rounded-2xl border border-slate-200 hover:border-blue-400 hover:text-blue-600 bg-white transition-all shadow-sm disabled:opacity-50"
+                >
+                  + Add Shift
+                </button>
+              </Form>
+            </div>
             )}
             <p className="text-[11px] text-slate-500">
               Deleting a task also removes its signups / votes. If it was the finalized winning time, the event reopens.
