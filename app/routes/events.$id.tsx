@@ -1854,7 +1854,12 @@ export async function action({ request, params, context }: ActionFunctionArgs) {
   // plus a time window — the identity the event page groups by — and on a
   // repeating sheet it exists on every day the series runs, so these apply
   // across all of them. Sign-ups are never deleted as a side effect.
-  if (intent === "update_shift" || intent === "delete_shift_task" || intent === "add_shift") {
+  if (
+    intent === "update_shift" ||
+    intent === "delete_shift_task" ||
+    intent === "delete_shift" ||
+    intent === "add_shift"
+  ) {
     if (!(await requireAdmin())) {
       return data({ error: "Unauthorized." }, { status: 403 });
     }
@@ -1921,6 +1926,33 @@ export async function action({ request, params, context }: ActionFunctionArgs) {
 
     if (inShift.length === 0) {
       return data({ error: "That shift no longer exists — reload the page." }, { status: 400 });
+    }
+
+    if (intent === "delete_shift") {
+      const booked = await signupCount(inShift.map((v) => v.id));
+      if (booked > 0) {
+        return data(
+          {
+            error: `This shift has ${booked} ${booked === 1 ? "volunteer" : "volunteers"} signed up. Cancel ${booked === 1 ? "that sign-up" : "those sign-ups"} first.`,
+          },
+          { status: 400 }
+        );
+      }
+      if (inShift.length === allSlots.length) {
+        return data(
+          { error: "A sheet needs at least one shift — add another before removing this one." },
+          { status: 400 }
+        );
+      }
+      const ids = inShift.map((v) => v.id);
+      for (let i = 0; i < ids.length; i += 20) {
+        await db.delete(eventSlots).where(inArray(eventSlots.id, ids.slice(i, i + 20)));
+      }
+      const days = daysOf(inShift).length;
+      return data({
+        success: true,
+        message: days > 1 ? `Shift removed from ${days} days.` : "Shift removed.",
+      });
     }
 
     if (intent === "delete_shift_task") {
@@ -3921,6 +3953,32 @@ export default function EventView() {
                         <span className="font-medium text-slate-400"> · every one of {shift.days} days</span>
                       )}
                     </span>
+                    {/* Its own form: removing a shift must not carry the
+                        card's edits along with it. */}
+                    <Form method="post">
+                      <input type="hidden" name="intent" value="delete_shift" />
+                      <input type="hidden" name="adminToken" value={adminToken || ""} />
+                      <input type="hidden" name="shiftKey" value={shift.key} />
+                      <button
+                        type="submit"
+                        disabled={adminShifts.length <= 1}
+                        title={
+                          adminShifts.length <= 1
+                            ? "A sheet needs at least one shift"
+                            : "Remove this shift"
+                        }
+                        onClick={(e) => {
+                          const where = shift.days > 1 ? ` from all ${shift.days} days` : "";
+                          const label = shift.shiftName || `Shift ${index + 1}`;
+                          if (!window.confirm(`Remove ${label}${where}, with its ${shift.tasks.length === 1 ? "task" : `${shift.tasks.length} tasks`}?`)) {
+                            e.preventDefault();
+                          }
+                        }}
+                        className="text-slate-400 hover:text-rose-500 font-bold text-xs disabled:opacity-20 disabled:hover:text-slate-400 transition-colors inline-flex items-center gap-1"
+                      >
+                        Remove <X className="w-3 h-3" />
+                      </button>
+                    </Form>
                   </div>
 
                   <Form method="post" className="space-y-3">
