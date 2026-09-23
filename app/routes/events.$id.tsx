@@ -3496,18 +3496,31 @@ export default function EventView() {
         >
           <div className="flex items-center justify-between">
             <h2 className="text-lg font-bold text-slate-900 tracking-tight inline-flex items-center gap-2"><Pencil className="w-4 h-4" /> Edit Event</h2>
-            <button
-              type="button"
-              onClick={closeEditor}
-              className="px-3.5 py-1.5 text-xs font-semibold rounded-2xl border border-slate-200 hover:border-slate-300 hover:bg-slate-50 bg-white text-slate-600 transition-all shadow-sm inline-flex items-center gap-1"
-            >
-              Close <X className="w-3 h-3" />
-            </button>
+            <div className="flex items-center gap-2 shrink-0">
+              <button
+                type="button"
+                onClick={closeEditor}
+                className="px-3.5 py-1.5 text-xs font-semibold rounded-2xl border border-slate-200 hover:border-slate-300 hover:bg-slate-50 bg-white text-slate-600 transition-all shadow-sm inline-flex items-center gap-1"
+              >
+                Cancel <X className="w-3 h-3" />
+              </button>
+              {/* Outside the <Form>, wired to it by id — the save belongs with
+                  Cancel at the top, not at the end of a long panel. */}
+              <button
+                type="submit"
+                form="edit-event-details"
+                disabled={isSubmitting}
+                className="px-4 py-1.5 rounded-2xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold shadow-sm transition-all hover:scale-[1.02] active:scale-[0.98] disabled:opacity-50"
+              >
+                {isSubmitting ? "Saving…" : "Update Details"}
+              </button>
+            </div>
           </div>
 
           {/* Edit details form */}
           <Form
             method="post"
+            id="edit-event-details"
             className="space-y-4"
             ref={editFormRef}
             onInput={() => setEditDirty(true)}
@@ -3540,7 +3553,7 @@ export default function EventView() {
               )}
               <div>
                 <label className="block text-xs font-semibold text-slate-700 mb-1.5">
-                  Location or Link
+                  Location or Link (Optional)
                 </label>
                 <input
                   type="text"
@@ -3560,7 +3573,9 @@ export default function EventView() {
                 </div>
               )}
               <div className="sm:col-span-2">
-                <label className="block text-xs font-semibold text-slate-700 mb-1.5">Description</label>
+                <label className="block text-xs font-semibold text-slate-700 mb-1.5">
+                  Description / Notes (Optional)
+                </label>
                 <textarea
                   name="description"
                   rows={3}
@@ -3579,13 +3594,6 @@ export default function EventView() {
                 />
               </div>
             </div>
-            <button
-              type="submit"
-              disabled={isSubmitting}
-              className="px-6 py-3 rounded-2xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold shadow-sm transition-all hover:scale-[1.02] active:scale-[0.98] disabled:opacity-50"
-            >
-              {isSubmitting ? "Saving…" : "Save Details"}
-            </button>
           </Form>
 
           {/* Manage options / slots */}
