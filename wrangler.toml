@@ -117,3 +117,30 @@ binding = "DB"
 database_name = "manymano-db-staging"
 database_id = "f7a7ab80-4548-4a9e-9595-697091b3e18d"
 migrations_dir = "./drizzle/migrations"
+
+# Branch previews (`wrangler preview --env staging`). Preview deployments do
+# NOT inherit env resources — every binding is named here so a preview can
+# never be pointed at production data by accident. Same posture as staging:
+# the staging database, no mail credentials, no bot-check keys, no reminder
+# secret (so /api/reminders answers 503 rather than sending from a preview).
+[env.staging.previews.vars]
+# Preview URLs are <preview-name>-<worker>.<subdomain>.workers.dev, so this
+# matches `wrangler preview --env staging --name multiday`. Deploy a preview
+# under a different --name with `--var SITE_URL:https://<that-url>`.
+SITE_URL = "https://multiday-manymano-staging.gunk.workers.dev"
+SITE_NAME = "ManyMano"
+SITE_TAGLINE = "Free sign-up sheets and meeting polls. No accounts, no ads — create and share in seconds."
+SITE_DESCRIPTION = "Free sign-up sheets and meeting polls. No accounts, no ads — create and share in seconds. A free Doodle and SignUpGenius alternative."
+FROM_EMAIL = "ManyMano Preview <no-reply@mail.manymano.com>"
+SECURITY_CONTACT = "https://github.com/gunkaragoz/ManyMano/issues"
+ICS_UID_DOMAIN = "manymano.com"
+ICS_PRODID = "PRODID:-//ManyMano//Open Source Scheduling//EN"
+GITHUB_REPO_URL = "https://github.com/gunkaragoz/ManyMano"
+FOOTER_CREDIT_URL = "https://gnkz.net"
+FOOTER_CREDIT_LABEL = "gnkz.net"
+
+[[env.staging.previews.d1_databases]]
+binding = "DB"
+database_name = "manymano-db-staging"
+database_id = "f7a7ab80-4548-4a9e-9595-697091b3e18d"
+migrations_dir = "./drizzle/migrations"
