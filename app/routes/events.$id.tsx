@@ -2599,6 +2599,34 @@ export default function EventView() {
     return () => window.clearTimeout(t);
   }, [toast]);
   const [showEdit, setShowEdit] = useState(false);
+  // The editor is a panel further down the page, so opening it has to take the
+  // organizer there — otherwise "Edit event" looks like it did nothing.
+  const editPanelRef = useRef<HTMLDivElement>(null);
+  const editFormRef = useRef<HTMLFormElement>(null);
+  const [editDirty, setEditDirty] = useState(false);
+  useEffect(() => {
+    if (!showEdit) return;
+    const t = window.setTimeout(() => {
+      editPanelRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+      editPanelRef.current?.querySelector<HTMLInputElement>('input[name="title"]')?.focus({
+        preventScroll: true,
+      });
+    }, 60);
+    return () => window.clearTimeout(t);
+  }, [showEdit]);
+  /** Closing with edits in flight should ask first — a panel this long is easy to abandon. */
+  const closeEditor = () => {
+    if (editDirty && !window.confirm("Close without saving your changes?")) return;
+    setEditDirty(false);
+    setShowEdit(false);
+  };
+  // Leaving the page entirely gets the browser's own warning.
+  useEffect(() => {
+    if (!editDirty) return;
+    const warn = (e: BeforeUnloadEvent) => e.preventDefault();
+    window.addEventListener("beforeunload", warn);
+    return () => window.removeEventListener("beforeunload", warn);
+  }, [editDirty]);
   // QR is derived on demand from the event URL, so older events need no
   // backfill. If the image fails to load (unknown/expired event, generation
   // error), hide the badge silently instead of showing a broken-image box.
@@ -3226,7 +3254,7 @@ export default function EventView() {
             {isAdmin && (
               <button
                 type="button"
-                onClick={() => setShowEdit((v) => !v)}
+                onClick={() => (showEdit ? closeEditor() : setShowEdit(true))}
                 className="shrink-0 mt-1 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full border border-slate-200 bg-white hover:bg-slate-50 hover:border-slate-300 text-xs font-semibold text-slate-600 hover:text-slate-900 transition-all shadow-sm"
               >
                 <Pencil className="w-3.5 h-3.5" />
@@ -3234,12 +3262,6 @@ export default function EventView() {
               </button>
             )}
           </div>
-
-          {event.description && (
-            <p className="text-sm text-slate-600 max-w-2xl leading-relaxed whitespace-pre-wrap font-normal">
-              {event.description}
-            </p>
-          )}
 
           <div className="flex flex-wrap items-center gap-2 pt-1">
             {/* TIME_POLL has no event date — options carry their own days. */}
@@ -3310,9 +3332,11 @@ export default function EventView() {
               </span>
             )}
           </div>
-          <p className="text-xs text-slate-400 pt-0.5">
-            Anyone with the link can see names/notes. Organizer can delete anytime below.
-          </p>
+          {event.description && (
+            <p className="text-sm text-slate-600 max-w-2xl leading-relaxed whitespace-pre-wrap font-normal pt-1">
+              {event.description}
+            </p>
+          )}
         </div>
         </div>
 
@@ -3370,6 +3394,12 @@ export default function EventView() {
             </a>
           ) : null}
         </div>
+
+        {/* Privacy note sits with the actions it is about, instead of between
+            the organizer pills and the description. */}
+        <p className="text-xs text-slate-400 pt-3">
+          Anyone with the link can see names/notes. Organizer can delete anytime below.
+        </p>
 
         {/* Admin Bar */}
         {isAdmin && (
@@ -3460,12 +3490,15 @@ export default function EventView() {
       {/* ADMIN EDIT PANEL                                                      */}
       {/* ===================================================================== */}
       {isAdmin && showEdit && (
-        <div className="bg-white border border-slate-200/80 rounded-3xl p-6 sm:p-8 shadow-[0_2px_12px_rgba(0,0,0,0.03)] space-y-8 animate-fade-in">
+        <div
+          ref={editPanelRef}
+          className="bg-white border border-slate-200/80 rounded-3xl p-6 sm:p-8 shadow-[0_2px_12px_rgba(0,0,0,0.03)] space-y-8 animate-fade-in scroll-mt-24"
+        >
           <div className="flex items-center justify-between">
             <h2 className="text-lg font-bold text-slate-900 tracking-tight inline-flex items-center gap-2"><Pencil className="w-4 h-4" /> Edit Event</h2>
             <button
               type="button"
-              onClick={() => setShowEdit(false)}
+              onClick={closeEditor}
               className="px-3.5 py-1.5 text-xs font-semibold rounded-2xl border border-slate-200 hover:border-slate-300 hover:bg-slate-50 bg-white text-slate-600 transition-all shadow-sm inline-flex items-center gap-1"
             >
               Close <X className="w-3 h-3" />
@@ -3473,7 +3506,14 @@ export default function EventView() {
           </div>
 
           {/* Edit details form */}
-          <Form method="post" className="space-y-4">
+          <Form
+            method="post"
+            className="space-y-4"
+            ref={editFormRef}
+            onInput={() => setEditDirty(true)}
+            onChange={() => setEditDirty(true)}
+            onSubmit={() => setEditDirty(false)}
+          >
             <input type="hidden" name="intent" value="update_event" />
             <input type="hidden" name="adminToken" value={adminToken || ""} />
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
