@@ -1,6 +1,6 @@
 # ManyMano 🤝
 
-> An easy, ad-free tool for sign-up sheets and meeting time polls. No accounts — create and share in seconds. Free forever, open source. Built to run 100% free on **Cloudflare Workers & D1** with zero subscription costs.
+> An easy, ad-free tool for sign-up sheets and meeting time polls. No accounts — create and share in seconds. Free to use, open source. Built to run 100% free on **Cloudflare Workers & D1** with zero subscription costs.
 
 [![Deploy to Cloudflare](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/gunkaragoz/ManyMano)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
