@@ -107,7 +107,8 @@ export function reminderInstant(
 
 /**
  * UTC instant the event starts: the earliest slot startTime on the event
- * date (the winning slot for finalized meetings), in the event's timezone.
+ * date — or, for one occurrence of a multi-day sheet, on that occurrence's
+ * date — (the winning slot for finalized meetings), in the event's timezone.
  * Sheets with no slot times assume a REMINDER_HOUR start. Null when the
  * date is missing or bad (caller skips).
  */
@@ -117,7 +118,9 @@ export function eventStartInstant(target: ReminderTarget): Date | null {
     const date = target.winningSlot.slotDate ?? target.event.eventDate;
     return zonedWallTimeToUtc(date, target.winningSlot.startTime ?? `${REMINDER_HOUR}:00`, tz);
   }
-  const date = target.event.eventDate;
+  // The occurrence being reminded about — for a multi-day sheet that is one
+  // day of the series, not its first date (the slots are that day's too).
+  const date = target.reminderDate || target.event.eventDate;
   if (!date) return null;
   let earliest: { hours: number; minutes: number } | null = null;
   for (const slot of target.slots) {

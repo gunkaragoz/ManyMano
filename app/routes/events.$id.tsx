@@ -2333,16 +2333,14 @@ export async function action({ request, params, context }: ActionFunctionArgs) {
     if (!(await requireAdmin())) {
       return data({ error: "Unauthorized." }, { status: 403 });
     }
-    const slots = await db.select({ id: eventSlots.id }).from(eventSlots).where(eq(eventSlots.eventId, eventId));
-    const slotIds = slots.map((s) => s.id);
-    if (slotIds.length > 0) {
-      await db.delete(signups).where(inArray(signups.slotId, slotIds));
-      await db.delete(pollVoteEntries).where(inArray(pollVoteEntries.slotId, slotIds));
-    }
-    const votes = await db.select({ id: pollVotes.id }).from(pollVotes).where(eq(pollVotes.eventId, eventId));
-    if (votes.length > 0) {
-      await db.delete(pollVoteEntries).where(inArray(pollVoteEntries.pollVoteId, votes.map((v) => v.id)));
-    }
+    // Children are matched through subqueries on the event ID: a multi-day
+    // sheet has up to 300 slots and a poll up to 1000 votes, and one bound
+    // variable per ID would pass D1's 100-variable cap and fail the delete.
+    const slotIdsOf = db.select({ id: eventSlots.id }).from(eventSlots).where(eq(eventSlots.eventId, eventId));
+    const voteIdsOf = db.select({ id: pollVotes.id }).from(pollVotes).where(eq(pollVotes.eventId, eventId));
+    await db.delete(signups).where(inArray(signups.slotId, slotIdsOf));
+    await db.delete(pollVoteEntries).where(inArray(pollVoteEntries.slotId, slotIdsOf));
+    await db.delete(pollVoteEntries).where(inArray(pollVoteEntries.pollVoteId, voteIdsOf));
     await db.delete(signups).where(eq(signups.eventId, eventId));
     await db.delete(pollVotes).where(eq(pollVotes.eventId, eventId));
     await db.delete(eventSlots).where(eq(eventSlots.eventId, eventId));

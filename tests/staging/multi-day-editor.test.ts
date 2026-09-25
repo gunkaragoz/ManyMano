@@ -235,6 +235,29 @@ describe.skipIf(!LIVE)("multi-day sheets: the page", () => {
   });
 });
 
+describe.skipIf(!LIVE)("multi-day sheets: deleting", () => {
+  it("deletes a full-size sheet (300 slots)", async () => {
+    // 30 days x 10 tasks — past D1's 100 bound variables if the delete binds one per slot.
+    const sheet = await mustCreate({
+      eventDate: "2026-11-01",
+      dateMode: "range",
+      dateEnd: "2026-11-30",
+      slotTitle: Array.from({ length: 10 }, (_, i) => `Task ${i + 1}`),
+      slotCapacity: Array(10).fill(1),
+    });
+    expect(await slots(sheet)).toHaveLength(300);
+    const res = await request(`/events/${sheet.id}.data`, {
+      method: "POST",
+      redirect: "manual",
+      headers: HEADERS(),
+      body: body({ intent: "delete_event", adminToken: sheet.admin }),
+    });
+    expect(res.status).toBeLessThan(400);
+    const after = await request(`/events/${sheet.id}.data`, { headers: { cookie: sheet.cookie } });
+    expect(await after.text()).toContain("Event not found");
+  });
+});
+
 describe.skipIf(!LIVE)("multi-day sheets: editing the dates", () => {
   it("new days copy the nearest day on the same weekday", async () => {
     const sheet = await mustCreate({

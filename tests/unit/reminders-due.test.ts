@@ -265,6 +265,14 @@ describe("multi-day sheets", () => {
     expect(targetReminderDate(laterOccurrence())).toBe("2026-01-23");
   });
 
+  it("starts, and is due, from the occurrence's date", () => {
+    // 09:00 New York (EST, UTC-5) on Jan 23 — not on the series' first date, Jan 16.
+    expect(eventStartInstant(laterOccurrence())?.toISOString()).toBe("2026-01-23T14:00:00.000Z");
+    expect(reminderDueInstant(laterOccurrence())?.toISOString()).toBe(
+      new Date(Date.parse("2026-01-23T14:00:00.000Z") - REMINDER_LEAD_HOURS * 3600_000).toISOString()
+    );
+  });
+
   it("organizer email dates every task with the occurrence, not the first date", () => {
     const mail = buildSignupOrganizerEmail(SITE, SITE.siteUrl, laterOccurrence());
     expect(mail.html).toContain("January 23");
