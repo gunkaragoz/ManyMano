@@ -308,9 +308,10 @@ export async function loader({ params, request, context, url }: LoaderFunctionAr
       : rawSlots;
 
   if (event.type === "SIGNUP_SHEET") {
-    // Fetch signups — never expose emails or edit tokens to the client.
-    // Organizers see emails only via the CSV roster export; the event page
-    // itself shows names (+ notes) to everyone, including organizers.
+    // Fetch signups — never expose edit tokens to the client. Emails are
+    // organizer-only: included only for verified admins (rendered in the
+    // private roster table below); everyone else gets null. The public
+    // roster shows names (+ notes) only.
     const eventSignups = await db
       .select()
       .from(signups)
@@ -321,7 +322,7 @@ export async function loader({ params, request, context, url }: LoaderFunctionAr
       slotId: s.slotId,
       eventId: s.eventId,
       participantName: s.participantName,
-      participantEmail: null as string | null,
+      participantEmail: isAdmin ? s.participantEmail : null,
       customFields: s.customFields,
       status: s.status,
       createdAt: s.createdAt,
@@ -1836,6 +1837,19 @@ function formatTime(t: string | null | undefined): string {
   return `${h}:${min} ${ampm}`;
 }
 
+/** Organizer roster: compact localized "signed up at" with ISO fallback. */
+function formatSignedUpAt(iso: string): string {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return iso;
+  return d.toLocaleString(undefined, {
+    year: "numeric",
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  });
+}
+
 /** Auto title for TIME_POLL options with an empty label — same format as create/poll. */
 function autoPollTitle(
   _label: string,
@@ -2610,6 +2624,43 @@ export default function EventView() {
     return groups;
   }, [slots]);
 
+  // Organizer-only volunteer roster rows (SIGNUP_SHEET): shift, task, name,
+  // email, signed-up-at. Emails are present only for verified admins (the
+  // loader nulls them for everyone else), and the table itself renders only
+  // under `isAdmin` below — never visible to volunteers.
+  const rosterRows = useMemo(() => {
+    const slotById = new Map(slots.map((s) => [s.id, s]));
+    return [...initialSignups]
+      .filter(Boolean)
+      .map((s) => {
+        const slot = slotById.get(s!.slotId) as
+          | { title?: string; shiftName?: string | null; startTime?: string | null; endTime?: string | null }
+          | undefined;
+        const shiftName = (slot?.shiftName || "").trim();
+        const time = [slot?.startTime, slot?.endTime]
+          .filter(Boolean)
+          .map((t) => formatTime(t))
+          .join(" – ");
+        return {
+          id: s!.id,
+          shift: [shiftName, time].filter(Boolean).join(" | ") || "—",
+          task: slot?.title || "Unknown",
+          name: s!.participantName,
+          email: s!.participantEmail || "",
+          signedUpAt: s!.createdAt,
+        };
+      })
+      .sort((a, b) =>
+        a.shift.localeCompare(b.shift) ||
+        a.task.localeCompare(b.task) ||
+        a.signedUpAt.localeCompare(b.signedUpAt)
+      );
+  }, [initialSignups, slots]);
+  const rosterExportHref =
+    adminToken
+      ? `/events/${event.id}/export?admin=${encodeURIComponent(adminToken)}`
+      : `/events/${event.id}/export`;
+
   // SSR-safe absolute links: `origin` comes from the loader (request URL),
   // so server and client render identical hrefs/values (no hydration
   // mismatch). Never use window.location directly in render.
@@ -3028,16 +3079,9 @@ export default function EventView() {
             <span>Apple / Outlook (.ics)</span>
           </a>
 
-          {isAdmin ? (
-            <a
-              href={adminToken ? `/events/${event.id}/export?admin=${encodeURIComponent(adminToken)}` : `/events/${event.id}/export`}
-              download
-              className="w-full h-11 px-4 text-[13px] font-semibold rounded-xl border border-slate-200 bg-white hover:bg-slate-50 hover:border-slate-300 text-slate-700 transition-all shadow-sm flex items-center justify-center gap-2"
-            >
-              <Download className="w-4 h-4 text-slate-500" />
-              <span>Export CSV Roster</span>
-            </a>
-          ) : null}
+          {/* Organizer roster (with optional CSV export) lives in its own
+              private section below — no export button here so volunteers
+              never mistake it for a public action. */}
         </div>
 
         {/* Admin Bar */}
@@ -3048,7 +3092,7 @@ export default function EventView() {
               <span className="font-bold">Organizer Admin Mode Active</span>
               <span className="mx-2 text-amber-300">•</span>
               <span className="font-normal text-amber-700/90">
-                You are viewing with your private admin token. You can edit details, manage options, cancel entries and finalize.
+                You can edit details, manage options, cancel entries and finalize.
               </span>
             </p>
           </div>
@@ -3628,6 +3672,112 @@ export default function EventView() {
               );
             })}
           </div>
+        </div>
+      )}
+
+      {/* ===================================================================== */}
+      {/* ORGANIZER ROSTER (SIGNUP_SHEET, admin-only)                           */}
+      {/* ===================================================================== */}
+      {event.type === "SIGNUP_SHEET" && isAdmin && (
+        <div className="bg-white border border-slate-200/80 rounded-3xl p-6 sm:p-8 shadow-[0_2px_12px_rgba(0,0,0,0.03)] space-y-5">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            <div>
+              <h2 className="text-xl font-bold text-slate-900 tracking-tight inline-flex items-center gap-2 flex-wrap">
+                Volunteer roster
+                <span className="text-[11px] font-bold uppercase tracking-wider px-2.5 py-1 rounded-full bg-amber-50 text-amber-800 border border-amber-200">
+                  Organizers only
+                </span>
+                {liveBadge}
+              </h2>
+              <p className="text-xs text-slate-500 mt-1">
+                {rosterRows.length} {rosterRows.length === 1 ? "volunteer" : "volunteers"} · Only visible to organizers — volunteers never see emails here.
+              </p>
+            </div>
+            <a
+              href={rosterExportHref}
+              download
+              className="inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl border border-slate-200 bg-white hover:bg-slate-50 hover:border-slate-300 text-slate-700 text-xs font-bold shadow-sm transition-all shrink-0"
+            >
+              <Download className="w-4 h-4 text-slate-500" />
+              <span>Export CSV</span>
+            </a>
+          </div>
+
+          {rosterRows.length === 0 ? (
+            <p className="text-sm text-slate-400 italic">
+              No volunteers yet. Once people sign up, they&apos;ll appear here with contact details.
+            </p>
+          ) : (
+            <>
+              {/* Desktop: table */}
+              <div className="hidden sm:block overflow-x-auto">
+                <table className="w-full text-left border-collapse text-xs min-w-[720px]">
+                  <thead>
+                    <tr className="bg-slate-50/80 border-y border-slate-200/80 text-slate-600 uppercase text-[10px] tracking-wider font-bold">
+                      <th scope="col" className="p-3.5">Shift</th>
+                      <th scope="col" className="p-3.5">Task</th>
+                      <th scope="col" className="p-3.5">Name</th>
+                      <th scope="col" className="p-3.5">Email</th>
+                      <th scope="col" className="p-3.5">Signed up at</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100 font-medium text-slate-800">
+                    {rosterRows.map((r) => (
+                      <tr key={r.id} className="hover:bg-slate-50/60 transition-colors">
+                        <td className="p-3.5 align-top">{r.shift}</td>
+                        <td className="p-3.5 align-top font-semibold text-slate-900">{r.task}</td>
+                        <td className="p-3.5 align-top">{r.name}</td>
+                        <td className="p-3.5 align-top">
+                          {r.email ? (
+                            <a href={`mailto:${r.email}`} className="text-blue-700 hover:underline break-all">
+                              {r.email}
+                            </a>
+                          ) : (
+                            <span className="text-slate-400">—</span>
+                          )}
+                        </td>
+                        <td className="p-3.5 align-top whitespace-nowrap text-slate-600">
+                          {formatSignedUpAt(r.signedUpAt)}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              {/* Mobile: minimal flat name + email table */}
+              <div className="sm:hidden overflow-hidden bg-white border border-slate-200/80 rounded-2xl">
+                <table className="w-full text-left border-collapse text-xs">
+                  <thead>
+                    <tr className="bg-slate-50/80 border-b border-slate-200/80 text-slate-600 uppercase text-[10px] tracking-wider font-bold">
+                      <th scope="col" className="px-3 py-2.5">Name</th>
+                      <th scope="col" className="px-3 py-2.5 text-right">Email</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100 font-medium text-slate-800">
+                    {rosterRows.map((r) => (
+                      <tr key={r.id}>
+                        <td className="px-3 py-2 align-baseline font-semibold text-slate-900 truncate max-w-[140px]">
+                          {r.name}
+                        </td>
+                        <td className="px-3 py-2 align-baseline text-right">
+                          {r.email ? (
+                            <a
+                              href={`mailto:${r.email}`}
+                              className="text-blue-700 hover:underline truncate block"
+                            >
+                              {r.email}
+                            </a>
+                          ) : (
+                            <span className="text-slate-400">—</span>
+                          )}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </>
+          )}
         </div>
       )}
 
