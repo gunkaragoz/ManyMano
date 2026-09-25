@@ -92,6 +92,37 @@ for (const key of requiredKeys) {
   else ok(`.env.sample documents ${key}`);
 }
 
+// --- 2b. Brand strings must not drift between wrangler environments ----------
+// Wrangler does not inherit [vars] into [env.*], so each environment carries
+// its own copy. Editing the top-level one and nothing else is silent: the
+// deployed site keeps the old string. These have to stay identical.
+console.log("\n[2b] wrangler.toml brand vars agree across environments");
+const wranglerSource = readFileSync(resolve(ROOT, "wrangler.toml"), "utf8");
+for (const key of ["SITE_NAME", "SITE_TAGLINE", "SITE_DESCRIPTION"]) {
+  const values = [...wranglerSource.matchAll(new RegExp(`^${key}\\s*=\\s*"([^"]*)"`, "gm"))].map(
+    (m) => m[1]
+  );
+  if (values.length === 0) {
+    fail(`wrangler.toml defines no ${key}`);
+    continue;
+  }
+  const distinct = [...new Set(values)];
+  if (distinct.length > 1) {
+    fail(
+      `${key} differs between wrangler.toml environments — deploys would use a different string than [vars]:\n` +
+        distinct.map((v) => `      • ${JSON.stringify(v)}`).join("\n")
+    );
+  } else {
+    ok(`${key} is the same in all ${values.length} environments`);
+  }
+  const sampleValue = (sample[key] ?? "").trim();
+  if (sampleValue && sampleValue !== distinct[0]) {
+    fail(
+      `${key} in .env.sample (${JSON.stringify(sampleValue)}) does not match wrangler.toml (${JSON.stringify(distinct[0])})`
+    );
+  }
+}
+
 // --- 3. Effective env must satisfy getSiteConfig ------------------------------
 console.log("\n[3/5] Effective env satisfies getSiteConfig");
 const { env, fromFile } = loadEffectiveEnv();

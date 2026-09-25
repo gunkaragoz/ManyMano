@@ -16,6 +16,10 @@ migrations_dir = "./drizzle/migrations"
 # Production vars (public brand/config — secrets go via `wrangler secret put`,
 # never in this file). Values mirror the production env; SITE_URL is
 # the canonical origin the app renders into links/meta.
+# Wrangler does NOT inherit these into [env.*] — each environment below
+# repeats every var it needs. Change a brand string here and you have to
+# change it in production, staging and previews too, or the deployed site
+# keeps the old copy. `npm run test:predeploy` fails when they drift.
 [vars]
 SITE_URL = "https://manymano.com"
 SITE_NAME = "ManyMano"
@@ -45,7 +49,7 @@ name = "manymano"
 [env.production.vars]
 SITE_URL = "https://manymano.com"
 SITE_NAME = "ManyMano"
-SITE_TAGLINE = "Free sign-up sheets and meeting polls. No accounts, no ads — create and share in seconds."
+SITE_TAGLINE = "Free sign-up sheets and meeting polls."
 SITE_DESCRIPTION = "Free sign-up sheets and meeting polls. No accounts, no ads — create and share in seconds. A free Doodle and SignUpGenius alternative."
 FROM_EMAIL = "ManyMano <no-reply@mail.manymano.com>"
 SECURITY_CONTACT = "https://github.com/gunkaragoz/ManyMano/issues"
@@ -102,7 +106,7 @@ name = "manymano-staging"
 [env.staging.vars]
 SITE_URL = "https://manymano-staging.gunk.workers.dev"
 SITE_NAME = "ManyMano"
-SITE_TAGLINE = "Free sign-up sheets and meeting polls. No accounts, no ads — create and share in seconds."
+SITE_TAGLINE = "Free sign-up sheets and meeting polls."
 SITE_DESCRIPTION = "Free sign-up sheets and meeting polls. No accounts, no ads — create and share in seconds. A free Doodle and SignUpGenius alternative."
 FROM_EMAIL = "ManyMano Staging <no-reply@mail.manymano.com>"
 SECURITY_CONTACT = "https://github.com/gunkaragoz/ManyMano/issues"
@@ -129,7 +133,7 @@ migrations_dir = "./drizzle/migrations"
 # under a different --name with `--var SITE_URL:https://<that-url>`.
 SITE_URL = "https://multiday-manymano-staging.gunk.workers.dev"
 SITE_NAME = "ManyMano"
-SITE_TAGLINE = "Free sign-up sheets and meeting polls. No accounts, no ads — create and share in seconds."
+SITE_TAGLINE = "Free sign-up sheets and meeting polls."
 SITE_DESCRIPTION = "Free sign-up sheets and meeting polls. No accounts, no ads — create and share in seconds. A free Doodle and SignUpGenius alternative."
 FROM_EMAIL = "ManyMano Preview <no-reply@mail.manymano.com>"
 SECURITY_CONTACT = "https://github.com/gunkaragoz/ManyMano/issues"
