@@ -4,8 +4,8 @@
 //
 // Pure logic: no Request/Response, no auth. Two entry points:
 // - runReminderFanout(): explicit date, sends unconditionally (manual tool).
-// - runScheduledReminders(): hourly cron, sends only what's due — 9:00 AM
-//   event-local, 24h ahead (organizers + participants) plus a 48h
+// - runScheduledReminders(): hourly cron, sends only what's due — 12 hours
+//   before the event starts (organizers + participants) plus a 48h
 //   understaffed alert (organizers of signup sheets with open spots).
 //
 // Dedupe (one reminder_sends row per event+date+kind) makes re-runs safe:
@@ -27,8 +27,10 @@ import {
   isReminderSent,
   isUnderstaffed,
   LEGACY_ORGANIZER_KIND,
+  LEGACY_ORGANIZER_24H_KIND,
   markReminderSent,
   participantTasksForSignup,
+  reminderDueInstant,
   reminderInstant,
   targetReminderDate,
   type FinalizedMeetingTarget,
@@ -129,13 +131,16 @@ async function sendOrganizer(
   ctx: SenderCtx,
   target: SignupSheetTarget | FinalizedMeetingTarget,
   built: { subject: string; html: string },
-  opts: { date: string; dryRun?: boolean; kind: ReminderKind; legacyKind?: ReminderKind }
+  opts: { date: string; dryRun?: boolean; kind: ReminderKind; legacyKinds?: ReminderKind[] }
 ): Promise<ReminderStatus> {
-  const { date, kind, legacyKind } = opts;
+  const { date, kind, legacyKinds = [] } = opts;
   const dryRun = opts.dryRun ?? false;
   if (dryRun) return "dry-run";
   if (await isReminderSent(db, target.event.id, date, kind)) return "already-sent";
-  if (legacyKind && (await isReminderSent(db, target.event.id, date, legacyKind))) return "already-sent";
+  for (const legacy of legacyKinds) {
+    // eslint-disable-next-line no-await-in-loop
+    if (await isReminderSent(db, target.event.id, date, legacy)) return "already-sent";
+  }
   const to = (target.event.organizerEmail || "").trim();
   if (!to || !isValidEmail(to)) return "skipped";
   const result = await sendEmail({ ...ctx.emailBase, to, subject: built.subject, html: built.html });
@@ -216,8 +221,8 @@ export async function runReminderFanout(
         const organizer = await sendOrganizer(db, ctx, target, buildSignupOrganizerEmail(site, ctx.origin, target), {
           date,
           dryRun,
-          kind: "organizer_24h",
-          legacyKind: LEGACY_ORGANIZER_KIND,
+          kind: "organizer_12h",
+          legacyKinds: [LEGACY_ORGANIZER_24H_KIND, LEGACY_ORGANIZER_KIND],
         });
         const participants = await sendParticipants(db, ctx, site, target, groupSignupRecipients(target), {
           date,
@@ -228,8 +233,8 @@ export async function runReminderFanout(
         const organizer = await sendOrganizer(db, ctx, target, buildMeetingOrganizerEmail(site, ctx.origin, target), {
           date,
           dryRun,
-          kind: "organizer_24h",
-          legacyKind: LEGACY_ORGANIZER_KIND,
+          kind: "organizer_12h",
+          legacyKinds: [LEGACY_ORGANIZER_24H_KIND, LEGACY_ORGANIZER_KIND],
         });
         const participants = await sendParticipants(db, ctx, site, target, groupMeetingRecipients(target), {
           date,
@@ -258,8 +263,8 @@ export async function runReminderFanout(
 }
 
 /**
- * Cron entry: sends only what's due as of `nowMs` — 9:00 AM event-local,
- * 24h ahead (organizers + participants) plus a 48h understaffed alert
+ * Cron entry: sends only what's due as of `nowMs` — 12 hours before the
+ * event starts (organizers + participants) plus a 48h understaffed alert
  * (organizers of signup sheets with open spots). Idempotent via dedupe;
  * a missed hour just sends on the next run. Expired/undated events are
  * already excluded by collectReminderTargets.
@@ -289,14 +294,14 @@ export async function runScheduledReminders(
       const eventDate = targetReminderDate(target);
       if (!eventDate) continue;
       const tz = normalizeTimezone(target.event.timezone);
-      const due24At = reminderInstant(eventDate, 1, tz)?.getTime();
+      const due12At = reminderDueInstant(target)?.getTime();
       const due48At = reminderInstant(eventDate, 2, tz)?.getTime();
-      const due24 = due24At !== undefined && due24At <= nowMs;
+      const due12 = due12At !== undefined && due12At <= nowMs;
       const due48 = due48At !== undefined && due48At <= nowMs;
-      if (!due24 && !due48) continue;
+      if (!due12 && !due48) continue;
       try {
         // eslint-disable-next-line no-await-in-loop
-        const report = await sendDueTarget(db, ctx, site, target, eventDate, { due24, due48 });
+        const report = await sendDueTarget(db, ctx, site, target, eventDate, { due12, due48 });
         reports.push(report);
       } catch {
         reports.push({
@@ -324,7 +329,7 @@ async function sendDueTarget(
   site: SiteConfig,
   target: ReminderTarget,
   eventDate: string,
-  due: { due24: boolean; due48: boolean }
+  due: { due12: boolean; due48: boolean }
 ): Promise<EventReport> {
   let organizer: ReminderStatus = "skipped";
   let organizer48h: ReminderStatus | undefined;
@@ -339,12 +344,12 @@ async function sendDueTarget(
       { date: eventDate, kind: "organizer_48h" }
     );
   }
-  if (due.due24) {
+  if (due.due12) {
     if (target.kind === "signup_sheet") {
       organizer = await sendOrganizer(db, ctx, target, buildSignupOrganizerEmail(site, ctx.origin, target), {
         date: eventDate,
-        kind: "organizer_24h",
-        legacyKind: LEGACY_ORGANIZER_KIND,
+        kind: "organizer_12h",
+        legacyKinds: [LEGACY_ORGANIZER_24H_KIND, LEGACY_ORGANIZER_KIND],
       });
       participants = await sendParticipants(db, ctx, site, target, groupSignupRecipients(target), {
         date: eventDate,
@@ -353,8 +358,8 @@ async function sendDueTarget(
     } else {
       organizer = await sendOrganizer(db, ctx, target, buildMeetingOrganizerEmail(site, ctx.origin, target), {
         date: eventDate,
-        kind: "organizer_24h",
-        legacyKind: LEGACY_ORGANIZER_KIND,
+        kind: "organizer_12h",
+        legacyKinds: [LEGACY_ORGANIZER_24H_KIND, LEGACY_ORGANIZER_KIND],
       });
       participants = await sendParticipants(db, ctx, site, target, groupMeetingRecipients(target), {
         date: eventDate,

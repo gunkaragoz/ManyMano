@@ -30,7 +30,7 @@ export default {
   },
 
   // Hourly reminder scan (see [triggers] in wrangler.toml). Each run sends
-  // only what's due — 9:00 AM event-local, 24h ahead (organizers +
+  // only what's due — 12 hours before the event starts (organizers +
   // participants) plus a 48h understaffed alert (organizers). Dedupe via
   // reminder_sends rows makes overlapping runs safe. Staging has no cron
   // trigger configured, so this only ever fires in production.

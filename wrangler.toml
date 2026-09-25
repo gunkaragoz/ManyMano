@@ -78,9 +78,9 @@ pattern = "www.manymano.com/*"
 zone_name = "manymano.com"
 
 # Reminder scan, hourly on the hour (production only — staging has no
-# triggers). Each run sends only what's due: 9:00 AM event-local, 24h ahead
-# (organizers + participants) plus a 48h understaffed alert (organizers of
-# signup sheets with open spots). Dedupe makes re-runs safe.
+# triggers). Each run sends only what's due: 12 hours before the event
+# starts (organizers + participants) plus a 48h understaffed alert
+# (organizers of signup sheets with open spots). Dedupe makes re-runs safe.
 [env.production.triggers]
 crons = ["0 * * * *"]
 
@@ -113,6 +113,32 @@ FOOTER_CREDIT_URL = "https://gnkz.net"
 FOOTER_CREDIT_LABEL = "gnkz.net"
 
 [[env.staging.d1_databases]]
+binding = "DB"
+database_name = "manymano-db-staging"
+database_id = "f7a7ab80-4548-4a9e-9595-697091b3e18d"
+migrations_dir = "./drizzle/migrations"
+
+# PR previews (Workers Builds posts one preview URL per PR — the build
+# fails without this block). Previews never inherit production settings,
+# so this repeats the staging-safe values: shared staging D1 (per the
+# Cloudflare previews guide — never production data), staging SITE_URL,
+# and no mail/Turnstile credentials (preview sends are skipped, same as
+# staging). No cron triggers or routes here — those never target previews.
+# Keep in sync with [env.staging.vars] when adding plaintext vars.
+[previews.vars]
+SITE_URL = "https://manymano-staging.gunk.workers.dev"
+SITE_NAME = "ManyMano"
+SITE_TAGLINE = "Free sign-up sheets and meeting polls. No accounts, no ads — create and share in seconds."
+SITE_DESCRIPTION = "Free sign-up sheets and meeting polls. No accounts, no ads — create and share in seconds. A free Doodle and SignUpGenius alternative."
+FROM_EMAIL = "ManyMano Staging <no-reply@mail.manymano.com>"
+SECURITY_CONTACT = "https://github.com/gunkaragoz/ManyMano/issues"
+ICS_UID_DOMAIN = "manymano.com"
+ICS_PRODID = "PRODID:-//ManyMano//Open Source Scheduling//EN"
+GITHUB_REPO_URL = "https://github.com/gunkaragoz/ManyMano"
+FOOTER_CREDIT_URL = "https://gnkz.net"
+FOOTER_CREDIT_LABEL = "gnkz.net"
+
+[[previews.d1_databases]]
 binding = "DB"
 database_name = "manymano-db-staging"
 database_id = "f7a7ab80-4548-4a9e-9595-697091b3e18d"
