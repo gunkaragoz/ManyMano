@@ -2107,6 +2107,39 @@ export async function action({ request, params, context }: ActionFunctionArgs) {
       updates.push({ ids, title, capacity });
     }
 
+    // Same-named tasks must run on the same days (the invariant behind the
+    // "n:Title" identity — see create). Check the shift as it will be after
+    // this save: renaming "Helper" (Wed/Fri) to "Greeter" (Mon/Wed) would
+    // otherwise make Friday's task indistinguishable from the other Greeter.
+    {
+      const dayKey = (rows: typeof inShift) =>
+        [...new Set(rows.map((r) => (r as { slotDate?: string | null }).slotDate ?? ""))].sort().join(",");
+      const renamed = new Set(updates.flatMap((u) => u.ids));
+      const result: Array<{ title: string; days: string }> = [
+        ...updates.map((u) => ({ title: u.title, days: dayKey(inShift.filter((s) => u.ids.includes(s.id))) })),
+        ...added.map((a) => ({ title: a.title, days: dayKey(inShift) })),
+      ];
+      // Tasks the card didn't post (a stale page) keep their title and days.
+      const untouched = new Map<string, typeof inShift>();
+      for (const s of inShift) {
+        if (renamed.has(s.id)) continue;
+        const id = taskIdOf.get(s.id) as string;
+        untouched.set(id, [...(untouched.get(id) ?? []), s]);
+      }
+      for (const rows of untouched.values()) result.push({ title: rows[0].title, days: dayKey(rows) });
+      const daysByTitle = new Map<string, string>();
+      for (const t of result) {
+        const seen = daysByTitle.get(t.title);
+        if (seen !== undefined && seen !== t.days) {
+          return data(
+            { error: `Two tasks called "${t.title}" would run on different days — use a different name.` },
+            { status: 400 }
+          );
+        }
+        daysByTitle.set(t.title, t.days);
+      }
+    }
+
     if (added.length > 0) {
       const hasDated = allSlots.some((s) => (s as { slotDate?: string | null }).slotDate);
       const cap = hasDated ? MAX_SLOT_ROWS_PER_EVENT : MAX_SLOTS_PER_EVENT;

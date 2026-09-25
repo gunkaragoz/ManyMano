@@ -378,6 +378,66 @@ describe.skipIf(!LIVE)("multi-day sheets: shift cards", () => {
     expect((await slots(sheet)).map((s) => s.title)).toEqual(["Desk", "Desk", "Desk"]);
   });
 
+  it("won't rename a task onto a same-named task that runs on other days", async () => {
+    // One shift, Mon/Wed/Fri: Greeter on Mon+Wed, Helper on Wed+Fri.
+    const sheet = await mustCreate({
+      eventDate: "2026-11-16",
+      ...weekly("1,3,5", 3),
+      slotTitle: ["Greeter", "Helper"],
+      slotCapacity: [1, 2],
+      slotShiftName: ["AM", "AM"],
+      slotStartTime: ["09:00", "09:00"],
+      slotEndTime: ["10:00", "10:00"],
+      slotDays: ["w1,w3", "w3,w5"],
+    });
+    const card = (helperTitle: string) => ({
+      intent: "update_shift",
+      shiftKey: AM,
+      slotShiftName: "AM",
+      slotStartTime: "09:00",
+      slotEndTime: "10:00",
+      taskTitle: ["Greeter", helperTitle],
+      taskOriginal: ["0:Greeter", "0:Helper"],
+      taskCapacity: [1, 2],
+    });
+    let r = await act(sheet, card("Greeter"));
+    expect(r.status).toBe(400);
+    expect((await slots(sheet)).filter((s) => s.title === "Helper")).toHaveLength(2);
+
+    // A name nothing else uses is fine.
+    r = await act(sheet, card("Runner"));
+    expect(r.ok, r.message).toBe(true);
+    expect((await slots(sheet)).filter((s) => s.title === "Runner").map((s) => s.slotDate)).toEqual([
+      "2026-11-18",
+      "2026-11-20",
+    ]);
+  });
+
+  it("allows same-named tasks when they run on the same days", async () => {
+    const sheet = await mustCreate({
+      eventDate: "2026-11-16",
+      dateMode: "range",
+      dateEnd: "2026-11-17",
+      slotTitle: ["Greeter", "Helper"],
+      slotCapacity: [1, 2],
+      slotShiftName: ["AM", "AM"],
+      slotStartTime: ["09:00", "09:00"],
+      slotEndTime: ["10:00", "10:00"],
+    });
+    const r = await act(sheet, {
+      intent: "update_shift",
+      shiftKey: AM,
+      slotShiftName: "AM",
+      slotStartTime: "09:00",
+      slotEndTime: "10:00",
+      taskTitle: ["Greeter", "Greeter"],
+      taskOriginal: ["0:Greeter", "0:Helper"],
+      taskCapacity: [1, 2],
+    });
+    expect(r.ok, r.message).toBe(true);
+    expect((await slots(sheet)).filter((s) => s.title === "Greeter")).toHaveLength(4);
+  });
+
   it("won't merge one shift into another", async () => {
     const sheet = await mustCreate({
       eventDate: "2026-11-16",
