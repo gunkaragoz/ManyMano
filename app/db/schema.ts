@@ -74,7 +74,9 @@ export const pollVoteEntries = sqliteTable("poll_vote_entries", {
 
 // Day-before reminder dedupe (see app/utils/reminders.ts + GET /api/reminders).
 // One row per (event, date, kind) once the send was attempted successfully,
-// so a retried cron run never double-emails. Kinds: 'organizer' | 'participants'.
+// so a retried cron run never double-emails. Kinds: 'organizer_12h' |
+// 'organizer_48h' | 'participants' ('organizer' / 'organizer_24h' are legacy
+// pre-12h kinds, still honored as already-sent).
 // reminder_key is the event-local calendar day being reminded about (YYYY-MM-DD).
 export const reminderSends = sqliteTable(
   "reminder_sends",

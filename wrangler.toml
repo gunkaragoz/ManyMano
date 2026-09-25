@@ -78,9 +78,9 @@ pattern = "www.manymano.com/*"
 zone_name = "manymano.com"
 
 # Reminder scan, hourly on the hour (production only — staging has no
-# triggers). Each run sends only what's due: 9:00 AM event-local, 24h ahead
-# (organizers + participants) plus a 48h understaffed alert (organizers of
-# signup sheets with open spots). Dedupe makes re-runs safe.
+# triggers). Each run sends only what's due: 12 hours before the event
+# starts (organizers + participants) plus a 48h understaffed alert
+# (organizers of signup sheets with open spots). Dedupe makes re-runs safe.
 [env.production.triggers]
 crons = ["0 * * * *"]
 
