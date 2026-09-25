@@ -207,6 +207,38 @@ if (!/async\s+scheduled\s*\(/.test(readFileSync(workerSrc, "utf8"))) {
 } else {
   ok("workers/app.ts: async scheduled() handler");
 }
+// PR previews (Workers Builds fails the preview build without a previews
+// block). Previews inherit nothing from production, so the block must
+// carry staging-safe vars and bind DB to the staging database — a preview
+// pointed at production data or failing fast on missing vars is a bug.
+const previewsVars = tomlSection(wranglerToml, "[previews.vars]");
+if (!previewsVars) {
+  fail("wrangler.toml has no [previews.vars] — PR preview builds fail without a previews block");
+} else {
+  ok("[previews.vars] present");
+  for (const key of ["SITE_URL", "SITE_NAME", "FROM_EMAIL"]) {
+    if (!new RegExp(`^\\s*${key}\\s*=`, "m").test(previewsVars)) {
+      fail(`[previews.vars] missing ${key} (previews don't inherit production vars — app fail-fasts)`);
+    } else ok(`[previews.vars]: ${key}`);
+  }
+}
+function d1IdAfter(header) {
+  const esc = header.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const m = wranglerToml.match(new RegExp(`${esc}[\\s\\S]*?database_id\\s*=\\s*"([^"]+)"`));
+  return m ? m[1] : null;
+}
+const prodD1 = d1IdAfter("[[d1_databases]]");
+const stagingD1 = d1IdAfter("[[env.staging.d1_databases]]");
+const previewsD1 = d1IdAfter("[[previews.d1_databases]]");
+if (!previewsD1) {
+  fail("wrangler.toml has no [[previews.d1_databases]] — preview has no DB binding");
+} else if (previewsD1 === prodD1) {
+  fail("[[previews.d1_databases]] points at the PRODUCTION database — previews must use staging data");
+} else if (previewsD1 !== stagingD1) {
+  fail("[[previews.d1_databases]] should use the shared staging database (see previews guide)");
+} else {
+  ok("[[previews.d1_databases]] uses the staging database");
+}
 
 console.log("");
 if (failures > 0) {
