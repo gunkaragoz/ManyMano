@@ -179,9 +179,32 @@ function tomlSection(src, header) {
   const body = [];
   for (let i = start + 1; i < lines.length; i += 1) {
     if (/^\s*\[[^[\]]+\]\s*$/.test(lines[i])) break;
-    body.push(lines[i]);
+    body.push(stripTomlComment(lines[i]));
   }
   return body.join("\n");
+}
+/**
+ * Strip a TOML comment: an unquoted # runs to end of line. Quote-aware so
+ * a # inside a quoted value (URL fragment, etc.) survives. Multiline
+ * strings aren't used in wrangler.toml — single-line scan suffices.
+ */
+function stripTomlComment(line) {
+  let out = "";
+  let quote = null;
+  for (const c of line) {
+    if (quote) {
+      out += c;
+      if (c === quote) quote = null;
+    } else if (c === '"' || c === "'") {
+      quote = c;
+      out += c;
+    } else if (c === "#") {
+      break;
+    } else {
+      out += c;
+    }
+  }
+  return out;
 }
 const prodTriggers = tomlSection(wranglerToml, "[env.production.triggers]");
 if (!prodTriggers) {
