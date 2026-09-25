@@ -188,8 +188,18 @@ if (!prodTriggers) {
   fail("wrangler.toml has no [env.production.triggers] — the hourly reminder scan is detached");
 } else {
   const m = prodTriggers.match(/crons\s*=\s*\[([^\]]*)\]/);
-  const crons = m ? m[1].split(",").map((s) => s.trim().replace(/^["']|["']$/g, "")) : [];
+  // Filter empties: "".split(",") is [""], so crons = [] / [""] must not
+  // count as a configured schedule. Each entry must also have the 5-field
+  // cron shape (minute hour day month weekday).
+  const crons = m
+    ? m[1]
+        .split(",")
+        .map((s) => s.trim().replace(/^["']|["']$/g, ""))
+        .filter(Boolean)
+    : [];
+  const malformed = crons.filter((c) => !/^(\S+\s+){4}\S+$/.test(c));
   if (crons.length === 0) fail("[env.production.triggers] has an empty crons list — no reminder scan");
+  else if (malformed.length > 0) fail(`[env.production.triggers] has malformed cron entries: ${malformed.join(", ")}`);
   else ok(`[env.production.triggers] crons: ${crons.join(", ")}`);
 }
 if (/^\s*\[triggers\]\s*$/m.test(wranglerToml)) {
