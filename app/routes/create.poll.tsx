@@ -659,14 +659,14 @@ export default function CreateMeetingPoll() {
 
                 <div>
                   <label className="block text-xs font-semibold text-slate-700 mb-1.5">
-                    Video Link or Location (Optional)
+                    Location or Link (Optional)
                   </label>
                   <input
                     type="text"
                     name="location"
                     value={details.location}
                     onChange={(e) => updateDetails({ location: e.target.value })}
-                    placeholder="e.g., https://meet.google.com/xyz or Room 302"
+                    placeholder="e.g., Room 302 or https://meet.google.com/xyz"
                     className="w-full px-4 py-3 rounded-xl border border-slate-200/90 text-sm focus:outline-none focus:ring-2 focus:ring-green-500/20 focus:border-green-500 transition-all placeholder:text-slate-400"
                   />
                 </div>

@@ -1,4 +1,4 @@
-import { lt, inArray } from "drizzle-orm";
+import { and, eq, gte, inArray, lt, ne, notExists, or, sql } from "drizzle-orm";
 import { events, eventSlots, signups, pollVotes, pollVoteEntries } from "~/db";
 
 /** Default data retention: events expire this many days after creation. */
@@ -27,8 +27,26 @@ export function resolveRetentionDays(env?: RetentionEnv): number {
   return Number.isFinite(n) && (n as number) > 0 ? Math.floor(n as number) : DEFAULT_RETENTION_DAYS;
 }
 
-export function expiryDateFor(createdAtIso: string, retentionDays: number = RETENTION_DAYS): string {
-  const d = new Date(createdAtIso);
+/**
+ * Retention is measured from creation, except for sheets whose slots carry
+ * their own dates (multi-day / repeating): those are measured from their LAST
+ * date, so a series can't be deleted partway through. `lastSlotDate` is a
+ * "YYYY-MM-DD" day; omit it and the behaviour is unchanged.
+ */
+function retentionAnchorMs(createdAtIso: string, lastSlotDate?: string | null): number {
+  const created = new Date(createdAtIso).getTime();
+  if (!lastSlotDate) return created;
+  // End of that calendar day, so the last date itself is never cut short.
+  const last = new Date(`${lastSlotDate}T23:59:59Z`).getTime();
+  return Number.isNaN(last) ? created : Math.max(created, last);
+}
+
+export function expiryDateFor(
+  createdAtIso: string,
+  retentionDays: number = RETENTION_DAYS,
+  lastSlotDate?: string | null
+): string {
+  const d = new Date(retentionAnchorMs(createdAtIso, lastSlotDate));
   d.setDate(d.getDate() + retentionDays);
   return d.toISOString();
 }
@@ -36,9 +54,36 @@ export function expiryDateFor(createdAtIso: string, retentionDays: number = RETE
 export function isExpired(
   createdAtIso: string,
   now: Date = new Date(),
-  retentionDays: number = RETENTION_DAYS
+  retentionDays: number = RETENTION_DAYS,
+  lastSlotDate?: string | null
 ): boolean {
-  return new Date(createdAtIso).getTime() + retentionDays * 86400_000 < now.getTime();
+  return (
+    retentionAnchorMs(createdAtIso, lastSlotDate) + retentionDays * 86400_000 < now.getTime()
+  );
+}
+
+/**
+ * The last dated slot of a sign-up sheet ("YYYY-MM-DD"), or null when its
+ * slots carry no dates. Only sheets get this: a meeting poll stores a date on
+ * every option too, but a poll keeps the plain creation-based retention — a
+ * far-future option must not keep it alive. Only worth querying for an event
+ * that already looks expired by creation date — see the call sites' guard.
+ */
+export async function latestSlotDate(
+  db: any,
+  event: { id: string; type: string }
+): Promise<string | null> {
+  if (event.type !== "SIGNUP_SHEET") return null;
+  const eventId = event.id;
+  const rows = await db
+    .select({ slotDate: eventSlots.slotDate })
+    .from(eventSlots)
+    .where(eq(eventSlots.eventId, eventId));
+  let latest: string | null = null;
+  for (const r of rows as Array<{ slotDate: string | null }>) {
+    if (r.slotDate && (!latest || r.slotDate > latest)) latest = r.slotDate;
+  }
+  return latest;
 }
 
 function cutoffIso(now: Date = new Date(), retentionDays: number = RETENTION_DAYS): string {
@@ -57,35 +102,45 @@ export async function pruneExpiredEvents(
   retentionDays: number = RETENTION_DAYS
 ): Promise<number> {
   const cutoff = cutoffIso(now, retentionDays);
+  // A multi-day / repeating sign-up sheet stays alive while any of its dates is still
+  // inside the retention window. That rule lives in the query rather than a
+  // filter after it: otherwise 50 still-running series old enough to match
+  // would fill every batch forever and hide the expired events behind them.
+  // Events with no dated slots (everything created before multi-day existed)
+  // are unaffected.
+  const cutoffDay = cutoff.slice(0, 10);
   const stale = await db
     .select({ id: events.id })
     .from(events)
-    .where(lt(events.createdAt, cutoff))
+    .where(
+      and(
+        lt(events.createdAt, cutoff),
+        // Sheets only: poll options are dated too, but polls expire by creation.
+        or(
+          ne(events.type, "SIGNUP_SHEET"),
+          notExists(
+          db
+            .select({ one: sql`1` })
+            .from(eventSlots)
+            .where(and(eq(eventSlots.eventId, events.id), gte(eventSlots.slotDate, cutoffDay)))
+          )
+        )
+      )
+    )
     .limit(50);
   if (stale.length === 0) return 0;
   const ids = stale.map((r: { id: string }) => r.id as string);
 
-  const slots = await db
-    .select({ id: eventSlots.id })
-    .from(eventSlots)
-    .where(inArray(eventSlots.eventId, ids));
-  const slotIds = slots.map((s: { id: string }) => s.id as string);
-
-  const votes = await db
-    .select({ id: pollVotes.id })
-    .from(pollVotes)
-    .where(inArray(pollVotes.eventId, ids));
-  const voteIds = votes.map((v: { id: string }) => v.id as string);
-
-  if (slotIds.length > 0) {
-    await db.delete(signups).where(inArray(signups.slotId, slotIds));
-    await db.delete(pollVoteEntries).where(inArray(pollVoteEntries.slotId, slotIds));
-  }
+  // Children are matched through subqueries on the (at most 50) event IDs, so
+  // no statement binds one variable per slot — a year-long series has
+  // hundreds, well past D1's 100-variable cap.
+  const slotIdsOf = db.select({ id: eventSlots.id }).from(eventSlots).where(inArray(eventSlots.eventId, ids));
+  const voteIdsOf = db.select({ id: pollVotes.id }).from(pollVotes).where(inArray(pollVotes.eventId, ids));
+  await db.delete(signups).where(inArray(signups.slotId, slotIdsOf));
+  await db.delete(pollVoteEntries).where(inArray(pollVoteEntries.slotId, slotIdsOf));
   // Signups/votes keyed only by event (defensive; slot deletes cover most).
   await db.delete(signups).where(inArray(signups.eventId, ids));
-  if (voteIds.length > 0) {
-    await db.delete(pollVoteEntries).where(inArray(pollVoteEntries.pollVoteId, voteIds));
-  }
+  await db.delete(pollVoteEntries).where(inArray(pollVoteEntries.pollVoteId, voteIdsOf));
   await db.delete(pollVotes).where(inArray(pollVotes.eventId, ids));
   await db.delete(eventSlots).where(inArray(eventSlots.eventId, ids));
   await db.delete(events).where(inArray(events.id, ids));

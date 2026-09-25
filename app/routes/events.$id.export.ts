@@ -3,7 +3,13 @@ import type { LoaderFunctionArgs } from "react-router";
 import { eq, and, inArray } from "drizzle-orm";
 import { getDb, events, eventSlots, signups, pollVotes, pollVoteEntries } from "~/db";
 import { getPresentedAdminToken, verifyAdminToken } from "~/utils/auth";
-import { isExpired, pruneExpiredEvents, resolveRetentionDays } from "~/utils/retention";
+import {
+  isExpired,
+  latestSlotDate,
+  pruneExpiredEvents,
+  resolveRetentionDays,
+} from "~/utils/retention";
+import { effectiveDateForSlot } from "~/utils/calendar";
 
 export async function loader({ params, request, context }: LoaderFunctionArgs) {
   const env = getCloudflareEnv(context) as { DB: D1Database; RETENTION_DAYS?: string };
@@ -23,7 +29,12 @@ export async function loader({ params, request, context }: LoaderFunctionArgs) {
   if (!event) {
     throw new Response("Event not found", { status: 404 });
   }
-  if (isExpired(event.createdAt, new Date(), retentionDays)) {
+  // A multi-day sheet is measured from its LAST date, so only pay for that
+  // extra query once the event already looks expired by creation date.
+  if (
+    isExpired(event.createdAt, new Date(), retentionDays) &&
+    isExpired(event.createdAt, new Date(), retentionDays, await latestSlotDate(db, event))
+  ) {
     throw new Response("This event expired and was auto-deleted.", { status: 410 });
   }
 
@@ -43,8 +54,9 @@ export async function loader({ params, request, context }: LoaderFunctionArgs) {
     .where(eq(eventSlots.eventId, eventId))
     .orderBy(eventSlots.displayOrder);
   // Match the voting grid: polls sort chronologically by day then time.
+  const hasSlotDates = rawSlots.some((s) => (s as { slotDate?: string | null }).slotDate);
   const slots =
-    event.type === "TIME_POLL"
+    event.type === "TIME_POLL" || hasSlotDates
       ? [...rawSlots].sort((a, b) => {
           const dateCmp = ((a as { slotDate?: string | null }).slotDate || "").localeCompare(
             (b as { slotDate?: string | null }).slotDate || ""
@@ -61,7 +73,7 @@ export async function loader({ params, request, context }: LoaderFunctionArgs) {
   let csvRows: string[][] = [];
 
   if (event.type === "SIGNUP_SHEET") {
-    csvRows.push(["Shift", "Task", "Name", "Email", "Notes/Comments", "Status", "Date Signed Up"]);
+    csvRows.push(["Date", "Shift", "Task", "Name", "Email", "Notes/Comments", "Status", "Date Signed Up"]);
     const eventSignups = await db
       .select()
       .from(signups)
@@ -78,8 +90,12 @@ export async function loader({ params, request, context }: LoaderFunctionArgs) {
       const shiftName = ((slot as { shiftName?: string | null } | undefined)?.shiftName || "").trim();
       const time = slot ? [slot.startTime, slot.endTime].filter(Boolean).join(" – ") : "";
       const shift = [shiftName, time].filter(Boolean).join(" | ");
+      // Multi-day sheets: the slot's date; single-day sheets repeat the event
+      // date, so every row still says which day it was for.
+      const slotDate = slot ? effectiveDateForSlot(slot, event.eventDate) : event.eventDate;
 
       csvRows.push([
+        slotDate || "",
         shift,
         slot?.title || "Unknown",
         s.participantName,

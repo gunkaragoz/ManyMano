@@ -288,11 +288,12 @@ export async function runScheduledReminders(
     // eslint-disable-next-line no-await-in-loop
     const targets = await collectReminderTargets(db, date, retentionDays);
     for (const target of targets) {
-      // A target matches exactly one scan date (event/effective date).
-      if (seen.has(target.event.id)) continue;
-      seen.add(target.event.id);
+      // A multi-day sheet matches several scan dates — one target per
+      // occurrence — so dedupe on event + day, not the event alone.
       const eventDate = targetReminderDate(target);
       if (!eventDate) continue;
+      if (seen.has(`${target.event.id}|${eventDate}`)) continue;
+      seen.add(`${target.event.id}|${eventDate}`);
       const tz = normalizeTimezone(target.event.timezone);
       const due12At = reminderDueInstant(target)?.getTime();
       const due48At = reminderInstant(eventDate, 2, tz)?.getTime();

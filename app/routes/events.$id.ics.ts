@@ -4,7 +4,12 @@ import { eq } from "drizzle-orm";
 import { getDb, events, eventSlots } from "~/db";
 import { generateICS, pickCalendarSlot, effectiveDateForSlot } from "~/utils/calendar";
 import { getPresentedAdminToken, secretMatches } from "~/utils/auth";
-import { isExpired, pruneExpiredEvents, resolveRetentionDays } from "~/utils/retention";
+import {
+  isExpired,
+  latestSlotDate,
+  pruneExpiredEvents,
+  resolveRetentionDays,
+} from "~/utils/retention";
 import { getSiteConfig } from "~/utils/site";
 
 export async function loader({ params, request, context }: LoaderFunctionArgs) {
@@ -28,7 +33,12 @@ export async function loader({ params, request, context }: LoaderFunctionArgs) {
   if (!event) {
     throw new Response("Event not found", { status: 404 });
   }
-  if (isExpired(event.createdAt, new Date(), retentionDays)) {
+  // A multi-day sheet is measured from its LAST date, so only pay for that
+  // extra query once the event already looks expired by creation date.
+  if (
+    isExpired(event.createdAt, new Date(), retentionDays) &&
+    isExpired(event.createdAt, new Date(), retentionDays, await latestSlotDate(db, event))
+  ) {
     throw new Response("This event expired and was auto-deleted.", { status: 410 });
   }
 
@@ -39,7 +49,13 @@ export async function loader({ params, request, context }: LoaderFunctionArgs) {
     .select()
     .from(eventSlots)
     .where(eq(eventSlots.eventId, eventId));
-  const picked = pickCalendarSlot(slots, event.winningSlotId);
+  // ?slot=<id> exports one dated slot of a multi-day sheet (the link emails
+  // use). Without it the behaviour is unchanged: the winning/earliest slot.
+  const requestedSlotId = new URL(request.url).searchParams.get("slot");
+  const requestedSlot = requestedSlotId
+    ? slots.find((s) => s.id === requestedSlotId) || null
+    : null;
+  const picked = requestedSlot || pickCalendarSlot(slots, event.winningSlotId);
 
   // Organizer email is only embedded for organizers; the public .ics omits it
   // so a shared calendar file doesn't leak the organizer's address.
@@ -48,8 +64,10 @@ export async function loader({ params, request, context }: LoaderFunctionArgs) {
 
   const origin = new URL(request.url).origin;
   const icsContent = generateICS({
-    uid: event.id,
-    title: event.title,
+    // A per-slot export needs its own UID, or calendar clients treat the
+    // second dated file as an update of the first.
+    uid: requestedSlot ? `${event.id}-${requestedSlot.id}` : event.id,
+    title: requestedSlot?.title ? `${requestedSlot.title} — ${event.title}` : event.title,
     description: event.description,
     location: event.location,
     eventDate: picked ? effectiveDateForSlot(picked, event.eventDate) : event.eventDate,

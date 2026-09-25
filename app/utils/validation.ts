@@ -15,6 +15,14 @@ export const SHIFT_NAME_MAX = 120;
 
 /** Max options per event (poll days / signup tasks). Client also caps at 31. */
 export const MAX_SLOTS_PER_EVENT = 31;
+/** Max tasks a multi-date sign-up sheet may define per date (same cap, per day). */
+export const MAX_TASKS_PER_DATE = 31;
+/**
+ * The size limit that actually matters: one row is stored per (date x task),
+ * and every row is loaded when the event page renders. Weekly for a year with
+ * a handful of tasks fits; every weekday for a year with five does not.
+ */
+export const MAX_SLOT_ROWS_PER_EVENT = 300;
 /** Max votes/signups listed per event write path (abuse cap). */
 export const MAX_VOTES_PER_EVENT = 1000;
 

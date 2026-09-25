@@ -248,3 +248,34 @@ describe("dedupe keys", () => {
     expect(targetReminderDate(sheet([{ capacity: 1, filled: 0 }]))).toBe("2026-01-16");
   });
 });
+
+describe("multi-day sheets", () => {
+  // A later occurrence of a series: the sheet starts 2026-01-16, this
+  // reminder is for its 2026-01-23 day.
+  function laterOccurrence(): SignupSheetTarget {
+    const t = sheet([{ capacity: 2, filled: 1 }]);
+    return {
+      ...t,
+      reminderDate: "2026-01-23",
+      slots: t.slots.map((s) => ({ ...s, slotDate: "2026-01-23", startTime: "09:00", endTime: "11:00" })),
+    };
+  }
+
+  it("keys (and times) each occurrence by its own day, not the first date", () => {
+    expect(targetReminderDate(laterOccurrence())).toBe("2026-01-23");
+  });
+
+  it("starts, and is due, from the occurrence's date", () => {
+    // 09:00 New York (EST, UTC-5) on Jan 23 — not on the series' first date, Jan 16.
+    expect(eventStartInstant(laterOccurrence())?.toISOString()).toBe("2026-01-23T14:00:00.000Z");
+    expect(reminderDueInstant(laterOccurrence())?.toISOString()).toBe(
+      new Date(Date.parse("2026-01-23T14:00:00.000Z") - REMINDER_LEAD_HOURS * 3600_000).toISOString()
+    );
+  });
+
+  it("organizer email dates every task with the occurrence, not the first date", () => {
+    const mail = buildSignupOrganizerEmail(SITE, SITE.siteUrl, laterOccurrence());
+    expect(mail.html).toContain("January 23");
+    expect(mail.html).not.toContain("January 16");
+  });
+});

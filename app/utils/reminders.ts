@@ -25,7 +25,7 @@
 // - Dedupe lives in the reminder_sends table (one row per event + date +
 //   kind). A retried cron run never double-emails.
 
-import { and, eq } from "drizzle-orm";
+import { and, eq, inArray, or } from "drizzle-orm";
 import {
   events,
   eventSlots,
@@ -36,9 +36,9 @@ import {
 } from "~/db";
 import { buildGoogleCalendarUrl, effectiveDateForSlot, formatLongDateLabel, parseTimeString } from "./calendar";
 import { zonedWallTimeToUtc } from "./timezones";
-import { isExpired, RETENTION_DAYS } from "./retention";
+import { isExpired, latestSlotDate, RETENTION_DAYS } from "./retention";
 import { isValidEmail } from "./validation";
-import { escapeHtml } from "./sanitize";
+import { escapeHtml, locationHtml } from "./sanitize";
 import { emailFooter } from "./email";
 import type { SiteConfig } from "./site";
 
@@ -107,7 +107,8 @@ export function reminderInstant(
 
 /**
  * UTC instant the event starts: the earliest slot startTime on the event
- * date (the winning slot for finalized meetings), in the event's timezone.
+ * date — or, for one occurrence of a multi-day sheet, on that occurrence's
+ * date — (the winning slot for finalized meetings), in the event's timezone.
  * Sheets with no slot times assume a REMINDER_HOUR start. Null when the
  * date is missing or bad (caller skips).
  */
@@ -117,7 +118,9 @@ export function eventStartInstant(target: ReminderTarget): Date | null {
     const date = target.winningSlot.slotDate ?? target.event.eventDate;
     return zonedWallTimeToUtc(date, target.winningSlot.startTime ?? `${REMINDER_HOUR}:00`, tz);
   }
-  const date = target.event.eventDate;
+  // The occurrence being reminded about — for a multi-day sheet that is one
+  // day of the series, not its first date (the slots are that day's too).
+  const date = target.reminderDate || target.event.eventDate;
   if (!date) return null;
   let earliest: { hours: number; minutes: number } | null = null;
   for (const slot of target.slots) {
@@ -149,7 +152,8 @@ export function reminderDueInstant(target: ReminderTarget): Date | null {
  * endpoint and cron paths).
  */
 export function targetReminderDate(target: ReminderTarget): string | null {
-  if (target.kind === "signup_sheet") return target.event.eventDate;
+  // A multi-day sheet is reminded once per occurrence, keyed by that day.
+  if (target.kind === "signup_sheet") return target.reminderDate || target.event.eventDate;
   return effectiveDateForSlot(target.winningSlot, target.event.eventDate);
 }
 
@@ -170,6 +174,8 @@ export interface ReminderSlotInfo {
   id: string;
   title: string;
   shiftName: string | null;
+  /** Per-date slot (multi-day sheets). Absent/null on single-day sheets. */
+  slotDate?: string | null;
   startTime: string | null;
   endTime: string | null;
   capacity: number;
@@ -190,6 +196,8 @@ export interface ReminderEventInfo {
 export interface SignupSheetTarget {
   kind: "signup_sheet";
   event: ReminderEventInfo;
+  /** The day being reminded about — the sheet's date, or one day of a series. */
+  reminderDate?: string | null;
   slots: ReminderSlotInfo[];
 }
 
@@ -233,18 +241,44 @@ export async function collectReminderTargets(
 ): Promise<ReminderTarget[]> {
   const targets: ReminderTarget[] = [];
 
-  // 1. Sign-up sheets dated `date` (dateless sheets can't have a day-before).
+  // 1. Sign-up sheets that have something on `date`: either the sheet's own
+  // event_date (every sheet created before multi-day existed) or a slot dated
+  // that day (multi-day / repeating sheets). Dateless sheets can't have a
+  // day-before reminder.
+  // One statement with two bound values, so no row limit can truncate the
+  // list and no ID list can outgrow D1's 100-variable cap.
   const sheets = await db
     .select()
     .from(events)
-    .where(and(eq(events.type, "SIGNUP_SHEET"), eq(events.eventDate, date)));
+    .where(
+      and(
+        eq(events.type, "SIGNUP_SHEET"),
+        or(
+          eq(events.eventDate, date),
+          inArray(
+            events.id,
+            db.select({ id: eventSlots.eventId }).from(eventSlots).where(eq(eventSlots.slotDate, date))
+          )
+        )
+      )
+    );
   for (const e of sheets) {
-    if (isExpired(e.createdAt, new Date(), retentionDays)) continue;
-    const slots = await db
+    // A multi-day sheet is measured from its last date; only pay for that
+    // query once the sheet already looks expired by creation date.
+    if (
+      isExpired(e.createdAt, new Date(), retentionDays) &&
+      isExpired(e.createdAt, new Date(), retentionDays, await latestSlotDate(db, e))
+    )
+      continue;
+    const allSlots = await db
       .select()
       .from(eventSlots)
       .where(eq(eventSlots.eventId, e.id))
       .orderBy(eventSlots.displayOrder);
+    // Only the slots that actually happen on `date`. On a single-day sheet
+    // every slot resolves to the event date, so this keeps all of them.
+    const slots = allSlots.filter((s) => effectiveDateForSlot(s, e.eventDate) === date);
+    if (slots.length === 0) continue;
     const eventSignups = await db
       .select()
       .from(signups)
@@ -258,10 +292,12 @@ export async function collectReminderTargets(
     targets.push({
       kind: "signup_sheet",
       event: toEventInfo(e),
+      reminderDate: date,
       slots: slots.map((s) => ({
         id: s.id,
         title: s.title,
         shiftName: (s as { shiftName?: string | null }).shiftName ?? null,
+        slotDate: (s as { slotDate?: string | null }).slotDate ?? null,
         startTime: s.startTime,
         endTime: s.endTime,
         capacity: s.capacity ?? 1,
@@ -412,6 +448,8 @@ function slotCalendarLinks(opts: {
   eventDate: string | null;
   startTime: string | null;
   endTime: string | null;
+  /** Dated slot of a multi-day sheet — exported as its own calendar entry. */
+  slotId?: string | null;
 }): { googleUrl: string; icsUrl: string } {
   const googleUrl = buildGoogleCalendarUrl({
     title: opts.title,
@@ -424,7 +462,10 @@ function slotCalendarLinks(opts: {
     url: eventPageUrl(opts.origin, opts.eventId),
     fallbackTitle: `${opts.site.siteName} Event`,
   });
-  return { googleUrl, icsUrl: `${opts.origin}/events/${opts.eventId}/ics` };
+  const icsUrl = opts.slotId
+    ? `${opts.origin}/events/${opts.eventId}/ics?slot=${encodeURIComponent(opts.slotId)}`
+    : `${opts.origin}/events/${opts.eventId}/ics`;
+  return { googleUrl, icsUrl };
 }
 
 function descriptionBlock(description: string | null): string {
@@ -454,21 +495,23 @@ export function participantTasksForSignup(
     const slot = target.slots.find((s) => s.id === slotId);
     if (!slot) return [];
     const label = taskLabel(slot);
+    const slotDate = slot.slotDate || target.event.eventDate;
     const { googleUrl, icsUrl } = slotCalendarLinks({
       site,
       origin,
       event: target.event,
       eventId: target.event.id,
       title: `${label} — ${target.event.title}`,
-      eventDate: target.event.eventDate,
+      eventDate: slotDate,
       startTime: slot.startTime,
       endTime: slot.endTime,
+      slotId: slot.id,
     });
     return [
       {
         label,
         whenLine: whenLineFor({
-          eventDate: target.event.eventDate,
+          eventDate: slotDate,
           startTime: slot.startTime,
           endTime: slot.endTime,
           timezone: target.event.timezone,
@@ -542,7 +585,7 @@ export function buildSignupParticipantEmail(
         <p>Hi ${escapeHtml(recipientName)},</p>
         <p>Quick reminder — you're signed up for <strong>${escapeHtml(e.title)}</strong>.</p>
         ${taskBlocks}
-        ${e.location ? `<p><strong>Location:</strong> ${escapeHtml(e.location)}</p>` : ""}
+        ${locationHtml(e.location)}
         ${descriptionBlock(e.description)}
         <p><strong>Event page:</strong> <a href="${escapeHtml(eventUrl)}" style="color: #2563eb;">${escapeHtml(eventUrl)}</a></p>
         <p style="font-size: 13px; color: #64748b;">Need to change your plans? Open the event page to manage your sign-up.</p>
@@ -581,7 +624,7 @@ export function buildSignupOrganizerEmail(
         hasUnlimited = true;
       }
       const when = whenLineFor({
-        eventDate: e.eventDate,
+        eventDate: slot.slotDate || target.reminderDate || e.eventDate,
         startTime: slot.startTime,
         endTime: slot.endTime,
         timezone: e.timezone,
@@ -609,7 +652,9 @@ export function buildSignupOrganizerEmail(
     hasCapped && !hasUnlimited
       ? `${filledTotal}/${capacityTotal} spots filled`
       : `${filledTotal} signed up`;
-  const whenHeadline = e.eventDate ? formatLongDateLabel(e.eventDate) : "";
+  // The day being reminded about — one date of a series, not the sheet's first.
+  const headlineDate = target.reminderDate || e.eventDate;
+  const whenHeadline = headlineDate ? formatLongDateLabel(headlineDate) : "";
   const timing = horizon === "48h" ? "is in 2 days" : "is coming up";
   return {
     subject:
@@ -621,7 +666,7 @@ export function buildSignupOrganizerEmail(
         <h2 style="color: #0f172a; margin-top: 0;">${horizon === "48h" ? "Your event needs more volunteers" : "Your event is coming up"}</h2>
         <p>Hi ${escapeHtml(e.organizerName)},</p>
         <p><strong>${escapeHtml(e.title)}</strong>${whenHeadline ? ` is on <strong>${escapeHtml(whenHeadline)}</strong>` : ` ${timing}`} — ${escapeHtml(headline)}.</p>
-        ${e.location ? `<p><strong>Location:</strong> ${escapeHtml(e.location)}</p>` : ""}
+        ${locationHtml(e.location)}
         ${descriptionBlock(e.description)}
         ${slotBlocks}
         <p><strong>Event page:</strong> <a href="${escapeHtml(eventUrl)}" style="color: #2563eb;">${escapeHtml(eventUrl)}</a></p>
@@ -698,7 +743,7 @@ export function buildMeetingParticipantEmail(
         <p>Hi ${escapeHtml(recipientName)},</p>
         <p>Quick reminder — <strong>${escapeHtml(e.title)}</strong> is coming up:</p>
         ${whenLine ? `<p><strong>When:</strong> ${escapeHtml(whenLine)}</p>` : ""}
-        ${e.location ? `<p><strong>Location:</strong> ${escapeHtml(e.location)}</p>` : ""}
+        ${locationHtml(e.location)}
         ${descriptionBlock(e.description)}
         <p><strong>Event page:</strong> <a href="${escapeHtml(eventUrl)}" style="color: #2563eb;">${escapeHtml(eventUrl)}</a></p>
         <p>
@@ -738,7 +783,7 @@ export function buildMeetingOrganizerEmail(
         <p>Hi ${escapeHtml(e.organizerName)},</p>
         <p><strong>${escapeHtml(e.title)}</strong> is locked in (${escapeHtml(headcount)}):</p>
         ${whenLine ? `<p><strong>When:</strong> ${escapeHtml(whenLine)}</p>` : ""}
-        ${e.location ? `<p><strong>Location:</strong> ${escapeHtml(e.location)}</p>` : ""}
+        ${locationHtml(e.location)}
         ${descriptionBlock(e.description)}
         <div style="background: #f8fafc; border: 1px solid #e2e8f0; padding: 14px 16px; border-radius: 12px; margin: 12px 0;">
           <p style="margin: 0;"><strong>Attendees</strong></p>

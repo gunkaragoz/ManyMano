@@ -37,6 +37,8 @@ const fail = (msg) => {
   failures += 1;
   console.error(`  ✗ FAIL: ${msg}`);
 };
+/** Something worth seeing that cannot break a deploy (e.g. local-only files). */
+const warn = (msg) => console.warn(`  ⚠ ${msg}`);
 
 /** Parse a KEY=VALUE dotenv-style file (quotes stripped, `#` comments ignored). */
 function parseDotenvFile(path) {
@@ -90,6 +92,53 @@ for (const key of requiredKeys) {
   if (!(key in sample)) fail(`.env.sample is missing key ${key} (document it!)`);
   else if (!sample[key].trim()) fail(`.env.sample has empty placeholder for ${key}`);
   else ok(`.env.sample documents ${key}`);
+}
+
+// --- 2b. Brand strings must not drift between wrangler environments ----------
+// Wrangler does not inherit [vars] into [env.*], so each environment carries
+// its own copy. Editing the top-level one and nothing else is silent: the
+// deployed site keeps the old string. These have to stay identical.
+console.log("\n[2b] Brand vars agree across environments (and local .dev.vars)");
+const localVarsPath = resolve(ROOT, ".dev.vars");
+const localVars = existsSync(localVarsPath) ? parseDotenvFile(localVarsPath) : null;
+if (!localVars) console.log("  (no .dev.vars here — skipping the local check)");
+const wranglerSource = readFileSync(resolve(ROOT, "wrangler.toml"), "utf8");
+for (const key of ["SITE_NAME", "SITE_TAGLINE", "SITE_DESCRIPTION"]) {
+  const values = [...wranglerSource.matchAll(new RegExp(`^${key}\\s*=\\s*"([^"]*)"`, "gm"))].map(
+    (m) => m[1]
+  );
+  if (values.length === 0) {
+    fail(`wrangler.toml defines no ${key}`);
+    continue;
+  }
+  const distinct = [...new Set(values)];
+  if (distinct.length > 1) {
+    fail(
+      `${key} differs between wrangler.toml environments — deploys would use a different string than [vars]:\n` +
+        distinct.map((v) => `      • ${JSON.stringify(v)}`).join("\n")
+    );
+  } else {
+    ok(`${key} is the same in all ${values.length} environments`);
+  }
+  const sampleValue = (sample[key] ?? "").trim();
+  if (sampleValue && sampleValue !== distinct[0]) {
+    fail(
+      `${key} in .env.sample (${JSON.stringify(sampleValue)}) does not match wrangler.toml (${JSON.stringify(distinct[0])})`
+    );
+  }
+
+  // .dev.vars is the copy that drives `npm run dev`, so it is where an edit
+  // looks like it "didn't take". It is gitignored and local-only, so a
+  // mismatch is reported but never blocks a deploy.
+  if (localVars) {
+    const localValue = (localVars[key] ?? "").trim();
+    if (!localValue) warn(`.dev.vars has no ${key} — local dev falls back to whatever is set`);
+    else if (localValue !== distinct[0]) {
+      warn(
+        `.dev.vars ${key} is ${JSON.stringify(localValue)}, deploys use ${JSON.stringify(distinct[0])} — local pages will read differently`
+      );
+    } else ok(`.dev.vars ${key} matches`);
+  }
 }
 
 // --- 3. Effective env must satisfy getSiteConfig ------------------------------

@@ -2,7 +2,7 @@ import { getCloudflareEnv } from "~/utils/cloudflare-context";
 import type { ActionFunctionArgs, HeadersFunction, LoaderFunctionArgs, MetaFunction } from "react-router";
 import { data, redirect } from "react-router";
 import { useLoaderData, useActionData, useNavigation, useSearchParams, useFetcher, Form, isRouteErrorResponse, useRouteError } from "react-router";
-import { eq, and, inArray } from "drizzle-orm";
+import { eq, and, inArray, isNull } from "drizzle-orm";
 import { useState, useMemo, useEffect, useRef } from "react";
 import {
   ArrowRight,
@@ -31,7 +31,7 @@ import { getDb, events, eventSlots, signups, pollVotes, pollVoteEntries } from "
 import { generateInternalId, generateSecretToken } from "~/utils/ids";
 import { sendEmail, emailFooter, getEmailSenderConfig, resolveEmailProvider } from "~/utils/email";
 import { trackEmailUsage, getEmailLimits, guestEmailAllowed } from "~/utils/quota";
-import { escapeHtml } from "~/utils/sanitize";
+import { asExternalUrl, escapeHtml, locationHtml } from "~/utils/sanitize";
 import {
   buildAdminCookie,
   buildExpiredAdminCookie,
@@ -40,7 +40,34 @@ import {
   secretMatches,
   verifyAdminToken,
 } from "~/utils/auth";
-import { expiryDateFor, isExpired, pruneExpiredEvents, resolveRetentionDays } from "~/utils/retention";
+import {
+  MAX_SERIES_DAYS,
+  describeSpec,
+  expandDates,
+  maxSeriesEnd,
+  parseDateSpec,
+  readDateSpec,
+  templateDayFor,
+  writeDateSpec,
+  type DateSpec,
+} from "~/utils/recurrence";
+import {
+  DateEndField,
+  DateModeTabs,
+  DateSummary,
+  RepeatRuleField,
+  dateFieldLabel,
+  selectionFromSpec,
+  selectionToSpec,
+  type DateSelection,
+} from "~/components/RepeatPicker";
+import {
+  expiryDateFor,
+  isExpired,
+  latestSlotDate,
+  pruneExpiredEvents,
+  resolveRetentionDays,
+} from "~/utils/retention";
 import { verifyTurnstile, turnstileFailure, hasTurnstileToken } from "~/utils/turnstile";
 import { assessGuestRequest, needsVerification } from "~/utils/bot-protection";
 import Turnstile from "~/components/Turnstile";
@@ -71,6 +98,7 @@ import {
   EMAIL_MAX,
   LOCATION_MAX,
   MAX_SLOTS_PER_EVENT,
+  MAX_SLOT_ROWS_PER_EVENT,
   MAX_VOTES_PER_EVENT,
   ORGANIZER_NAME_MAX,
   PARTICIPANT_NAME_MAX,
@@ -127,7 +155,11 @@ export const meta: MetaFunction<typeof loader> = ({ loaderData, matches }) => {
   ]);
 };
 
-function publicEventShape(e: typeof events.$inferSelect, retentionDays: number) {
+function publicEventShape(
+  e: typeof events.$inferSelect,
+  retentionDays: number,
+  lastSlotDate?: string | null
+) {
   return {
     id: e.id,
     type: e.type,
@@ -142,14 +174,23 @@ function publicEventShape(e: typeof events.$inferSelect, retentionDays: number) 
     durationMinutes: (e as { durationMinutes?: number | null }).durationMinutes ?? null,
     createdAt: e.createdAt,
     updatedAt: e.updatedAt,
-    expiresAt: expiryDateFor(e.createdAt, retentionDays),
+    // The stored date rule, so the edit form can open on what the sheet
+    // actually is instead of on defaults.
+    dateSpec: readDateSpec(e.settings),
+    // A multi-day sheet is measured from its last date, not its creation
+    // date, so the banner shows the real deletion day.
+    expiresAt: expiryDateFor(e.createdAt, retentionDays, lastSlotDate),
     retentionDays,
   };
 }
 
-function adminEventShape(e: typeof events.$inferSelect, retentionDays: number) {
+function adminEventShape(
+  e: typeof events.$inferSelect,
+  retentionDays: number,
+  lastSlotDate?: string | null
+) {
   return {
-    ...publicEventShape(e, retentionDays),
+    ...publicEventShape(e, retentionDays, lastSlotDate),
     organizerEmail: e.organizerEmail,
   };
 }
@@ -225,7 +266,12 @@ export async function loader({ params, request, context, url }: LoaderFunctionAr
     throw new Response("Event not found", { status: 404 });
   }
 
-  if (isExpired(event.createdAt, new Date(), retentionDays)) {
+  // A multi-day sheet lives until its LAST date leaves the window, so only
+  // pay for that extra query once it already looks expired by creation date.
+  if (
+    isExpired(event.createdAt, new Date(), retentionDays) &&
+    isExpired(event.createdAt, new Date(), retentionDays, await latestSlotDate(db, event))
+  ) {
     throw new Response("This event expired and was auto-deleted.", { status: 410 });
   }
 
@@ -294,6 +340,12 @@ export async function loader({ params, request, context, url }: LoaderFunctionAr
     .from(eventSlots)
     .where(eq(eventSlots.eventId, eventId))
     .orderBy(eventSlots.displayOrder);
+  // Latest dated slot, for the retention banner (null on single-day sheets).
+  // Sheets only — poll options are dated too but polls expire by creation.
+  const lastSlotDateForEvent = event.type !== "SIGNUP_SHEET" ? null : rawSlots.reduce<string | null>((latest, s) => {
+    const d = (s as { slotDate?: string | null }).slotDate;
+    return d && (!latest || d > latest) ? d : latest;
+  }, null);
   const slots =
     event.type === "TIME_POLL"
       ? [...rawSlots].sort((a, b) => {
@@ -330,7 +382,9 @@ export async function loader({ params, request, context, url }: LoaderFunctionAr
 
     return data(
       {
-        event: isAdmin ? adminEventShape(event, retentionDays) : publicEventShape(event, retentionDays),
+        event: isAdmin
+          ? adminEventShape(event, retentionDays, lastSlotDateForEvent)
+          : publicEventShape(event, retentionDays, lastSlotDateForEvent),
         slots,
         signups: safeSignups,
         isAdmin,
@@ -401,7 +455,9 @@ export async function loader({ params, request, context, url }: LoaderFunctionAr
 
     return data(
       {
-        event: isAdmin ? adminEventShape(event, retentionDays) : publicEventShape(event, retentionDays),
+        event: isAdmin
+          ? adminEventShape(event, retentionDays, lastSlotDateForEvent)
+          : publicEventShape(event, retentionDays, lastSlotDateForEvent),
         slots,
         signups: [],
         isAdmin,
@@ -495,7 +551,10 @@ export async function action({ request, params, context }: ActionFunctionArgs) {
   if (!event) {
     return data({ error: "Event not found." }, { status: 404 });
   }
-  if (isExpired(event.createdAt, new Date(), retentionDays)) {
+  if (
+    isExpired(event.createdAt, new Date(), retentionDays) &&
+    isExpired(event.createdAt, new Date(), retentionDays, await latestSlotDate(db, event))
+  ) {
     return data({ error: "This event expired and was auto-deleted." }, { status: 410 });
   }
 
@@ -646,7 +705,9 @@ export async function action({ request, params, context }: ActionFunctionArgs) {
       const eventUrl = `${url.origin}/events/${eventId}`;
       const shiftPrefix = ((targetSlot as { shiftName?: string | null }).shiftName || "").trim();
       const taskLabel = shiftPrefix ? `${shiftPrefix} – ${targetSlot.title}` : targetSlot.title;
-      const whenDatePart = event.eventDate ? formatLongDateLabel(event.eventDate) : "";
+      // Multi-day sheets: the slot's own date, not the sheet's first date.
+      const slotDate = effectiveDateForSlot(targetSlot, event.eventDate);
+      const whenDatePart = slotDate ? formatLongDateLabel(slotDate) : "";
       const whenTimePart = targetSlot.startTime
         ? `${formatTime(targetSlot.startTime)}${targetSlot.endTime ? ` – ${formatTime(targetSlot.endTime)}` : ""}`
         : targetSlot.endTime
@@ -659,7 +720,7 @@ export async function action({ request, params, context }: ActionFunctionArgs) {
         title: `${taskLabel} — ${event.title}`,
         description: event.description,
         location: event.location,
-        eventDate: event.eventDate,
+        eventDate: slotDate,
         startTime: targetSlot.startTime,
         endTime: targetSlot.endTime,
         timeZone: event.timezone,
@@ -677,13 +738,13 @@ export async function action({ request, params, context }: ActionFunctionArgs) {
             <p>Hi ${escapeHtml(participantName)},</p>
             <p>You have secured your spot for <strong>${escapeHtml(taskLabel)}</strong> at <strong>${escapeHtml(event.title)}</strong>.</p>
             ${whenLine ? `<p><strong>When:</strong> ${escapeHtml(whenLine)}</p>` : ""}
-            ${event.location ? `<p><strong>Location:</strong> ${escapeHtml(event.location)}</p>` : ""}
+            ${locationHtml(event.location)}
             ${event.description ? `<p><strong>Description:</strong><br>${escapeHtml(event.description).replace(/\r?\n/g, "<br>")}</p>` : ""}
             <p><strong>Event page:</strong> <a href="${escapeHtml(eventUrl)}" style="color: #2563eb;">${escapeHtml(eventUrl)}</a></p>
             <p>
               <a href="${escapeHtml(googleCalendarUrl)}" style="color: #2563eb;">Add to Google Calendar</a>
               &nbsp;·&nbsp;
-              <a href="${escapeHtml(url.origin)}/events/${escapeHtml(eventId)}/ics" style="color: #2563eb;">Download .ics (Apple/Outlook)</a>
+              <a href="${escapeHtml(url.origin)}/events/${escapeHtml(eventId)}/ics?slot=${escapeHtml(encodeURIComponent(targetSlot.id))}" style="color: #2563eb;">Download .ics (Apple/Outlook)</a>
             </p>
             <div style="background: #f8fafc; border: 1px solid #e2e8f0; padding: 16px; border-radius: 12px; margin: 24px 0;">
               <p style="margin: 0 0 10px 0; font-size: 13px;"><strong>Need to cancel?</strong></p>
@@ -739,7 +800,10 @@ export async function action({ request, params, context }: ActionFunctionArgs) {
             ? `${shiftPrefix} – ${slotTitle}`
             : slotTitle
           : shiftPrefix || "your spot";
-        const whenDatePart = event.eventDate ? formatLongDateLabel(event.eventDate) : "";
+        const removedDate = removedSlot
+          ? effectiveDateForSlot(removedSlot, event.eventDate)
+          : event.eventDate;
+        const whenDatePart = removedDate ? formatLongDateLabel(removedDate) : "";
         const whenTimePart = removedSlot?.startTime
           ? `${formatTime(removedSlot.startTime)}${removedSlot.endTime ? ` – ${formatTime(removedSlot.endTime)}` : ""}`
           : removedSlot?.endTime
@@ -758,7 +822,7 @@ export async function action({ request, params, context }: ActionFunctionArgs) {
             <p>Hi ${escapeHtml(existing.participantName)},</p>
             <p>The organizer removed your sign-up for <strong>${escapeHtml(taskLabel)}</strong> at <strong>${escapeHtml(event.title)}</strong>.</p>
             ${whenLine ? `<p><strong>When:</strong> ${escapeHtml(whenLine)}</p>` : ""}
-            ${event.location ? `<p><strong>Location:</strong> ${escapeHtml(event.location)}</p>` : ""}
+            ${locationHtml(event.location)}
             <p><strong>Event page:</strong> <a href="${escapeHtml(eventUrl)}" style="color: #2563eb;">${escapeHtml(eventUrl)}</a></p>
             <p style="font-size: 13px; color: #64748b;">If you think this was a mistake, please contact the organizer${event.organizerName ? ` (${escapeHtml(event.organizerName)})` : ""} or sign up again if a spot is still open.</p>
             ${emailFooter(site)}
@@ -1438,7 +1502,7 @@ export async function action({ request, params, context }: ActionFunctionArgs) {
             <p>Hi ${escapeHtml(v.participantName)},</p>
             <p>The time for <strong>${escapeHtml(event.title)}</strong> has been decided:</p>
             ${lockedWhen ? `<p><strong>When:</strong> ${escapeHtml(lockedWhen)}</p>` : ""}
-            ${event.location ? `<p><strong>Location:</strong> ${escapeHtml(event.location)}</p>` : ""}
+            ${locationHtml(event.location)}
             ${event.description ? `<p><strong>Description:</strong><br>${escapeHtml(event.description).replace(/\r?\n/g, "<br>")}</p>` : ""}
             <p><strong>Event page:</strong> <a href="${escapeHtml(eventUrl)}" style="color: #2563eb;">${escapeHtml(eventUrl)}</a></p>
             <p>
@@ -1491,12 +1555,230 @@ export async function action({ request, params, context }: ActionFunctionArgs) {
       return data({ error: "Please pick a valid event date." }, { status: 400 });
     }
 
+    // Dates: the edit form posts the same fields as create, so a sheet can
+    // become multi-day (or stop being one) here. Slots are reconciled rather
+    // than rebuilt, so days that survive keep their tasks and sign-ups.
+    let dateMessage = "";
+    if (event.type === "SIGNUP_SHEET" && formData.get("dateMode") !== null) {
+      const specResult = parseDateSpec(
+        (name) => formData.get(name) as string | null,
+        eventDate || ""
+      );
+      if ("error" in specResult) {
+        return data({ error: specResult.error }, { status: 400 });
+      }
+      const spec = specResult.spec;
+      if (spec.mode !== "single" && !eventDate) {
+        return data({ error: "Pick the first date before adding more days." }, { status: 400 });
+      }
+
+      const existing = await db
+        .select()
+        .from(eventSlots)
+        .where(eq(eventSlots.eventId, eventId))
+        .orderBy(eventSlots.displayOrder);
+
+      const newDates =
+        spec.mode === "single" ? [] : expandDates(spec, eventDate as string, MAX_SERIES_DAYS + 1);
+      if (spec.mode !== "single" && newDates.length === 0) {
+        // Otherwise every existing day would count as removed and, with no
+        // sign-ups in the way, the sheet would be emptied.
+        return data(
+          { error: "Those settings don't include any days — pick a different repeat or end date." },
+          { status: 400 }
+        );
+      }
+      if (newDates.length > 0 && newDates[newDates.length - 1] > maxSeriesEnd(eventDate as string)) {
+        return data(
+          { error: "A sheet can run for up to one year — pick an earlier end." },
+          { status: 400 }
+        );
+      }
+
+      // The day each existing slot is on. A sheet that never had a date takes
+      // the one being picked now, so its tasks carry over instead of vanishing.
+      const dayOf = (s: (typeof existing)[number]) =>
+        effectiveDateForSlot(s, event.eventDate) || (eventDate as string) || "";
+      const currentDates = [...new Set(existing.map(dayOf))].filter(Boolean).sort();
+      const slotsByDay = new Map<string, typeof existing>();
+      for (const s of existing) {
+        const day = dayOf(s);
+        slotsByDay.set(day, [...(slotsByDay.get(day) ?? []), s]);
+      }
+      // Each day being added copies a matching existing day's tasks.
+      const templateFor = (date: string) => {
+        const day = templateDayFor(currentDates, date);
+        return day ? slotsByDay.get(day) ?? [] : [];
+      };
+
+      // Collapsing a multi-day sheet to one day keeps the day the organizer
+      // picked when it is one of the sheet's days. Otherwise the first day is
+      // kept and moved to the picked date — which would silently move its
+      // volunteers to a day they never signed up for, so that is refused when
+      // the day is booked. (A sheet that was always one day keeps the old
+      // behaviour: changing its date moves the whole sheet, by design.)
+      let singleDay = currentDates[0];
+      if (spec.mode === "single" && existing.some((s) => s.slotDate)) {
+        singleDay = eventDate && currentDates.includes(eventDate) ? eventDate : currentDates[0];
+        if (singleDay && singleDay !== eventDate) {
+          const dayIds = (slotsByDay.get(singleDay) ?? []).map((s) => s.id);
+          const booked = (
+            await db
+              .select({ slotId: signups.slotId })
+              .from(signups)
+              .where(and(eq(signups.eventId, eventId), eq(signups.status, "CONFIRMED")))
+          ).some((b) => dayIds.includes(b.slotId));
+          if (booked) {
+            return data(
+              {
+                error: `${formatSlotDateLabel(singleDay)} has volunteers signed up — pick one of the sheet's days as the one day to keep, so nobody's sign-up moves to another date.`,
+              },
+              { status: 400 }
+            );
+          }
+        }
+      }
+      const keptDates = new Set(spec.mode === "single" ? (singleDay ? [singleDay] : []) : newDates);
+      const droppedDates = currentDates.filter((d) => !keptDates.has(d));
+
+      if (droppedDates.length > 0) {
+        // Never delete someone's spot as a side effect of an edit: name the
+        // days that are in the way and let the organizer deal with them.
+        const droppedSlotIds = existing
+          .filter((s) => droppedDates.includes(dayOf(s)))
+          .map((s) => s.id);
+        const booked = droppedSlotIds.length
+          ? await db
+              .select({ slotId: signups.slotId })
+              .from(signups)
+              .where(and(eq(signups.eventId, eventId), eq(signups.status, "CONFIRMED")))
+          : [];
+        const bookedDays = [
+          ...new Set(
+            booked
+              .filter((b) => droppedSlotIds.includes(b.slotId))
+              .map((b) => {
+                const slot = existing.find((s) => s.id === b.slotId);
+                return slot ? dayOf(slot) : "";
+              })
+              .filter(Boolean)
+          ),
+        ].sort();
+        if (bookedDays.length > 0) {
+          const listed = bookedDays.slice(0, 3).map(formatSlotDateLabel).join(", ");
+          const rest = bookedDays.length > 3 ? ` and ${bookedDays.length - 3} more` : "";
+          return data(
+            {
+              error: `${listed}${rest} already ${bookedDays.length === 1 ? "has" : "have"} volunteers signed up. Remove those sign-ups first, or keep those days.`,
+            },
+            { status: 400 }
+          );
+        }
+      }
+
+      // A day with no tasks may still be part of the schedule — its shifts
+      // were limited to other days. Only a day the old schedule didn't cover
+      // is new; filling the gaps would undo that choice on every save.
+      const oldSpec = readDateSpec(event.settings);
+      const previouslyScheduled = new Set(
+        oldSpec.mode === "single" || !event.eventDate
+          ? []
+          : expandDates(oldSpec, event.eventDate, MAX_SERIES_DAYS + 1)
+      );
+      const addedDates = newDates.filter(
+        (d) => !currentDates.includes(d) && !previouslyScheduled.has(d)
+      );
+      const totalRows =
+        existing.length -
+        existing.filter((s) => droppedDates.includes(dayOf(s))).length +
+        addedDates.reduce((n, d) => n + templateFor(d).length, 0);
+      if (totalRows === 0) {
+        // e.g. narrowing a range to the one day its shifts skip: every day
+        // with tasks would be removed and nothing added in their place.
+        return data(
+          { error: "No task runs on any of those days — keep a day that has tasks, or add a shift first." },
+          { status: 400 }
+        );
+      }
+      if (totalRows > MAX_SLOT_ROWS_PER_EVENT) {
+        return data(
+          {
+            error: `That would make ${totalRows} tasks across ${newDates.length} days. A sheet can hold ${MAX_SLOT_ROWS_PER_EVENT} — use fewer days or fewer tasks.`,
+          },
+          { status: 400 }
+        );
+      }
+
+      // Remove the days that are going away (all empty, checked above).
+      if (droppedDates.length > 0) {
+        const ids = existing
+          .filter((s) => droppedDates.includes(dayOf(s)))
+          .map((s) => s.id);
+        for (let i = 0; i < ids.length; i += 20) {
+          await db.delete(eventSlots).where(inArray(eventSlots.id, ids.slice(i, i + 20)));
+        }
+      }
+
+      if (spec.mode === "single") {
+        // Back to a one-day sheet: the surviving slots lose their per-day date
+        // and read from events.event_date again, exactly like a sheet that
+        // never used this feature.
+        await db
+          .update(eventSlots)
+          .set({ slotDate: null })
+          .where(eq(eventSlots.eventId, eventId));
+      } else {
+        // A sheet that was single-day until now: its undated slots are the day
+        // they were read as above, so write that day down (unless it was
+        // dropped, in which case they are already gone).
+        const undatedDay = event.eventDate || (eventDate as string);
+        if (keptDates.has(undatedDay)) {
+          await db
+            .update(eventSlots)
+            .set({ slotDate: undatedDay })
+            .where(and(eq(eventSlots.eventId, eventId), isNull(eventSlots.slotDate)));
+        }
+        if (addedDates.length > 0) {
+          let order = existing.reduce((m, s) => Math.max(m, s.displayOrder ?? 0), -1);
+          const rows = addedDates.flatMap((date) =>
+            templateFor(date).map((t) => ({
+              id: generateInternalId(),
+              eventId,
+              title: t.title,
+              shiftName: (t as { shiftName?: string | null }).shiftName ?? null,
+              slotDate: date,
+              capacity: t.capacity,
+              startTime: t.startTime,
+              endTime: t.endTime,
+              displayOrder: ++order,
+            }))
+          );
+          // D1 caps a statement at 100 bound variables; 9 columns per row.
+          for (let i = 0; i < rows.length; i += 10) {
+            await db.insert(eventSlots).values(rows.slice(i, i + 10));
+          }
+        }
+      }
+
+      const removed = droppedDates.length;
+      const added = addedDates.length;
+      dateMessage =
+        added || removed
+          ? ` ${added ? `Added ${added} day${added === 1 ? "" : "s"}.` : ""}${removed ? ` Removed ${removed} day${removed === 1 ? "" : "s"}.` : ""}`
+          : "";
+
+      await db
+        .update(events)
+        .set({ settings: writeDateSpec(event.settings, spec) })
+        .where(eq(events.id, eventId));
+    }
+
     await db
       .update(events)
       .set({ title, description, eventDate, location, organizerName, timezone, updatedAt: now })
       .where(eq(events.id, eventId));
 
-    return data({ success: true, message: "Event details updated." });
+    return data({ success: true, message: `Event details updated.${dateMessage}` });
   }
 
   // 6. Add Slot (admin only)
@@ -1528,11 +1810,13 @@ export async function action({ request, params, context }: ActionFunctionArgs) {
     if (slotError) return data({ error: slotError }, { status: 400 });
 
     const existingSlots = await db.select().from(eventSlots).where(eq(eventSlots.eventId, eventId));
-    if (existingSlots.length >= MAX_SLOTS_PER_EVENT) {
-      return data(
-        { error: `Too many options — maximum ${MAX_SLOTS_PER_EVENT} per event.` },
-        { status: 400 }
-      );
+    // Multi-day sheets hold one row per (date x task), so they are capped by
+    // the total-row limit instead of the per-date task limit.
+    const hasDatedSlots = existingSlots.some((s) => (s as { slotDate?: string | null }).slotDate);
+    const slotCap =
+      event.type === "SIGNUP_SHEET" && hasDatedSlots ? MAX_SLOT_ROWS_PER_EVENT : MAX_SLOTS_PER_EVENT;
+    if (existingSlots.length >= slotCap) {
+      return data({ error: `Too many options — maximum ${slotCap} per event.` }, { status: 400 });
     }
     const maxOrder = existingSlots.reduce((m, s) => Math.max(m, s.displayOrder ?? 0), -1);
     const rawCap = parseInt(capacityRaw, 10);
@@ -1558,6 +1842,394 @@ export async function action({ request, params, context }: ActionFunctionArgs) {
     return data({ success: true, message: "New option added." });
   }
 
+  // 6b. Add a task to an existing shift (admin only). The create form thinks
+  // in shifts that hold tasks; this is that action for a live sheet, so a new
+  // task lands on every day the shift already runs on rather than one row at
+  // a time.
+  if (intent === "add_shift_task") {
+    if (!(await requireAdmin())) {
+      return data({ error: "Unauthorized." }, { status: 403 });
+    }
+    if (isPoll) return data({ error: "Polls have time options, not tasks." }, { status: 400 });
+
+    const title = cleanText(formData.get("slotTitle"), SLOT_TITLE_MAX);
+    const shiftName = cleanText(formData.get("slotShiftName"), SHIFT_NAME_MAX) || null;
+    const startTime = cleanText(formData.get("slotStartTime"), 16) || null;
+    const endTime = cleanText(formData.get("slotEndTime"), 16) || null;
+    const capacityRaw = cleanText(formData.get("slotCapacity"), 8) || "1";
+    if (!title) {
+      return data({ error: "Give the new task a name." }, { status: 400 });
+    }
+    const slotError = validateSlotFields("", startTime, endTime);
+    if (slotError) return data({ error: slotError }, { status: 400 });
+
+    const existingSlots = await db.select().from(eventSlots).where(eq(eventSlots.eventId, eventId));
+    // Every day this shift runs on, identified the same way the event page
+    // groups shifts: name + start + end.
+    const sameShift = existingSlots.filter(
+      (s) =>
+        ((s as { shiftName?: string | null }).shiftName || "") === (shiftName || "") &&
+        (s.startTime || "") === (startTime || "") &&
+        (s.endTime || "") === (endTime || "")
+    );
+    if (sameShift.length === 0) {
+      return data({ error: "That shift no longer exists — reload the page." }, { status: 400 });
+    }
+    const days = [...new Set(sameShift.map((s) => (s as { slotDate?: string | null }).slotDate ?? null))];
+    if (sameShift.some((s) => s.title.trim().toLowerCase() === title.toLowerCase())) {
+      return data({ error: `"${title}" is already a task in this shift.` }, { status: 400 });
+    }
+
+    const hasDatedSlots = existingSlots.some((s) => (s as { slotDate?: string | null }).slotDate);
+    const slotCap = hasDatedSlots ? MAX_SLOT_ROWS_PER_EVENT : MAX_SLOTS_PER_EVENT;
+    if (existingSlots.length + days.length > slotCap) {
+      return data({ error: `Too many options — maximum ${slotCap} per event.` }, { status: 400 });
+    }
+
+    const rawCap = parseInt(capacityRaw, 10);
+    const capacity = Number.isFinite(rawCap) ? Math.min(Math.max(rawCap, 1), 999) : 1;
+    let order = existingSlots.reduce((m, s) => Math.max(m, s.displayOrder ?? 0), -1);
+    const rows = days.map((day) => ({
+      id: generateInternalId(),
+      eventId,
+      title,
+      shiftName,
+      slotDate: day,
+      capacity,
+      startTime,
+      endTime,
+      displayOrder: ++order,
+    }));
+    // D1 caps a statement at 100 bound variables; 9 columns per row.
+    for (let i = 0; i < rows.length; i += 10) {
+      await db.insert(eventSlots).values(rows.slice(i, i + 10));
+    }
+
+    return data({
+      success: true,
+      message:
+        days.length > 1
+          ? `Added "${title}" on ${days.length} days.`
+          : `Added "${title}".`,
+    });
+  }
+
+  // 6c. Shift-level actions for the editor's shift cards. A shift is a name
+  // plus a time window — the identity the event page groups by — and on a
+  // repeating sheet it exists on every day the series runs, so these apply
+  // across all of them. Sign-ups are never deleted as a side effect.
+  if (
+    intent === "update_shift" ||
+    intent === "delete_shift_task" ||
+    intent === "delete_shift" ||
+    intent === "add_shift"
+  ) {
+    if (!(await requireAdmin())) {
+      return data({ error: "Unauthorized." }, { status: 403 });
+    }
+    if (isPoll) return data({ error: "Polls have time options, not shifts." }, { status: 400 });
+
+    const allSlots = await db.select().from(eventSlots).where(eq(eventSlots.eventId, eventId));
+    const shiftKey = (slot: { shiftName?: string | null; startTime: string | null; endTime: string | null }) =>
+      `${(slot.shiftName || "").trim()}||${slot.startTime || ""}||${slot.endTime || ""}`;
+    const targetKey = cleanText(formData.get("shiftKey"), 400);
+    const inShift = allSlots.filter((s) => shiftKey(s) === targetKey);
+    const sheetDays = [
+      ...new Set(allSlots.map((s) => (s as { slotDate?: string | null }).slotDate ?? null)),
+    ];
+
+    /** The days (or the single undated row) a set of slots covers. */
+    const daysOf = (rows: typeof allSlots) => [
+      ...new Set(rows.map((r) => (r as { slotDate?: string | null }).slotDate ?? null)),
+    ];
+    // A task's identity inside the shift. Titles alone aren't unique — the
+    // create form allows two "Greeter" tasks with different spots — so the
+    // n-th task of a title on a day is "n:Title", the same key the editor
+    // card posts. The same task on other days shares it.
+    const taskIdOf = new Map<string, string>();
+    {
+      const seenOnDay = new Map<string, number>();
+      [...inShift]
+        .sort((a, b) => (a.displayOrder ?? 0) - (b.displayOrder ?? 0))
+        .forEach((s) => {
+          const day = (s as { slotDate?: string | null }).slotDate ?? "";
+          const k = `${day}\u0000${s.title}`;
+          const n = seenOnDay.get(k) ?? 0;
+          seenOnDay.set(k, n + 1);
+          taskIdOf.set(s.id, `${n}:${s.title}`);
+        });
+    }
+    /** Rows of one task. A bare title (an older page) still means every task with it. */
+    const rowsOfTask = (posted: string) =>
+      /^\d+:/.test(posted)
+        ? inShift.filter((s) => taskIdOf.get(s.id) === posted)
+        : inShift.filter((s) => s.title === posted);
+    const signupCount = async (ids: string[]) => {
+      if (ids.length === 0) return 0;
+      const rows = await db
+        .select({ slotId: signups.slotId })
+        .from(signups)
+        .where(and(eq(signups.eventId, eventId), eq(signups.status, "CONFIRMED")));
+      return rows.filter((r) => ids.includes(r.slotId)).length;
+    };
+
+    if (intent === "add_shift") {
+      const shiftName = cleanText(formData.get("slotShiftName"), SHIFT_NAME_MAX) || null;
+      const startTime = cleanText(formData.get("slotStartTime"), 16) || null;
+      const endTime = cleanText(formData.get("slotEndTime"), 16) || null;
+      const title = cleanText(formData.get("slotTitle"), SLOT_TITLE_MAX);
+      const capRaw = parseInt(cleanText(formData.get("slotCapacity"), 8) || "1", 10);
+      if (!title) return data({ error: "Give the first task a name." }, { status: 400 });
+      const slotError = validateSlotFields("", startTime, endTime);
+      if (slotError) return data({ error: slotError }, { status: 400 });
+      // Same name and time IS the same shift (the page groups by it). Merging
+      // silently could give it same-named tasks on different days, which the
+      // editor can't tell apart — so point at the existing card instead.
+      if (allSlots.some((s) => shiftKey(s) === shiftKey({ shiftName, startTime, endTime }))) {
+        return data(
+          { error: "A shift with that name and time already exists — add the task to it instead." },
+          { status: 400 }
+        );
+      }
+
+      // Every day the schedule covers — not just the days that have rows. A
+      // day can be empty on purpose (its shifts were limited to other days),
+      // and a new shift is presented as running across the whole series.
+      const spec = readDateSpec(event.settings);
+      const scheduled =
+        spec.mode !== "single" && event.eventDate
+          ? expandDates(spec, event.eventDate, MAX_SERIES_DAYS + 1)
+          : [];
+      const datedRows = sheetDays.filter((d): d is string => Boolean(d));
+      const days: Array<string | null> = scheduled.length
+        ? [...new Set([...scheduled, ...datedRows])].sort()
+        : sheetDays.length
+          ? sheetDays
+          : [null];
+      const hasDated = allSlots.some((s) => (s as { slotDate?: string | null }).slotDate);
+      const cap = hasDated ? MAX_SLOT_ROWS_PER_EVENT : MAX_SLOTS_PER_EVENT;
+      if (allSlots.length + days.length > cap) {
+        return data({ error: `Too many options — maximum ${cap} per event.` }, { status: 400 });
+      }
+      let order = allSlots.reduce((m, s) => Math.max(m, s.displayOrder ?? 0), -1);
+      const rows = days.map((day) => ({
+        id: generateInternalId(),
+        eventId,
+        title,
+        shiftName,
+        slotDate: day,
+        capacity: Number.isFinite(capRaw) ? Math.min(Math.max(capRaw, 1), 999) : 1,
+        startTime,
+        endTime,
+        displayOrder: ++order,
+      }));
+      for (let i = 0; i < rows.length; i += 10) {
+        await db.insert(eventSlots).values(rows.slice(i, i + 10));
+      }
+      return data({
+        success: true,
+        message: days.length > 1 ? `Shift added on ${days.length} days.` : "Shift added.",
+      });
+    }
+
+    if (inShift.length === 0) {
+      return data({ error: "That shift no longer exists — reload the page." }, { status: 400 });
+    }
+
+    if (intent === "delete_shift") {
+      const booked = await signupCount(inShift.map((v) => v.id));
+      if (booked > 0) {
+        return data(
+          {
+            error: `This shift has ${booked} ${booked === 1 ? "volunteer" : "volunteers"} signed up. Cancel ${booked === 1 ? "that sign-up" : "those sign-ups"} first.`,
+          },
+          { status: 400 }
+        );
+      }
+      if (inShift.length === allSlots.length) {
+        return data(
+          { error: "A sheet needs at least one shift — add another before removing this one." },
+          { status: 400 }
+        );
+      }
+      const ids = inShift.map((v) => v.id);
+      for (let i = 0; i < ids.length; i += 20) {
+        await db.delete(eventSlots).where(inArray(eventSlots.id, ids.slice(i, i + 20)));
+      }
+      const days = daysOf(inShift).length;
+      return data({
+        success: true,
+        message: days > 1 ? `Shift removed from ${days} days.` : "Shift removed.",
+      });
+    }
+
+    if (intent === "delete_shift_task") {
+      const title = cleanText(formData.get("slotTitle"), SLOT_TITLE_MAX);
+      const taskId = cleanText(formData.get("slotTask"), SLOT_TITLE_MAX + 8);
+      const victims = rowsOfTask(taskId || title);
+      if (victims.length === 0) {
+        return data({ error: "That task no longer exists — reload the page." }, { status: 400 });
+      }
+      const booked = await signupCount(victims.map((v) => v.id));
+      if (booked > 0) {
+        return data(
+          {
+            error: `"${title}" has ${booked} ${booked === 1 ? "volunteer" : "volunteers"} signed up. Cancel ${booked === 1 ? "that sign-up" : "those sign-ups"} first.`,
+          },
+          { status: 400 }
+        );
+      }
+      if (inShift.length === victims.length) {
+        return data(
+          { error: "A shift needs at least one task — rename it instead, or remove the shift." },
+          { status: 400 }
+        );
+      }
+      const ids = victims.map((v) => v.id);
+      for (let i = 0; i < ids.length; i += 20) {
+        await db.delete(eventSlots).where(inArray(eventSlots.id, ids.slice(i, i + 20)));
+      }
+      const days = daysOf(victims).length;
+      return data({
+        success: true,
+        message: days > 1 ? `Removed "${title}" from ${days} days.` : `Removed "${title}".`,
+      });
+    }
+
+    // update_shift: name / times for the whole shift, and each task's spots.
+    const shiftName = cleanText(formData.get("slotShiftName"), SHIFT_NAME_MAX) || null;
+    const startTime = cleanText(formData.get("slotStartTime"), 16) || null;
+    const endTime = cleanText(formData.get("slotEndTime"), 16) || null;
+    const slotError = validateSlotFields("", startTime, endTime);
+    if (slotError) return data({ error: slotError }, { status: 400 });
+    const newKey = shiftKey({ shiftName, startTime, endTime });
+    if (newKey !== targetKey && allSlots.some((s) => shiftKey(s) === newKey)) {
+      return data(
+        { error: "Another shift already has that name and time — change one of them." },
+        { status: 400 }
+      );
+    }
+
+    const titles = formData.getAll("taskTitle") as string[];
+    // "taskOriginalTitle" is what a page loaded before task IDs posts.
+    const originals = (
+      formData.has("taskOriginal") ? formData.getAll("taskOriginal") : formData.getAll("taskOriginalTitle")
+    ) as string[];
+    const capacities = formData.getAll("taskCapacity") as string[];
+    const days = daysOf(inShift);
+    // Rows the card added have no original: they are new tasks, created on
+    // every day of the shift — the same thing "+ Add Task to this shift" means
+    // on the create form. Everything is checked before anything is written,
+    // so a rejected card leaves the sheet exactly as it was.
+    const added: Array<{ title: string; capacity: number }> = [];
+    const updates: Array<{ ids: string[]; title: string; capacity: number }> = [];
+
+    for (let i = 0; i < titles.length; i++) {
+      const original = cleanText(originals[i], SLOT_TITLE_MAX + 8);
+      const title = cleanText(titles[i], SLOT_TITLE_MAX) || original.replace(/^\d+:/, "");
+      if (!title) continue;
+      const capRaw = parseInt(capacities[i] || "1", 10);
+      const capacity = Number.isFinite(capRaw) ? Math.min(Math.max(capRaw, 1), 999) : 1;
+
+      if (!original) {
+        const clashes =
+          inShift.some((s) => s.title.toLowerCase() === title.toLowerCase()) ||
+          added.some((a) => a.title.toLowerCase() === title.toLowerCase());
+        if (clashes) {
+          return data({ error: `"${title}" is already a task in this shift.` }, { status: 400 });
+        }
+        added.push({ title, capacity });
+        continue;
+      }
+      const ids = rowsOfTask(original).map((s) => s.id);
+      if (ids.length === 0) {
+        return data({ error: "A task in this shift changed — reload the page." }, { status: 400 });
+      }
+      updates.push({ ids, title, capacity });
+    }
+
+    // Same-named tasks must run on the same days (the invariant behind the
+    // "n:Title" identity — see create). Check the shift as it will be after
+    // this save: renaming "Helper" (Wed/Fri) to "Greeter" (Mon/Wed) would
+    // otherwise make Friday's task indistinguishable from the other Greeter.
+    {
+      const dayKey = (rows: typeof inShift) =>
+        [...new Set(rows.map((r) => (r as { slotDate?: string | null }).slotDate ?? ""))].sort().join(",");
+      const renamed = new Set(updates.flatMap((u) => u.ids));
+      const result: Array<{ title: string; days: string }> = [
+        ...updates.map((u) => ({ title: u.title, days: dayKey(inShift.filter((s) => u.ids.includes(s.id))) })),
+        ...added.map((a) => ({ title: a.title, days: dayKey(inShift) })),
+      ];
+      // Tasks the card didn't post (a stale page) keep their title and days.
+      const untouched = new Map<string, typeof inShift>();
+      for (const s of inShift) {
+        if (renamed.has(s.id)) continue;
+        const id = taskIdOf.get(s.id) as string;
+        untouched.set(id, [...(untouched.get(id) ?? []), s]);
+      }
+      for (const rows of untouched.values()) result.push({ title: rows[0].title, days: dayKey(rows) });
+      const daysByTitle = new Map<string, string>();
+      for (const t of result) {
+        const seen = daysByTitle.get(t.title);
+        if (seen !== undefined && seen !== t.days) {
+          return data(
+            { error: `Two tasks called "${t.title}" would run on different days — use a different name.` },
+            { status: 400 }
+          );
+        }
+        daysByTitle.set(t.title, t.days);
+      }
+    }
+
+    if (added.length > 0) {
+      const hasDated = allSlots.some((s) => (s as { slotDate?: string | null }).slotDate);
+      const cap = hasDated ? MAX_SLOT_ROWS_PER_EVENT : MAX_SLOTS_PER_EVENT;
+      if (allSlots.length + added.length * days.length > cap) {
+        return data({ error: `Too many options — maximum ${cap} per event.` }, { status: 400 });
+      }
+    }
+
+    for (const u of updates) {
+      for (let j = 0; j < u.ids.length; j += 20) {
+        await db
+          .update(eventSlots)
+          .set({ title: u.title, shiftName, startTime, endTime, capacity: u.capacity })
+          .where(inArray(eventSlots.id, u.ids.slice(j, j + 20)));
+      }
+    }
+
+    if (added.length > 0) {
+      let order = allSlots.reduce((m, s) => Math.max(m, s.displayOrder ?? 0), -1);
+      const rows = added.flatMap((task) =>
+        days.map((day) => ({
+          id: generateInternalId(),
+          eventId,
+          title: task.title,
+          shiftName,
+          slotDate: day,
+          capacity: task.capacity,
+          startTime,
+          endTime,
+          displayOrder: ++order,
+        }))
+      );
+      // D1 caps a statement at 100 bound variables; 9 columns per row.
+      for (let i = 0; i < rows.length; i += 10) {
+        await db.insert(eventSlots).values(rows.slice(i, i + 10));
+      }
+    }
+
+    const dayCount = days.length;
+    const addedNote = added.length
+      ? ` Added ${added.length === 1 ? `"${added[0].title}"` : `${added.length} tasks`}.`
+      : "";
+    return data({
+      success: true,
+      message:
+        (dayCount > 1 ? `Shift updated on ${dayCount} days.` : "Shift updated.") + addedNote,
+    });
+  }
+
   // 7. Update Slot (admin only)
   if (intent === "update_slot") {
     if (!(await requireAdmin())) {
@@ -1568,7 +2240,11 @@ export async function action({ request, params, context }: ActionFunctionArgs) {
     const titleRaw = cleanText(formData.get("slotTitle"), SLOT_TITLE_MAX);
     const shiftName = cleanText(formData.get("slotShiftName"), SHIFT_NAME_MAX) || null;
     const slotDateRaw = cleanText(formData.get("slotDate"), 10);
-    const slotDate = slotDateRaw === "" ? null : (/^\d{4}-\d{2}-\d{2}$/.test(slotDateRaw) ? slotDateRaw : null);
+    // Same rule as the timezone fix: a form that doesn't render the field at
+    // all must keep the stored value. Wiping it here would collapse a
+    // multi-day sheet's slot back onto the event date.
+    const slotDateOmitted = formData.get("slotDate") === null;
+    const slotDate = /^\d{4}-\d{2}-\d{2}$/.test(slotDateRaw) ? slotDateRaw : null;
     const startTime = cleanText(formData.get("slotStartTime"), 16) || null;
     const endTime = cleanText(formData.get("slotEndTime"), 16) || null;
     const capacityRaw = cleanText(formData.get("slotCapacity"), 8);
@@ -1608,7 +2284,7 @@ export async function action({ request, params, context }: ActionFunctionArgs) {
       .set({
         title,
         shiftName,
-        slotDate,
+        slotDate: slotDateOmitted ? (target as { slotDate?: string | null }).slotDate ?? null : slotDate,
         startTime,
         endTime,
         ...(event.type === "SIGNUP_SHEET" && capacityRaw
@@ -1657,16 +2333,14 @@ export async function action({ request, params, context }: ActionFunctionArgs) {
     if (!(await requireAdmin())) {
       return data({ error: "Unauthorized." }, { status: 403 });
     }
-    const slots = await db.select({ id: eventSlots.id }).from(eventSlots).where(eq(eventSlots.eventId, eventId));
-    const slotIds = slots.map((s) => s.id);
-    if (slotIds.length > 0) {
-      await db.delete(signups).where(inArray(signups.slotId, slotIds));
-      await db.delete(pollVoteEntries).where(inArray(pollVoteEntries.slotId, slotIds));
-    }
-    const votes = await db.select({ id: pollVotes.id }).from(pollVotes).where(eq(pollVotes.eventId, eventId));
-    if (votes.length > 0) {
-      await db.delete(pollVoteEntries).where(inArray(pollVoteEntries.pollVoteId, votes.map((v) => v.id)));
-    }
+    // Children are matched through subqueries on the event ID: a multi-day
+    // sheet has up to 300 slots and a poll up to 1000 votes, and one bound
+    // variable per ID would pass D1's 100-variable cap and fail the delete.
+    const slotIdsOf = db.select({ id: eventSlots.id }).from(eventSlots).where(eq(eventSlots.eventId, eventId));
+    const voteIdsOf = db.select({ id: pollVotes.id }).from(pollVotes).where(eq(pollVotes.eventId, eventId));
+    await db.delete(signups).where(inArray(signups.slotId, slotIdsOf));
+    await db.delete(pollVoteEntries).where(inArray(pollVoteEntries.slotId, slotIdsOf));
+    await db.delete(pollVoteEntries).where(inArray(pollVoteEntries.pollVoteId, voteIdsOf));
     await db.delete(signups).where(eq(signups.eventId, eventId));
     await db.delete(pollVotes).where(eq(pollVotes.eventId, eventId));
     await db.delete(eventSlots).where(eq(eventSlots.eventId, eventId));
@@ -1884,6 +2558,434 @@ function endForDuration(start: string, durationMinutes: number | null | undefine
  * Timezone field for the edit-details form — same TimezoneSelect as create.
  * Local state seeds from the stored value; the edit panel remounts on open.
  */
+/**
+ * The same date controls as the create form, so an organizer can turn a
+ * one-day sheet into a series (or back) from here. The action reconciles the
+ * slots; this only decides what gets posted.
+ */
+function EditDatesField({
+  initialSpec,
+  initialDate,
+}: {
+  initialSpec: DateSpec;
+  initialDate: string;
+}) {
+  const today = new Date().toISOString().split("T")[0];
+  // The posted date stays empty for a sheet that never had one — saving the
+  // title must not quietly give it today's date (and day-before reminders).
+  // Today is only the anchor the repeat presets and preview are written from
+  // until a date is picked; the server refuses more days without one.
+  const [startDate, setStartDate] = useState(initialDate);
+  const anchor = startDate || today;
+  const [sel, setSel] = useState<DateSelection>(() => selectionFromSpec(initialSpec, anchor));
+  const spec = selectionToSpec(sel, anchor);
+  const dates =
+    spec.mode === "single" ? [anchor] : expandDates(spec, anchor, MAX_SERIES_DAYS + 1);
+
+  return (
+    <>
+      <div className="sm:col-span-2">
+        <label className="block text-xs font-semibold text-slate-700 mb-1.5">Event Type</label>
+        <DateModeTabs start={anchor} value={sel} onChange={setSel} />
+      </div>
+      <div>
+        <label className="block text-xs font-semibold text-slate-700 mb-1.5">
+          {dateFieldLabel(sel.mode)}
+        </label>
+        <DatePicker name="eventDate" value={startDate} onChange={setStartDate} />
+      </div>
+      <DateEndField value={sel} onChange={setSel} />
+      {sel.mode === "repeat" && (
+        <div className="sm:col-span-2">
+          <RepeatRuleField start={anchor} value={sel} onChange={setSel} />
+        </div>
+      )}
+      {sel.mode !== "single" && (
+        <div className="sm:col-span-2">
+          <DateSummary value={sel} dates={dates} />
+          <p className="text-[11px] text-slate-500 mt-1.5">
+            Days you remove here must have no sign-ups. New days copy the tasks of the nearest day on the same weekday.
+          </p>
+        </div>
+      )}
+    </>
+  );
+}
+
+type EditShift = {
+  key: string;
+  shiftName: string | null;
+  startTime: string | null;
+  endTime: string | null;
+  days: number;
+  /** `id` is "n:Title" — the n-th task of that title on a day (see update_shift). */
+  tasks: Array<{ id: string; title: string; capacity: number; days: number; signups: number }>;
+};
+
+const EDIT_INPUT =
+  "w-full px-3 py-2 text-xs rounded-xl border border-slate-200 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 placeholder:text-slate-400";
+const EDIT_SUBLABEL = "block text-[10px] uppercase font-bold text-slate-400 mb-1";
+
+/**
+ * One shift card in the editor — the same layout as the create form's shift
+ * card, with the same TimePickers and dashed "add task" button. The only
+ * additions are what a live sheet knows and a draft doesn't: how many days the
+ * shift covers, and who has signed up.
+ *
+ * A card is one form. The intent rides on the submit BUTTONS, never on a
+ * hidden input, because a hidden intent wins formData.get() over the clicked
+ * button's value — which is exactly how remove-task silently saved instead of
+ * deleting. Removing an existing task posts its own little form (referenced by
+ * id) so the row being removed is unambiguous.
+ */
+function EditShiftCard({
+  shift,
+  index,
+  adminToken,
+  isSubmitting,
+}: {
+  shift: EditShift;
+  index: number;
+  adminToken: string | null;
+  isSubmitting: boolean;
+  }) {
+  const [start, setStart] = useState(shift.startTime || "");
+  const [end, setEnd] = useState(shift.endTime || "");
+  // Tasks added here are saved with the card, exactly like create.
+  const [newTasks, setNewTasks] = useState<number[]>([]);
+  const formId = `shift-${index}`;
+  // Once the server has the new tasks they arrive as real rows, so the draft
+  // rows must go — otherwise a saved task shows twice.
+  const taskCount = shift.tasks.length;
+  useEffect(() => {
+    setNewTasks([]);
+  }, [taskCount]);
+
+  return (
+    <div className="p-4 bg-slate-50/70 rounded-2xl border border-slate-200/80 transition-all space-y-3">
+      <div className="flex items-center justify-between">
+        <span className="text-xs font-bold text-slate-700">
+          Shift {index + 1}
+          {shift.days > 1 && (
+            <span className="font-medium text-slate-400"> · every one of {shift.days} days</span>
+          )}
+        </span>
+        <button
+          type="submit"
+          form={`${formId}-remove`}
+          disabled={isSubmitting}
+          className="text-slate-400 hover:text-rose-500 font-bold text-xs disabled:opacity-20 transition-colors inline-flex items-center gap-1"
+          onClick={(e) => {
+            const where = shift.days > 1 ? ` from all ${shift.days} days` : "";
+            const label = shift.shiftName || `Shift ${index + 1}`;
+            if (!window.confirm(`Remove ${label}${where}, with its ${shift.tasks.length === 1 ? "task" : `${shift.tasks.length} tasks`}?`)) {
+              e.preventDefault();
+            }
+          }}
+        >
+          Remove <X className="w-3 h-3" />
+        </button>
+      </div>
+
+      <Form method="post" id={formId} className="space-y-3">
+        <input type="hidden" name="adminToken" value={adminToken || ""} />
+        <input type="hidden" name="shiftKey" value={shift.key} />
+        <input type="hidden" name="slotStartTime" value={start} />
+        <input type="hidden" name="slotEndTime" value={end} />
+        {/* Enter-to-submit uses the first submit button; make that Save. */}
+        <button type="submit" name="intent" value="update_shift" className="hidden" tabIndex={-1} aria-hidden="true">
+          Save
+        </button>
+
+        <div className="grid grid-cols-1 sm:grid-cols-12 gap-3 items-center">
+          <div className="sm:col-span-6">
+            <label className={EDIT_SUBLABEL}>Shift Name (Optional)</label>
+            <input
+              type="text"
+              name="slotShiftName"
+              defaultValue={shift.shiftName || ""}
+              placeholder="e.g., Morning"
+              className={EDIT_INPUT}
+            />
+          </div>
+          <div className="sm:col-span-3">
+            <label className={EDIT_SUBLABEL}>Start Time</label>
+            <TimePicker value={start} onChange={setStart} size="sm" />
+          </div>
+          <div className="sm:col-span-3">
+            <label className={EDIT_SUBLABEL}>End Time</label>
+            <TimePicker value={end} onChange={setEnd} size="sm" />
+          </div>
+        </div>
+
+        <div className="space-y-2.5 pt-1">
+          {shift.tasks.map((task) => (
+            <div
+              key={task.id}
+              className="grid grid-cols-1 sm:grid-cols-12 gap-3 items-end bg-white rounded-xl border border-slate-200/80 p-3"
+            >
+              <input type="hidden" name="taskOriginal" value={task.id} />
+              <div className="sm:col-span-8">
+                <label className={EDIT_SUBLABEL}>Task *</label>
+                <input type="text" name="taskTitle" required defaultValue={task.title} className={EDIT_INPUT} />
+              </div>
+              <div className="sm:col-span-3">
+                <label className={EDIT_SUBLABEL}>Spots Needed</label>
+                <input
+                  type="number"
+                  name="taskCapacity"
+                  min={1}
+                  max={999}
+                  defaultValue={task.capacity}
+                  className={EDIT_INPUT}
+                />
+              </div>
+              <div className="sm:col-span-1 flex sm:justify-end">
+                <button
+                  type="submit"
+                  form={`${formId}-del-${encodeURIComponent(task.id)}`}
+                  title={`Remove "${task.title}"`}
+                  className="text-slate-400 hover:text-rose-500 font-bold text-xs transition-colors inline-flex items-center gap-1 p-2"
+                  onClick={(e) => {
+                    const where = task.days > 1 ? ` from all ${task.days} days` : "";
+                    if (!window.confirm(`Remove "${task.title}"${where}?`)) e.preventDefault();
+                  }}
+                >
+                  <X className="w-3.5 h-3.5" />
+                </button>
+              </div>
+              {(shift.days > 1 || task.signups > 0) && (
+                <span className="sm:col-span-12 text-[10px] text-slate-400 -mt-1">
+                  {task.days < shift.days
+                    ? `On ${task.days} of ${shift.days} days`
+                    : shift.days > 1
+                      ? `On all ${shift.days} days`
+                      : ""}
+                  {task.signups > 0
+                    ? `${shift.days > 1 ? " · " : ""}${task.signups} signed up`
+                    : ""}
+                </span>
+              )}
+            </div>
+          ))}
+
+          {newTasks.map((id) => (
+            <div
+              key={id}
+              className="grid grid-cols-1 sm:grid-cols-12 gap-3 items-end bg-white rounded-xl border border-dashed border-slate-300 p-3"
+            >
+              {/* Empty original marks it as new; saving the card creates it. */}
+              <input type="hidden" name="taskOriginal" value="" />
+              <div className="sm:col-span-8">
+                <label className={EDIT_SUBLABEL}>Task *</label>
+                <input type="text" name="taskTitle" required placeholder="e.g., Setup Crew" className={EDIT_INPUT} />
+              </div>
+              <div className="sm:col-span-3">
+                <label className={EDIT_SUBLABEL}>Spots Needed</label>
+                <input type="number" name="taskCapacity" min={1} max={999} defaultValue={1} className={EDIT_INPUT} />
+              </div>
+              <div className="sm:col-span-1 flex sm:justify-end">
+                <button
+                  type="button"
+                  onClick={() => setNewTasks((prev) => prev.filter((n) => n !== id))}
+                  title="Discard this task"
+                  className="text-slate-400 hover:text-rose-500 font-bold text-xs transition-colors inline-flex items-center gap-1 p-2"
+                >
+                  <X className="w-3.5 h-3.5" />
+                </button>
+              </div>
+            </div>
+          ))}
+
+          <button
+            type="button"
+            onClick={() => setNewTasks((prev) => [...prev, Date.now()])}
+            className="px-3 py-1.5 text-xs font-semibold rounded-2xl border border-dashed border-slate-300 hover:border-blue-400 hover:text-blue-600 bg-white transition-all flex items-center gap-1"
+          >
+            <span>+ Add Task to this shift</span>
+          </button>
+        </div>
+
+        <button
+          type="submit"
+          name="intent"
+          value="update_shift"
+          disabled={isSubmitting}
+          className="px-4 py-2 rounded-2xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold shadow-sm transition-all disabled:opacity-50"
+        >
+          {isSubmitting ? "Saving…" : "Save shift"}
+        </button>
+      </Form>
+
+      {/* Targets for the remove buttons above — kept out of the card's form so
+          a removal never carries half-finished edits with it. */}
+      <Form method="post" id={`${formId}-remove`} className="hidden">
+        <input type="hidden" name="intent" value="delete_shift" />
+        <input type="hidden" name="adminToken" value={adminToken || ""} />
+        <input type="hidden" name="shiftKey" value={shift.key} />
+      </Form>
+      {shift.tasks.map((task) => (
+        <Form
+          key={`del-${task.id}`}
+          method="post"
+          id={`${formId}-del-${encodeURIComponent(task.id)}`}
+          className="hidden"
+        >
+          <input type="hidden" name="intent" value="delete_shift_task" />
+          <input type="hidden" name="adminToken" value={adminToken || ""} />
+          <input type="hidden" name="shiftKey" value={shift.key} />
+          <input type="hidden" name="slotTitle" value={task.title} />
+          <input type="hidden" name="slotTask" value={task.id} />
+        </Form>
+      ))}
+    </div>
+  );
+}
+
+/** A brand-new shift, laid out like create's card; saving adds it to every day. */
+function NewShiftCard({
+  index,
+  adminToken,
+  isSubmitting,
+  multiDay,
+  onDiscard,
+}: {
+  index: number;
+  adminToken: string | null;
+  isSubmitting: boolean;
+  multiDay: boolean;
+  onDiscard: () => void;
+}) {
+  const [start, setStart] = useState("");
+  const [end, setEnd] = useState("");
+  // Once this draft is saved the shift arrives as a real card, so the draft
+  // must go — left filled in, a second "Save shift" would add it all again.
+  // A rejected save keeps the draft so nothing typed is lost. actionData
+  // still holds the PREVIOUS result while this save is in flight, so only a
+  // result object different from the one seen at submit time is ours.
+  const actionData = useActionData<{ success?: boolean; error?: string }>();
+  const NOT_PENDING = useRef<object>({}).current;
+  const pendingSince = useRef<unknown>(NOT_PENDING);
+  const discard = useRef(onDiscard);
+  discard.current = onDiscard;
+  useEffect(() => {
+    if (pendingSince.current === NOT_PENDING || actionData === pendingSince.current) return;
+    pendingSince.current = NOT_PENDING;
+    if (actionData?.success) discard.current();
+  }, [actionData, NOT_PENDING]);
+  return (
+    <Form
+      method="post"
+      onSubmit={() => {
+        pendingSince.current = actionData;
+      }}
+      className="p-4 bg-slate-50/70 rounded-2xl border border-dashed border-slate-300 space-y-3"
+    >
+      <input type="hidden" name="intent" value="add_shift" />
+      <input type="hidden" name="adminToken" value={adminToken || ""} />
+      <input type="hidden" name="slotStartTime" value={start} />
+      <input type="hidden" name="slotEndTime" value={end} />
+      <div className="flex items-center justify-between">
+        <span className="text-xs font-bold text-slate-700">
+          Shift {index + 1}
+          {multiDay && <span className="font-medium text-slate-400"> · added to every day</span>}
+        </span>
+        <button
+          type="button"
+          onClick={onDiscard}
+          className="text-slate-400 hover:text-rose-500 font-bold text-xs transition-colors inline-flex items-center gap-1"
+        >
+          Remove <X className="w-3 h-3" />
+        </button>
+      </div>
+      <div className="grid grid-cols-1 sm:grid-cols-12 gap-3 items-center">
+        <div className="sm:col-span-6">
+          <label className={EDIT_SUBLABEL}>Shift Name (Optional)</label>
+          <input type="text" name="slotShiftName" placeholder="e.g., Afternoon" className={EDIT_INPUT} />
+        </div>
+        <div className="sm:col-span-3">
+          <label className={EDIT_SUBLABEL}>Start Time</label>
+          <TimePicker value={start} onChange={setStart} size="sm" />
+        </div>
+        <div className="sm:col-span-3">
+          <label className={EDIT_SUBLABEL}>End Time</label>
+          <TimePicker value={end} onChange={setEnd} size="sm" />
+        </div>
+      </div>
+      <div className="grid grid-cols-1 sm:grid-cols-12 gap-3 items-end bg-white rounded-xl border border-slate-200/80 p-3">
+        <div className="sm:col-span-8">
+          <label className={EDIT_SUBLABEL}>Task *</label>
+          <input type="text" name="slotTitle" required placeholder="e.g., Clean-up Crew" className={EDIT_INPUT} />
+        </div>
+        <div className="sm:col-span-3">
+          <label className={EDIT_SUBLABEL}>Spots Needed</label>
+          <input type="number" name="slotCapacity" min={1} max={999} defaultValue={1} className={EDIT_INPUT} />
+        </div>
+      </div>
+      <button
+        type="submit"
+        disabled={isSubmitting}
+        className="px-4 py-2 rounded-2xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold shadow-sm transition-all disabled:opacity-50"
+      >
+        {isSubmitting ? "Saving…" : "Save shift"}
+      </button>
+    </Form>
+  );
+}
+
+/** The editor's whole shifts section: cards plus create's "+ Add Shift". */
+function EditShiftsPanel({
+  shifts,
+  adminToken,
+  isSubmitting,
+  multiDay,
+}: {
+  shifts: EditShift[];
+  adminToken: string | null;
+  isSubmitting: boolean;
+  multiDay: boolean;
+}) {
+  const [drafts, setDrafts] = useState<number[]>([]);
+  return (
+    <div className="space-y-3.5">
+      <div className="flex items-center justify-between gap-3">
+        <p className="text-xs text-slate-500">
+          Name each shift (optional), set its time, then add one or more tasks sharing that time.
+          {multiDay && " Changes apply to every day the shift runs on."}
+        </p>
+        <button
+          type="button"
+          onClick={() => setDrafts((prev) => [...prev, Date.now()])}
+          className="px-3.5 py-1.5 text-xs font-semibold rounded-2xl border border-slate-200 hover:border-blue-400 hover:text-blue-600 bg-white transition-all shadow-sm flex items-center gap-1 shrink-0"
+        >
+          <span>+ Add Shift</span>
+        </button>
+      </div>
+
+      {shifts.map((shift, index) => (
+        <EditShiftCard
+          key={shift.key}
+          shift={shift}
+          index={index}
+          adminToken={adminToken}
+          isSubmitting={isSubmitting}
+        />
+      ))}
+
+      {drafts.map((id, i) => (
+        <NewShiftCard
+          key={id}
+          index={shifts.length + i}
+          adminToken={adminToken}
+          isSubmitting={isSubmitting}
+          multiDay={multiDay}
+          onDiscard={() => setDrafts((prev) => prev.filter((d) => d !== id))}
+        />
+      ))}
+    </div>
+  );
+}
+
 function EditTimezoneField({ initial }: { initial: string }) {
   const [tz, setTz] = useState(initial || "UTC");
   return (
@@ -2337,6 +3439,34 @@ export default function EventView() {
     return () => window.clearTimeout(t);
   }, [toast]);
   const [showEdit, setShowEdit] = useState(false);
+  // The editor is a panel further down the page, so opening it has to take the
+  // organizer there — otherwise "Edit event" looks like it did nothing.
+  const editPanelRef = useRef<HTMLDivElement>(null);
+  const editFormRef = useRef<HTMLFormElement>(null);
+  const [editDirty, setEditDirty] = useState(false);
+  useEffect(() => {
+    if (!showEdit) return;
+    const t = window.setTimeout(() => {
+      editPanelRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+      editPanelRef.current?.querySelector<HTMLInputElement>('input[name="title"]')?.focus({
+        preventScroll: true,
+      });
+    }, 60);
+    return () => window.clearTimeout(t);
+  }, [showEdit]);
+  /** Closing with edits in flight should ask first — a panel this long is easy to abandon. */
+  const closeEditor = () => {
+    if (editDirty && !window.confirm("Close without saving your changes?")) return;
+    setEditDirty(false);
+    setShowEdit(false);
+  };
+  // Leaving the page entirely gets the browser's own warning.
+  useEffect(() => {
+    if (!editDirty) return;
+    const warn = (e: BeforeUnloadEvent) => e.preventDefault();
+    window.addEventListener("beforeunload", warn);
+    return () => window.removeEventListener("beforeunload", warn);
+  }, [editDirty]);
   // QR is derived on demand from the event URL, so older events need no
   // backfill. If the image fails to load (unknown/expired event, generation
   // error), hide the badge silently instead of showing a broken-image box.
@@ -2598,6 +3728,7 @@ export default function EventView() {
   const shiftGroups = useMemo(() => {
     const groups: Array<{
       key: string;
+      date: string | null;
       shiftName: string | null;
       startTime: string | null;
       endTime: string | null;
@@ -2606,7 +3737,11 @@ export default function EventView() {
     const indexByKey = new Map<string, number>();
     slots.forEach((s) => {
       const shiftName = ((s as { shiftName?: string | null }).shiftName || "").trim();
-      const key = `${shiftName}||${s.startTime || ""}||${s.endTime || ""}`;
+      // Multi-day sheets repeat the same shift on several dates, so the date
+      // is part of the identity. Single-day sheets have no slot dates, so the
+      // key (and the grouping) is exactly what it was before.
+      const date = effectiveDateForSlot(s, event.eventDate);
+      const key = `${date || ""}||${shiftName}||${s.startTime || ""}||${s.endTime || ""}`;
       const existing = indexByKey.get(key);
       if (existing !== undefined) {
         groups[existing].tasks.push(s);
@@ -2614,6 +3749,7 @@ export default function EventView() {
         indexByKey.set(key, groups.length);
         groups.push({
           key,
+          date,
           shiftName: shiftName || null,
           startTime: s.startTime,
           endTime: s.endTime,
@@ -2622,7 +3758,150 @@ export default function EventView() {
       }
     });
     return groups;
-  }, [slots]);
+  }, [slots, event.eventDate]);
+
+  // Sign-up sheets that span several dates render one section per date. A
+  // sheet whose slots have no date (every sheet created before multi-day
+  // existed) produces a single undated section and renders exactly as before.
+  const dateSections = useMemo(() => {
+    const sections: Array<{ date: string | null; groups: typeof shiftGroups }> = [];
+    const indexByDate = new Map<string, number>();
+    shiftGroups.forEach((group) => {
+      const key = group.date || "";
+      const existing = indexByDate.get(key);
+      if (existing !== undefined) sections[existing].groups.push(group);
+      else {
+        indexByDate.set(key, sections.length);
+        sections.push({ date: group.date, groups: [group] });
+      }
+    });
+    return sections.sort((a, b) => (a.date || "").localeCompare(b.date || ""));
+  }, [shiftGroups]);
+  // From what the sheet IS, not how many days happen to have tasks: a series
+  // whose tasks all land on one day (say, a custom repeat that only runs on
+  // Wednesdays and ends after one) still dates its slots, and that day is
+  // not necessarily events.event_date. Single-day sheets never date a slot.
+  const isMultiDate =
+    event.type === "SIGNUP_SHEET" &&
+    (dateSections.length > 1 ||
+      slots.some((s) => Boolean((s as { slotDate?: string | null }).slotDate)) ||
+      ((event as { dateSpec?: DateSpec }).dateSpec?.mode ?? "single") !== "single");
+  // Header badge: one date, or the span of a multi-day sheet and how it runs,
+  // so a 13-week series doesn't read as a one-off on its first day.
+  const headerDateLabel = useMemo(() => {
+    if (!event.eventDate) return "";
+    const long = (d: string) =>
+      new Date(d + "T00:00:00").toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric", year: "numeric" });
+    if (!isMultiDate || dateSections.length === 0) return long(event.eventDate);
+    const first = dateSections[0].date || event.eventDate;
+    const last = dateSections[dateSections.length - 1].date || first;
+    const short = (d: string) =>
+      new Date(d + "T00:00:00").toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" });
+    const spec = (event as { dateSpec?: DateSpec }).dateSpec;
+    const how =
+      spec?.mode === "repeat"
+        ? describeSpec(spec, event.eventDate)
+        : `${dateSections.length} ${dateSections.length === 1 ? "day" : "days"}`;
+    // One populated day: that day (not the first date of the schedule).
+    if (first === last) return spec?.mode === "repeat" ? `${long(first)} · ${how}` : long(first);
+    return `${short(first)} – ${long(last)} · ${how}`;
+  }, [event, isMultiDate, dateSections]);
+  /**
+   * The editor's shift cards: a shift is a name + time window (the identity
+   * the event page groups by), holding its tasks. On a repeating sheet the
+   * same shift exists on every day of the series, so a card covers all of
+   * them and says so; a task that runs on only some days says that too.
+   */
+  const adminShifts = useMemo(() => {
+    type Task = { id: string; title: string; capacity: number; days: number; signups: number };
+    type Shift = {
+      key: string;
+      shiftName: string | null;
+      startTime: string | null;
+      endTime: string | null;
+      days: number;
+      tasks: Task[];
+    };
+    const shifts: Shift[] = [];
+    const byKey = new Map<string, number>();
+    const dayBuckets = new Map<string, Set<string>>();
+    const taskDays = new Map<string, Set<string>>();
+    const seenOnDay = new Map<string, number>();
+
+    [...slots].sort((a, b) => (a.displayOrder ?? 0) - (b.displayOrder ?? 0)).forEach((slot) => {
+      const shiftName = ((slot as { shiftName?: string | null }).shiftName || "").trim();
+      const key = `${shiftName}||${slot.startTime || ""}||${slot.endTime || ""}`;
+      const date = effectiveDateForSlot(slot, event.eventDate) || "";
+      let index = byKey.get(key);
+      if (index === undefined) {
+        index = shifts.length;
+        byKey.set(key, index);
+        shifts.push({
+          key,
+          shiftName: shiftName || null,
+          startTime: slot.startTime,
+          endTime: slot.endTime,
+          days: 0,
+          tasks: [],
+        });
+        dayBuckets.set(key, new Set());
+      }
+      dayBuckets.get(key)!.add(date);
+      // Same-named tasks stay separate: the n-th "Greeter" on a day is its own
+      // task, matched across days by that position (the server's identity too).
+      const dayTitle = `${key}||${date}||${slot.title}`;
+      const n = seenOnDay.get(dayTitle) ?? 0;
+      seenOnDay.set(dayTitle, n + 1);
+      const taskId = `${n}:${slot.title}`;
+      const taskKey = `${key}||${taskId}`;
+      if (!taskDays.has(taskKey)) {
+        taskDays.set(taskKey, new Set());
+        shifts[index].tasks.push({
+          id: taskId,
+          title: slot.title,
+          capacity: slot.capacity,
+          days: 0,
+          signups: 0,
+        });
+      }
+      taskDays.get(taskKey)!.add(date);
+      const task = shifts[index].tasks.find((t) => t.id === taskId)!;
+      task.days = taskDays.get(taskKey)!.size;
+      task.signups += initialSignups.filter((su) => su && su.slotId === slot.id).length;
+    });
+
+    shifts.forEach((shift) => {
+      shift.days = dayBuckets.get(shift.key)!.size;
+    });
+    return shifts;
+  }, [slots, event.eventDate, initialSignups]);
+  const [showAllDates, setShowAllDates] = useState(false);
+  // Long series (a school year) open on the next four weeks so the page isn't
+  // an endless scroll; short ones always show every date.
+  const windowedSections = useMemo(() => {
+    if (!isMultiDate || showAllDates || dateSections.length <= 7) return dateSections;
+    // "Today" on the sheet's own calendar — in UTC, an evening in New York is
+    // already tomorrow and today's shifts would drop out of view.
+    const dayIn = (ms: number) => {
+      try {
+        return new Intl.DateTimeFormat("en-CA", {
+          timeZone: (event as { timezone?: string | null }).timezone || "UTC",
+        }).format(new Date(ms));
+      } catch {
+        return new Date(ms).toISOString().slice(0, 10);
+      }
+    };
+    const today = dayIn(Date.now());
+    const horizon = dayIn(Date.now() + 28 * 24 * 60 * 60 * 1000);
+    const upcoming = dateSections.filter((s) => (s.date || "") >= today);
+    const windowed = upcoming.filter((s) => (s.date || "") <= horizon);
+    if (windowed.length > 0) return windowed;
+    if (upcoming.length > 0) return upcoming.slice(0, 4);
+    // A finished series still shows something: its last few days, where the
+    // organizer checking the roster afterwards is looking.
+    return dateSections.slice(-4);
+  }, [dateSections, isMultiDate, showAllDates, event]);
+  const hiddenDateCount = dateSections.length - windowedSections.length;
 
   // Organizer-only volunteer roster rows (SIGNUP_SHEET): shift, task, name,
   // email, signed-up-at. Emails are present only for verified admins (the
@@ -2634,7 +3913,13 @@ export default function EventView() {
       .filter(Boolean)
       .map((s) => {
         const slot = slotById.get(s!.slotId) as
-          | { title?: string; shiftName?: string | null; startTime?: string | null; endTime?: string | null }
+          | {
+              title?: string;
+              shiftName?: string | null;
+              slotDate?: string | null;
+              startTime?: string | null;
+              endTime?: string | null;
+            }
           | undefined;
         const shiftName = (slot?.shiftName || "").trim();
         const time = [slot?.startTime, slot?.endTime]
@@ -2643,6 +3928,9 @@ export default function EventView() {
           .join(" – ");
         return {
           id: s!.id,
+          // Which day they signed up FOR — on a multi-day sheet the shift and
+          // task repeat, so without this two volunteers look identical.
+          date: slot?.slotDate || event.eventDate,
           shift: [shiftName, time].filter(Boolean).join(" | ") || "—",
           task: slot?.title || "Unknown",
           name: s!.participantName,
@@ -2651,11 +3939,12 @@ export default function EventView() {
         };
       })
       .sort((a, b) =>
+        (a.date || "").localeCompare(b.date || "") ||
         a.shift.localeCompare(b.shift) ||
         a.task.localeCompare(b.task) ||
         a.signedUpAt.localeCompare(b.signedUpAt)
       );
-  }, [initialSignups, slots]);
+  }, [initialSignups, slots, event.eventDate]);
   const rosterExportHref =
     adminToken
       ? `/events/${event.id}/export?admin=${encodeURIComponent(adminToken)}`
@@ -2964,7 +4253,7 @@ export default function EventView() {
             {isAdmin && (
               <button
                 type="button"
-                onClick={() => setShowEdit((v) => !v)}
+                onClick={() => (showEdit ? closeEditor() : setShowEdit(true))}
                 className="shrink-0 mt-1 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full border border-slate-200 bg-white hover:bg-slate-50 hover:border-slate-300 text-xs font-semibold text-slate-600 hover:text-slate-900 transition-all shadow-sm"
               >
                 <Pencil className="w-3.5 h-3.5" />
@@ -2972,12 +4261,6 @@ export default function EventView() {
               </button>
             )}
           </div>
-
-          {event.description && (
-            <p className="text-sm text-slate-600 max-w-2xl leading-relaxed whitespace-pre-wrap font-normal">
-              {event.description}
-            </p>
-          )}
 
           <div className="flex flex-wrap items-center gap-2 pt-1">
             {/* TIME_POLL has no event date — options carry their own days. */}
@@ -2991,7 +4274,7 @@ export default function EventView() {
                 className="inline-flex items-center gap-1.5 text-xs font-semibold text-slate-700 bg-slate-100/90 px-3 py-1.5 rounded-full border border-slate-200/80"
               >
                 <CalendarDays className="w-3.5 h-3.5 text-slate-500" />
-                {new Date(event.eventDate + "T00:00:00").toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric", year: "numeric" })}
+                {headerDateLabel}
                 {showViewerTz ? ` · ${organizerTzLabel(organizerTz, headerTzAt)}` : ""}
               </span>
             )}
@@ -3004,12 +4287,30 @@ export default function EventView() {
                 Event time: {organizerTzLabel(organizerTz, headerTzAt)}
               </span>
             )}
-            {event.location && (
-              <span className="inline-flex items-center gap-1.5 text-xs font-semibold text-slate-700 bg-slate-100/90 px-3 py-1.5 rounded-full border border-slate-200/80">
-                <MapPin className="w-3.5 h-3.5 text-slate-500" />
-                {event.location}
-              </span>
-            )}
+            {event.location &&
+              (() => {
+                // A location is often a meeting link — make it clickable
+                // instead of something people have to copy by hand.
+                const locationUrl = asExternalUrl(event.location);
+                const pill =
+                  "inline-flex items-center gap-1.5 text-xs font-semibold text-slate-700 bg-slate-100/90 px-3 py-1.5 rounded-full border border-slate-200/80 max-w-full";
+                return locationUrl ? (
+                  <a
+                    href={locationUrl}
+                    target="_blank"
+                    rel="noopener noreferrer nofollow"
+                    className={`${pill} hover:border-blue-300 hover:text-blue-700 transition-colors`}
+                  >
+                    <Link2 className="w-3.5 h-3.5 text-slate-500 shrink-0" />
+                    <span className="truncate">{event.location}</span>
+                  </a>
+                ) : (
+                  <span className={pill}>
+                    <MapPin className="w-3.5 h-3.5 text-slate-500 shrink-0" />
+                    <span className="truncate">{event.location}</span>
+                  </span>
+                );
+              })()}
             <span className="inline-flex items-center gap-1.5 text-xs font-medium text-slate-500 bg-slate-100/90 px-3 py-1.5 rounded-full border border-slate-200/80">
               <User className="w-3.5 h-3.5 text-slate-500" />
               Organized by:&nbsp;<strong className="text-slate-800 font-semibold">{event.organizerName}</strong>
@@ -3030,9 +4331,11 @@ export default function EventView() {
               </span>
             )}
           </div>
-          <p className="text-xs text-slate-400 pt-0.5">
-            Anyone with the link can see names/notes. Organizer can delete anytime below.
-          </p>
+          {event.description && (
+            <p className="text-sm text-slate-600 max-w-2xl leading-relaxed whitespace-pre-wrap font-normal pt-1">
+              {event.description}
+            </p>
+          )}
         </div>
         </div>
 
@@ -3083,6 +4386,12 @@ export default function EventView() {
               private section below — no export button here so volunteers
               never mistake it for a public action. */}
         </div>
+
+        {/* Privacy note sits with the actions it is about, instead of between
+            the organizer pills and the description. */}
+        <p className="text-xs text-slate-400 pt-3">
+          Anyone with the link can see names/notes. Organizer can delete anytime below.
+        </p>
 
         {/* Admin Bar */}
         {isAdmin && (
@@ -3173,20 +4482,43 @@ export default function EventView() {
       {/* ADMIN EDIT PANEL                                                      */}
       {/* ===================================================================== */}
       {isAdmin && showEdit && (
-        <div className="bg-white border border-slate-200/80 rounded-3xl p-6 sm:p-8 shadow-[0_2px_12px_rgba(0,0,0,0.03)] space-y-8 animate-fade-in">
+        <div
+          ref={editPanelRef}
+          className="bg-white border border-slate-200/80 rounded-3xl p-6 sm:p-8 shadow-[0_2px_12px_rgba(0,0,0,0.03)] space-y-8 animate-fade-in scroll-mt-24"
+        >
           <div className="flex items-center justify-between">
             <h2 className="text-lg font-bold text-slate-900 tracking-tight inline-flex items-center gap-2"><Pencil className="w-4 h-4" /> Edit Event</h2>
-            <button
-              type="button"
-              onClick={() => setShowEdit(false)}
-              className="px-3.5 py-1.5 text-xs font-semibold rounded-2xl border border-slate-200 hover:border-slate-300 hover:bg-slate-50 bg-white text-slate-600 transition-all shadow-sm inline-flex items-center gap-1"
-            >
-              Close <X className="w-3 h-3" />
-            </button>
+            <div className="flex items-center gap-2 shrink-0">
+              <button
+                type="button"
+                onClick={closeEditor}
+                className="px-3.5 py-1.5 text-xs font-semibold rounded-2xl border border-slate-200 hover:border-slate-300 hover:bg-slate-50 bg-white text-slate-600 transition-all shadow-sm inline-flex items-center gap-1"
+              >
+                Cancel <X className="w-3 h-3" />
+              </button>
+              {/* Outside the <Form>, wired to it by id — the save belongs with
+                  Cancel at the top, not at the end of a long panel. */}
+              <button
+                type="submit"
+                form="edit-event-details"
+                disabled={isSubmitting}
+                className="px-4 py-1.5 rounded-2xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold shadow-sm transition-all hover:scale-[1.02] active:scale-[0.98] disabled:opacity-50"
+              >
+                {isSubmitting ? "Saving…" : "Update Details"}
+              </button>
+            </div>
           </div>
 
           {/* Edit details form */}
-          <Form method="post" className="space-y-4">
+          <Form
+            method="post"
+            id="edit-event-details"
+            className="space-y-4"
+            ref={editFormRef}
+            onInput={() => setEditDirty(true)}
+            onChange={() => setEditDirty(true)}
+            onSubmit={() => setEditDirty(false)}
+          >
             <input type="hidden" name="intent" value="update_event" />
             <input type="hidden" name="adminToken" value={adminToken || ""} />
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -3206,21 +4538,20 @@ export default function EventView() {
                   <EditTimezoneField initial={(event as { timezone?: string | null }).timezone || "UTC"} />
                 </div>
               ) : (
-                <div>
-                  <label className="block text-xs font-semibold text-slate-700 mb-1.5">Date</label>
-                  <DatePicker
-                    name="eventDate"
-                    defaultValue={event.eventDate || ""}
-                  />
-                </div>
+                <EditDatesField
+                  initialSpec={(event as { dateSpec?: DateSpec }).dateSpec ?? { mode: "single" }}
+                  initialDate={event.eventDate || ""}
+                />
               )}
               <div>
-                <label className="block text-xs font-semibold text-slate-700 mb-1.5">Location</label>
+                <label className="block text-xs font-semibold text-slate-700 mb-1.5">
+                  Location or Link (Optional)
+                </label>
                 <input
                   type="text"
                   name="location"
                   defaultValue={event.location || ""}
-                  placeholder="e.g. Central Park, Zoom link…"
+                  placeholder="e.g., Central Park or https://meet.google.com/xyz"
                   className="w-full px-4 py-3 rounded-xl border border-slate-200/90 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all placeholder:text-slate-400"
                 />
               </div>
@@ -3234,7 +4565,9 @@ export default function EventView() {
                 </div>
               )}
               <div className="sm:col-span-2">
-                <label className="block text-xs font-semibold text-slate-700 mb-1.5">Description</label>
+                <label className="block text-xs font-semibold text-slate-700 mb-1.5">
+                  Description / Notes (Optional)
+                </label>
                 <textarea
                   name="description"
                   rows={3}
@@ -3253,13 +4586,6 @@ export default function EventView() {
                 />
               </div>
             </div>
-            <button
-              type="submit"
-              disabled={isSubmitting}
-              className="px-6 py-3 rounded-2xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold shadow-sm transition-all hover:scale-[1.02] active:scale-[0.98] disabled:opacity-50"
-            >
-              {isSubmitting ? "Saving…" : "Save Details"}
-            </button>
           </Form>
 
           {/* Manage options / slots */}
@@ -3294,171 +4620,24 @@ export default function EventView() {
                     isSubmitting={isSubmitting}
                   />
                 ))}
+                <PollTimeNewOptionRow
+                  durationMinutes={(event as { durationMinutes?: number | null }).durationMinutes ?? null}
+                  adminToken={adminToken}
+                  isSubmitting={isSubmitting}
+                />
               </div>
             ) : (
-            <div className="space-y-3.5">
-              {slots.map((s) => (
-                <Form
-                  key={s.id}
-                  method="post"
-                  className="flex flex-col lg:flex-row gap-2.5 items-stretch lg:items-end bg-slate-50/70 border border-slate-200/80 rounded-2xl p-4 transition-all"
-                >
-                  <input type="hidden" name="intent" value="update_slot" />
-                  <input type="hidden" name="adminToken" value={adminToken || ""} />
-                  <input type="hidden" name="slotId" value={s.id} />
-                  <div className="flex-1 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-12 gap-2.5">
-                    <div className="sm:col-span-2 lg:col-span-3">
-                        <label className="block text-[10px] uppercase font-bold text-slate-400 mb-1">Shift (opt.)</label>
-                        <input
-                          type="text"
-                          name="slotShiftName"
-                          defaultValue={(s as { shiftName?: string | null }).shiftName || ""}
-                          placeholder="e.g. Morning"
-                          className="w-full px-3 py-2 rounded-xl border border-slate-200 text-xs bg-white focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all placeholder:text-slate-400"
-                        />
-                      </div>
-                    <div className="sm:col-span-2 lg:col-span-3">
-                      <label className="block text-[10px] uppercase font-bold text-slate-400 mb-1">Task *</label>
-                      <input
-                        type="text"
-                        name="slotTitle"
-                        required
-                        defaultValue={s.title}
-                        className="w-full px-3 py-2 rounded-xl border border-slate-200 text-xs bg-white focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all"
-                      />
-                    </div>
-                    <div className="lg:col-span-2">
-                      <label className="block text-[10px] uppercase font-bold text-slate-400 mb-1">Start</label>
-                      <input
-                        type="text"
-                        name="slotStartTime"
-                        defaultValue={s.startTime || ""}
-                        placeholder="9:00 AM"
-                        className="w-full px-3 py-2 rounded-xl border border-slate-200 text-xs bg-white focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all placeholder:text-slate-400"
-                      />
-                    </div>
-                    <div className="lg:col-span-2">
-                      <label className="block text-[10px] uppercase font-bold text-slate-400 mb-1">End</label>
-                      <input
-                        type="text"
-                        name="slotEndTime"
-                        defaultValue={s.endTime || ""}
-                        placeholder="11:00 AM"
-                        className="w-full px-3 py-2 rounded-xl border border-slate-200 text-xs bg-white focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all placeholder:text-slate-400"
-                      />
-                    </div>
-                    <div className="lg:col-span-2">
-                        <label className="block text-[10px] uppercase font-bold text-slate-400 mb-1">Capacity</label>
-                        <input
-                          type="number"
-                          name="slotCapacity"
-                          min={1}
-                          defaultValue={s.capacity}
-                          className="w-full px-3 py-2 rounded-xl border border-slate-200 text-xs bg-white focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all"
-                        />
-                      </div>
-                  </div>
-                  <div className="flex gap-2 shrink-0">
-                    <button
-                      type="submit"
-                      disabled={isSubmitting}
-                      className="px-4 py-2 rounded-2xl bg-white border border-slate-200 hover:border-slate-300 text-slate-700 text-xs font-semibold shadow-sm transition-all disabled:opacity-50"
-                    >
-                      Save
-                    </button>
-                    <button
-                      type="submit"
-                      name="intent"
-                      value="delete_slot"
-                      formMethod="post"
-                      onClick={(e) => {
-                        if (!window.confirm(`Delete "${s.title}"? Existing signups/votes for it will be removed.`)) {
-                          e.preventDefault();
-                        }
-                      }}
-                      className="px-4 py-2 rounded-2xl bg-white border border-rose-200 hover:border-rose-300 text-rose-600 hover:bg-rose-50 text-xs font-semibold shadow-sm transition-all"
-                    >
-                      Delete
-                    </button>
-                  </div>
-                </Form>
-              ))}
-            </div>
-            )}
-
-            {/* Add new slot */}
-            {event.type === "TIME_POLL" ? (
-              <PollTimeNewOptionRow
-                durationMinutes={(event as { durationMinutes?: number | null }).durationMinutes ?? null}
+              <EditShiftsPanel
+                shifts={adminShifts}
                 adminToken={adminToken}
                 isSubmitting={isSubmitting}
+                multiDay={isMultiDate}
               />
-            ) : (
-            <Form
-              method="post"
-              className="flex flex-col lg:flex-row gap-2.5 items-stretch lg:items-end bg-slate-50/70 border border-slate-200/80 rounded-2xl p-4 transition-all"
-            >
-              <input type="hidden" name="intent" value="add_slot" />
-              <input type="hidden" name="adminToken" value={adminToken || ""} />
-              <div className="flex-1 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-12 gap-2.5">
-                <div className="sm:col-span-2 lg:col-span-3">
-                    <label className="block text-[10px] uppercase font-bold text-slate-400 mb-1">Shift (opt.)</label>
-                    <input
-                      type="text"
-                      name="slotShiftName"
-                      placeholder="e.g. Morning"
-                      className="w-full px-3 py-2 rounded-xl border border-slate-200 text-xs bg-white focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all placeholder:text-slate-400"
-                    />
-                  </div>
-                <div className="sm:col-span-2 lg:col-span-3">
-                  <label className="block text-[10px] uppercase font-bold text-slate-400 mb-1">New task</label>
-                  <input
-                    type="text"
-                    name="slotTitle"
-                    placeholder="e.g. Setup crew"
-                    className="w-full px-3 py-2 rounded-xl border border-slate-200 text-xs bg-white focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all placeholder:text-slate-400"
-                  />
-                </div>
-                <div className="lg:col-span-2">
-                  <label className="block text-[10px] uppercase font-bold text-slate-400 mb-1">Start (opt.)</label>
-                  <input
-                    type="text"
-                    name="slotStartTime"
-                    placeholder="9:00 AM"
-                    className="w-full px-3 py-2 rounded-xl border border-slate-200 text-xs bg-white focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all placeholder:text-slate-400"
-                  />
-                </div>
-                <div className="lg:col-span-2">
-                  <label className="block text-[10px] uppercase font-bold text-slate-400 mb-1">End (opt.)</label>
-                  <input
-                    type="text"
-                    name="slotEndTime"
-                    placeholder="11:00 AM"
-                    className="w-full px-3 py-2 rounded-xl border border-slate-200 text-xs bg-white focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all placeholder:text-slate-400"
-                  />
-                </div>
-                <div className="lg:col-span-2">
-                    <label className="block text-[10px] uppercase font-bold text-slate-400 mb-1">Capacity</label>
-                    <input
-                      type="number"
-                      name="slotCapacity"
-                      min={1}
-                      defaultValue={1}
-                      className="w-full px-3 py-2 rounded-xl border border-slate-200 text-xs bg-white focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all"
-                    />
-                  </div>
-              </div>
-              <button
-                type="submit"
-                disabled={isSubmitting}
-                className="px-5 py-2.5 rounded-2xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold shadow-sm transition-all hover:scale-[1.02] active:scale-[0.98] shrink-0 disabled:opacity-50"
-              >
-                + Add Option
-              </button>
-            </Form>
             )}
             <p className="text-[11px] text-slate-500">
-              Deleting a task also removes its signups / votes. If it was the finalized winning time, the event reopens.
+              {event.type === "TIME_POLL"
+                ? "Deleting an option also removes its votes. If it was the finalized winning time, the event reopens."
+                : "A task or shift with volunteers signed up can't be removed — cancel those sign-ups first."}
             </p>
             <div className="pt-6 border-t border-rose-100 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
               <div className="text-xs text-slate-500">
@@ -3501,7 +4680,14 @@ export default function EventView() {
           </div>
 
           <div className="space-y-5">
-            {shiftGroups.map((group) => {
+            {windowedSections.map((section) => (
+              <div key={section.date || "undated"} className="space-y-5">
+                {isMultiDate && section.date && (
+                  <h3 className="text-sm font-extrabold uppercase tracking-wider text-slate-500 px-1 pt-2">
+                    {formatLongDateLabel(section.date)}
+                  </h3>
+                )}
+                {section.groups.map((group) => {
               const renderTask = (slot: SlotRow) => {
                 const slotSignups = initialSignups.filter((s) => Boolean(s && s.slotId === slot.id));
                 const isFull = slot.capacity > 0 && slotSignups.length >= slot.capacity;
@@ -3652,7 +4838,7 @@ export default function EventView() {
                         <DualSlotTime
                           organizerTz={organizerTz}
                           viewerTz={viewerTz}
-                          date={event.eventDate}
+                          date={group.date || event.eventDate}
                           startTime={group.startTime}
                           endTime={group.endTime}
                         />
@@ -3670,7 +4856,27 @@ export default function EventView() {
                   )}
                 </div>
               );
-            })}
+                })}
+              </div>
+            ))}
+            {hiddenDateCount > 0 && (
+              <button
+                type="button"
+                onClick={() => setShowAllDates(true)}
+                className="w-full px-4 py-3 rounded-2xl border border-slate-200 bg-white text-sm font-semibold text-slate-600 hover:border-blue-400 hover:text-blue-600 transition-all"
+              >
+                Show all {dateSections.length} days ({hiddenDateCount} hidden)
+              </button>
+            )}
+            {showAllDates && dateSections.length > 7 && (
+              <button
+                type="button"
+                onClick={() => setShowAllDates(false)}
+                className="w-full px-4 py-3 rounded-2xl border border-slate-200 bg-white text-sm font-semibold text-slate-600 hover:border-blue-400 hover:text-blue-600 transition-all"
+              >
+                Show fewer days
+              </button>
+            )}
           </div>
         </div>
       )}
@@ -3714,6 +4920,7 @@ export default function EventView() {
                 <table className="w-full text-left border-collapse text-xs min-w-[720px]">
                   <thead>
                     <tr className="bg-slate-50/80 border-y border-slate-200/80 text-slate-600 uppercase text-[10px] tracking-wider font-bold">
+                      {isMultiDate && <th scope="col" className="p-3.5">Day</th>}
                       <th scope="col" className="p-3.5">Shift</th>
                       <th scope="col" className="p-3.5">Task</th>
                       <th scope="col" className="p-3.5">Name</th>
@@ -3724,6 +4931,11 @@ export default function EventView() {
                   <tbody className="divide-y divide-slate-100 font-medium text-slate-800">
                     {rosterRows.map((r) => (
                       <tr key={r.id} className="hover:bg-slate-50/60 transition-colors">
+                        {isMultiDate && (
+                          <td className="p-3.5 align-top whitespace-nowrap">
+                            {r.date ? formatSlotDateLabel(r.date) : "—"}
+                          </td>
+                        )}
                         <td className="p-3.5 align-top">{r.shift}</td>
                         <td className="p-3.5 align-top font-semibold text-slate-900">{r.task}</td>
                         <td className="p-3.5 align-top">{r.name}</td>
@@ -3761,6 +4973,11 @@ export default function EventView() {
                       <tr key={r.id}>
                         <td className="px-3 py-2 align-baseline font-semibold text-slate-900 truncate max-w-[140px]">
                           {r.name}
+                          {isMultiDate && r.date && (
+                            <span className="block text-[10px] font-medium text-slate-400">
+                              {formatSlotDateLabel(r.date)}
+                            </span>
+                          )}
                         </td>
                         <td className="px-3 py-2 align-baseline text-right">
                           {r.email ? (
@@ -4586,6 +5803,14 @@ export default function EventView() {
 
             <div className="bg-blue-50/70 border border-blue-100 p-4 rounded-2xl text-xs text-blue-900 space-y-0.5">
               <span className="font-bold text-sm text-blue-950 block">{selectedSlotForSignup.title}</span>
+              {/* Every day of a series has the same task names, so say which day. */}
+              {isMultiDate && (() => {
+                const slot = slots.find((s) => s.id === selectedSlotForSignup.id);
+                const date = slot ? effectiveDateForSlot(slot, event.eventDate) : null;
+                return date ? (
+                  <span className="font-semibold text-blue-900 block">{formatLongDateLabel(date)}</span>
+                ) : null;
+              })()}
               <span className="text-blue-700">at {event.title}</span>
             </div>
 
