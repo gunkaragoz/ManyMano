@@ -84,7 +84,7 @@ export default function Index() {
           <span aria-hidden="true" className="text-slate-400">•</span>
           <span>No ads or tracking</span>
           <span aria-hidden="true" className="text-slate-400">•</span>
-          <span>Free forever</span>
+          <span>Free to use</span>
         </div>
 
         <h1 className="text-4xl sm:text-5xl font-extrabold tracking-tight text-slate-900 leading-[1.15]">
@@ -196,8 +196,8 @@ export default function Index() {
             <p className="text-xs text-slate-500">No passwords or sign-ups. Just create, share, you're done.</p>
           </div>
           <div className="space-y-1.5 p-4">
-            <div className="text-sm font-bold text-slate-900">3. Free forever</div>
-            <p className="text-xs text-slate-500">No paywalls or feature limits. Open source on GitHub.</p>
+            <div className="text-sm font-bold text-slate-900">3. Free to use</div>
+            <p className="text-xs text-slate-500">Open source on GitHub.</p>
           </div>
         </div>
       </div>
