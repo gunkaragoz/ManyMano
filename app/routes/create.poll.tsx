@@ -616,7 +616,7 @@ export default function CreateMeetingPoll() {
           <div aria-hidden="true" className="absolute left-3 top-3 bottom-3 w-px bg-green-100" />
           {/* Step 1: Meeting Details */}
           <div className="relative space-y-5">
-            <div className="flex items-center justify-between gap-3">
+            <div className="flex items-center gap-3">
               <div className="flex items-center gap-2">
                 <span className="absolute -left-9 top-0 w-6 h-6 rounded-full bg-green-600 text-white text-xs font-extrabold flex items-center justify-center shrink-0 ring-4 ring-white">
                   1
@@ -625,9 +625,6 @@ export default function CreateMeetingPoll() {
                   Meeting Details
                 </label>
               </div>
-              <span className="text-[11px] text-slate-400" title="Your draft is saved in this tab and survives refresh. It clears after successful creation.">
-                Draft auto-saved in this tab
-              </span>
             </div>
 
             <div className="space-y-4">
