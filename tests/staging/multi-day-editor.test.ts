@@ -32,15 +32,30 @@ type Slot = {
 
 const created: Sheet[] = [];
 
-function assertStaging(url: string) {
+function isStagingHost(url: string): boolean {
   const host = new URL(url).hostname;
-  const ok =
+  return (
     host.includes("stg") ||
     host.includes("staging") ||
     host.includes("preview") ||
     host === "localhost" ||
-    host === "127.0.0.1";
-  expect(ok, `REFUSING multi-day write tests against non-staging host ${host}`).toBe(true);
+    host === "127.0.0.1"
+  );
+}
+
+// Checked once, before any test is collected: a production URL fails the
+// whole file here, so no test gets the chance to write. A failed assertion
+// inside one test would only stop that test — Vitest runs the rest.
+if (LIVE && !isStagingHost(STAGING_URL)) {
+  throw new Error(`REFUSING multi-day write tests against non-staging host ${new URL(STAGING_URL).hostname}`);
+}
+
+/** Every request goes through here, and re-checks the host before it is sent. */
+function request(path: string, init?: RequestInit): Promise<Response> {
+  if (!isStagingHost(STAGING_URL)) {
+    throw new Error(`REFUSING request to non-staging host ${STAGING_URL}`);
+  }
+  return fetch(`${STAGING_URL}${path}`, init);
 }
 
 function body(fields: Record<string, string | number | Array<string | number> | undefined>) {
@@ -63,7 +78,7 @@ const ORGANIZER = {
 async function create(
   fields: Record<string, string | number | Array<string | number> | undefined>
 ): Promise<Sheet | { error: string }> {
-  const res = await fetch(`${STAGING_URL}/create/signup`, {
+  const res = await request(`/create/signup`, {
     method: "POST",
     redirect: "manual",
     headers: HEADERS(),
@@ -91,7 +106,7 @@ async function mustCreate(fields: Parameters<typeof create>[0]): Promise<Sheet> 
 
 /** Posts an organizer action; `ok` is true only for a success payload. */
 async function act(sheet: Sheet, fields: Parameters<typeof body>[0]) {
-  const res = await fetch(`${STAGING_URL}/events/${sheet.id}.data`, {
+  const res = await request(`/events/${sheet.id}.data`, {
     method: "POST",
     redirect: "manual",
     headers: HEADERS(),
@@ -107,7 +122,7 @@ async function act(sheet: Sheet, fields: Parameters<typeof body>[0]) {
 
 /** The sheet's slots as the event page loads them, ordered by day then position. */
 async function slots(sheet: Sheet): Promise<Slot[]> {
-  const res = await fetch(`${STAGING_URL}/events/${sheet.id}.data`, { headers: { cookie: sheet.cookie } });
+  const res = await request(`/events/${sheet.id}.data`, { headers: { cookie: sheet.cookie } });
   expect(res.status).toBe(200);
   const decoded = await decodeTurboStream(res.body!, globalThis);
   await decoded.done;
@@ -137,7 +152,7 @@ const weekly = (weekdays: string, count: number) => ({
 
 afterAll(async () => {
   for (const sheet of created) {
-    await fetch(`${STAGING_URL}/events/${sheet.id}.data`, {
+    await request(`/events/${sheet.id}.data`, {
       method: "POST",
       redirect: "manual",
       headers: HEADERS(),
@@ -148,7 +163,6 @@ afterAll(async () => {
 
 describe.skipIf(!LIVE)("multi-day sheets: create", () => {
   it("expands a weekly rule into one row per (date x task), honouring shift days", async () => {
-    assertStaging(STAGING_URL);
     // Mon + Wed from Wed 2026-10-07, four times; "Evening" runs on Mondays only.
     const sheet = await mustCreate({
       eventDate: "2026-10-07",
@@ -204,7 +218,6 @@ describe.skipIf(!LIVE)("multi-day sheets: create", () => {
 
 describe.skipIf(!LIVE)("multi-day sheets: editing the dates", () => {
   it("new days copy the nearest day on the same weekday", async () => {
-    assertStaging(STAGING_URL);
     const sheet = await mustCreate({
       eventDate: "2026-10-07",
       ...weekly("1,3", 4),
@@ -309,7 +322,6 @@ describe.skipIf(!LIVE)("multi-day sheets: shift cards", () => {
     });
 
   it("a rejected card writes nothing", async () => {
-    assertStaging(STAGING_URL);
     const sheet = await sameNamed();
     // New time, plus a new task that clashes with an existing one.
     const r = await act(sheet, {
