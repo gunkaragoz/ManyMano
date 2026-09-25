@@ -3683,14 +3683,14 @@ export default function EventView() {
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
             <div>
               <h2 className="text-xl font-bold text-slate-900 tracking-tight inline-flex items-center gap-2 flex-wrap">
-                Volunteer roster
+                Signup List
                 <span className="text-[11px] font-bold uppercase tracking-wider px-2.5 py-1 rounded-full bg-amber-50 text-amber-800 border border-amber-200">
                   Organizers only
                 </span>
                 {liveBadge}
               </h2>
               <p className="text-xs text-slate-500 mt-1">
-                {rosterRows.length} {rosterRows.length === 1 ? "volunteer" : "volunteers"} · Only visible to organizers — volunteers never see emails here.
+                {rosterRows.length} {rosterRows.length === 1 ? "signup" : "signups"} · Only visible to organizers.
               </p>
             </div>
             <a
@@ -3705,7 +3705,7 @@ export default function EventView() {
 
           {rosterRows.length === 0 ? (
             <p className="text-sm text-slate-400 italic">
-              No volunteers yet. Once people sign up, they&apos;ll appear here with contact details.
+              No signups yet. Once people sign up, they&apos;ll appear here with contact details.
             </p>
           ) : (
             <>
