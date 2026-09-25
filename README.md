@@ -114,6 +114,19 @@ pnpm run dev
 
 Open the URL from your `.dev.vars` `SITE_URL` in your browser (the dev server port follows it automatically).
 
+### Branch names
+
+Branch off `main` with one of four prefixes — nothing else:
+
+| Prefix | For |
+| --- | --- |
+| `feat/` | a new capability or a change to how something works |
+| `fix/` | a bug fix |
+| `doc/` | documentation only |
+| `chore/` | dependencies, config, tooling, housekeeping |
+
+Keep the rest short and readable: `feat/multi-day-repeating-sheets`, `fix/timezone-wiped-on-edit`, `chore/bump-wrangler`.
+
 ---
 
 ## 🛠️ Tech Stack
