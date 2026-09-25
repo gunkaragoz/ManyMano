@@ -182,6 +182,7 @@ export function DateModeTabs({
     else if (mode === "repeat") patch({ mode, weekdays: value.weekdays.length ? value.weekdays : [weekdayOf(start)] });
     else patch({ mode: "single" });
   };
+  const spec = selectionToSpec(value, start);
 
   return (
     <>
@@ -189,26 +190,25 @@ export function DateModeTabs({
           the spec itself rather than trusting any client-side date list. */}
       <input type="hidden" name="dateMode" value={value.mode} />
       {value.mode === "range" && <input type="hidden" name="dateEnd" value={value.end} />}
-      {value.mode === "repeat" && (
+      {/* Posted from the same spec the preview describes: a preset's weekday
+          and interval come from the start date, never from whatever the
+          custom panel last held. */}
+      {spec.mode === "repeat" && (
         <>
+          <input type="hidden" name="repeatType" value={spec.rule.type} />
           <input
             type="hidden"
-            name="repeatType"
-            value={
-              value.repeatKey === "custom"
-                ? value.unit === "month"
-                  ? "monthlyNth"
-                  : "weekly"
-                : value.repeatKey === "monthly"
-                  ? "monthlyNth"
-                  : value.repeatKey
-            }
+            name="repeatInterval"
+            value={"interval" in spec.rule ? spec.rule.interval : 1}
           />
-          <input type="hidden" name="repeatInterval" value={value.interval} />
-          <input type="hidden" name="repeatWeekdays" value={value.weekdays.join(",")} />
-          <input type="hidden" name="repeatEndMode" value={value.endMode} />
-          <input type="hidden" name="repeatEndDate" value={value.endDate} />
-          <input type="hidden" name="repeatCount" value={value.count} />
+          <input
+            type="hidden"
+            name="repeatWeekdays"
+            value={spec.rule.type === "weekly" ? spec.rule.weekdays.join(",") : ""}
+          />
+          <input type="hidden" name="repeatEndMode" value={"after" in spec.ends ? "after" : "on"} />
+          <input type="hidden" name="repeatEndDate" value={"on" in spec.ends ? spec.ends.on : ""} />
+          <input type="hidden" name="repeatCount" value={"after" in spec.ends ? spec.ends.after : ""} />
         </>
       )}
 

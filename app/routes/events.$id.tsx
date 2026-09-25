@@ -743,7 +743,7 @@ export async function action({ request, params, context }: ActionFunctionArgs) {
             <p>
               <a href="${escapeHtml(googleCalendarUrl)}" style="color: #2563eb;">Add to Google Calendar</a>
               &nbsp;·&nbsp;
-              <a href="${escapeHtml(url.origin)}/events/${escapeHtml(eventId)}/ics" style="color: #2563eb;">Download .ics (Apple/Outlook)</a>
+              <a href="${escapeHtml(url.origin)}/events/${escapeHtml(eventId)}/ics?slot=${escapeHtml(encodeURIComponent(targetSlot.id))}" style="color: #2563eb;">Download .ics (Apple/Outlook)</a>
             </p>
             <div style="background: #f8fafc; border: 1px solid #e2e8f0; padding: 16px; border-radius: 12px; margin: 24px 0;">
               <p style="margin: 0 0 10px 0; font-size: 13px;"><strong>Need to cancel?</strong></p>
@@ -1579,6 +1579,14 @@ export async function action({ request, params, context }: ActionFunctionArgs) {
 
       const newDates =
         spec.mode === "single" ? [] : expandDates(spec, eventDate as string, MAX_SERIES_DAYS + 1);
+      if (spec.mode !== "single" && newDates.length === 0) {
+        // Otherwise every existing day would count as removed and, with no
+        // sign-ups in the way, the sheet would be emptied.
+        return data(
+          { error: "Those settings don't include any days — pick a different repeat or end date." },
+          { status: 400 }
+        );
+      }
       if (newDates.length > 0 && newDates[newDates.length - 1] > maxSeriesEnd(eventDate as string)) {
         return data(
           { error: "A sheet can run for up to one year — pick an earlier end." },
@@ -1640,7 +1648,18 @@ export async function action({ request, params, context }: ActionFunctionArgs) {
         }
       }
 
-      const addedDates = newDates.filter((d) => !currentDates.includes(d));
+      // A day with no tasks may still be part of the schedule — its shifts
+      // were limited to other days. Only a day the old schedule didn't cover
+      // is new; filling the gaps would undo that choice on every save.
+      const oldSpec = readDateSpec(event.settings);
+      const previouslyScheduled = new Set(
+        oldSpec.mode === "single" || !event.eventDate
+          ? []
+          : expandDates(oldSpec, event.eventDate, MAX_SERIES_DAYS + 1)
+      );
+      const addedDates = newDates.filter(
+        (d) => !currentDates.includes(d) && !previouslyScheduled.has(d)
+      );
       const totalRows =
         existing.length -
         existing.filter((s) => droppedDates.includes(dayOf(s))).length +
@@ -1887,6 +1906,28 @@ export async function action({ request, params, context }: ActionFunctionArgs) {
     const daysOf = (rows: typeof allSlots) => [
       ...new Set(rows.map((r) => (r as { slotDate?: string | null }).slotDate ?? null)),
     ];
+    // A task's identity inside the shift. Titles alone aren't unique — the
+    // create form allows two "Greeter" tasks with different spots — so the
+    // n-th task of a title on a day is "n:Title", the same key the editor
+    // card posts. The same task on other days shares it.
+    const taskIdOf = new Map<string, string>();
+    {
+      const seenOnDay = new Map<string, number>();
+      [...inShift]
+        .sort((a, b) => (a.displayOrder ?? 0) - (b.displayOrder ?? 0))
+        .forEach((s) => {
+          const day = (s as { slotDate?: string | null }).slotDate ?? "";
+          const k = `${day}\u0000${s.title}`;
+          const n = seenOnDay.get(k) ?? 0;
+          seenOnDay.set(k, n + 1);
+          taskIdOf.set(s.id, `${n}:${s.title}`);
+        });
+    }
+    /** Rows of one task. A bare title (an older page) still means every task with it. */
+    const rowsOfTask = (posted: string) =>
+      /^\d+:/.test(posted)
+        ? inShift.filter((s) => taskIdOf.get(s.id) === posted)
+        : inShift.filter((s) => s.title === posted);
     const signupCount = async (ids: string[]) => {
       if (ids.length === 0) return 0;
       const rows = await db
@@ -1966,7 +2007,8 @@ export async function action({ request, params, context }: ActionFunctionArgs) {
 
     if (intent === "delete_shift_task") {
       const title = cleanText(formData.get("slotTitle"), SLOT_TITLE_MAX);
-      const victims = inShift.filter((s) => s.title === title);
+      const taskId = cleanText(formData.get("slotTask"), SLOT_TITLE_MAX + 8);
+      const victims = rowsOfTask(taskId || title);
       if (victims.length === 0) {
         return data({ error: "That task no longer exists — reload the page." }, { status: 400 });
       }
@@ -2004,17 +2046,22 @@ export async function action({ request, params, context }: ActionFunctionArgs) {
     if (slotError) return data({ error: slotError }, { status: 400 });
 
     const titles = formData.getAll("taskTitle") as string[];
-    const originals = formData.getAll("taskOriginalTitle") as string[];
+    // "taskOriginalTitle" is what a page loaded before task IDs posts.
+    const originals = (
+      formData.has("taskOriginal") ? formData.getAll("taskOriginal") : formData.getAll("taskOriginalTitle")
+    ) as string[];
     const capacities = formData.getAll("taskCapacity") as string[];
     const days = daysOf(inShift);
-    // Rows the card added have no original title: they are new tasks, created
-    // on every day of the shift — the same thing "+ Add Task to this shift"
-    // means on the create form.
+    // Rows the card added have no original: they are new tasks, created on
+    // every day of the shift — the same thing "+ Add Task to this shift" means
+    // on the create form. Everything is checked before anything is written,
+    // so a rejected card leaves the sheet exactly as it was.
     const added: Array<{ title: string; capacity: number }> = [];
+    const updates: Array<{ ids: string[]; title: string; capacity: number }> = [];
 
     for (let i = 0; i < titles.length; i++) {
-      const original = cleanText(originals[i], SLOT_TITLE_MAX);
-      const title = cleanText(titles[i], SLOT_TITLE_MAX) || original;
+      const original = cleanText(originals[i], SLOT_TITLE_MAX + 8);
+      const title = cleanText(titles[i], SLOT_TITLE_MAX) || original.replace(/^\d+:/, "");
       if (!title) continue;
       const capRaw = parseInt(capacities[i] || "1", 10);
       const capacity = Number.isFinite(capRaw) ? Math.min(Math.max(capRaw, 1), 999) : 1;
@@ -2029,14 +2076,11 @@ export async function action({ request, params, context }: ActionFunctionArgs) {
         added.push({ title, capacity });
         continue;
       }
-
-      const ids = inShift.filter((s) => s.title === original).map((s) => s.id);
-      for (let j = 0; j < ids.length; j += 20) {
-        await db
-          .update(eventSlots)
-          .set({ title, shiftName, startTime, endTime, capacity })
-          .where(inArray(eventSlots.id, ids.slice(j, j + 20)));
+      const ids = rowsOfTask(original).map((s) => s.id);
+      if (ids.length === 0) {
+        return data({ error: "A task in this shift changed — reload the page." }, { status: 400 });
       }
+      updates.push({ ids, title, capacity });
     }
 
     if (added.length > 0) {
@@ -2045,6 +2089,18 @@ export async function action({ request, params, context }: ActionFunctionArgs) {
       if (allSlots.length + added.length * days.length > cap) {
         return data({ error: `Too many options — maximum ${cap} per event.` }, { status: 400 });
       }
+    }
+
+    for (const u of updates) {
+      for (let j = 0; j < u.ids.length; j += 20) {
+        await db
+          .update(eventSlots)
+          .set({ title: u.title, shiftName, startTime, endTime, capacity: u.capacity })
+          .where(inArray(eventSlots.id, u.ids.slice(j, j + 20)));
+      }
+    }
+
+    if (added.length > 0) {
       let order = allSlots.reduce((m, s) => Math.max(m, s.displayOrder ?? 0), -1);
       const rows = added.flatMap((task) =>
         days.map((day) => ({
@@ -2463,7 +2519,8 @@ type EditShift = {
   startTime: string | null;
   endTime: string | null;
   days: number;
-  tasks: Array<{ title: string; capacity: number; days: number; signups: number }>;
+  /** `id` is "n:Title" — the n-th task of that title on a day (see update_shift). */
+  tasks: Array<{ id: string; title: string; capacity: number; days: number; signups: number }>;
 };
 
 const EDIT_INPUT =
@@ -2565,10 +2622,10 @@ function EditShiftCard({
         <div className="space-y-2.5 pt-1">
           {shift.tasks.map((task) => (
             <div
-              key={task.title}
+              key={task.id}
               className="grid grid-cols-1 sm:grid-cols-12 gap-3 items-end bg-white rounded-xl border border-slate-200/80 p-3"
             >
-              <input type="hidden" name="taskOriginalTitle" value={task.title} />
+              <input type="hidden" name="taskOriginal" value={task.id} />
               <div className="sm:col-span-8">
                 <label className={EDIT_SUBLABEL}>Task *</label>
                 <input type="text" name="taskTitle" required defaultValue={task.title} className={EDIT_INPUT} />
@@ -2587,7 +2644,7 @@ function EditShiftCard({
               <div className="sm:col-span-1 flex sm:justify-end">
                 <button
                   type="submit"
-                  form={`${formId}-del-${encodeURIComponent(task.title)}`}
+                  form={`${formId}-del-${encodeURIComponent(task.id)}`}
                   title={`Remove "${task.title}"`}
                   className="text-slate-400 hover:text-rose-500 font-bold text-xs transition-colors inline-flex items-center gap-1 p-2"
                   onClick={(e) => {
@@ -2619,7 +2676,7 @@ function EditShiftCard({
               className="grid grid-cols-1 sm:grid-cols-12 gap-3 items-end bg-white rounded-xl border border-dashed border-slate-300 p-3"
             >
               {/* Empty original marks it as new; saving the card creates it. */}
-              <input type="hidden" name="taskOriginalTitle" value="" />
+              <input type="hidden" name="taskOriginal" value="" />
               <div className="sm:col-span-8">
                 <label className={EDIT_SUBLABEL}>Task *</label>
                 <input type="text" name="taskTitle" required placeholder="e.g., Setup Crew" className={EDIT_INPUT} />
@@ -2670,15 +2727,16 @@ function EditShiftCard({
       </Form>
       {shift.tasks.map((task) => (
         <Form
-          key={`del-${task.title}`}
+          key={`del-${task.id}`}
           method="post"
-          id={`${formId}-del-${encodeURIComponent(task.title)}`}
+          id={`${formId}-del-${encodeURIComponent(task.id)}`}
           className="hidden"
         >
           <input type="hidden" name="intent" value="delete_shift_task" />
           <input type="hidden" name="adminToken" value={adminToken || ""} />
           <input type="hidden" name="shiftKey" value={shift.key} />
           <input type="hidden" name="slotTitle" value={task.title} />
+          <input type="hidden" name="slotTask" value={task.id} />
         </Form>
       ))}
     </div>
@@ -2701,8 +2759,24 @@ function NewShiftCard({
 }) {
   const [start, setStart] = useState("");
   const [end, setEnd] = useState("");
+  // Once this draft is saved the shift arrives as a real card, so the draft
+  // must go — left filled in, a second "Save shift" would add it all again.
+  // A rejected save keeps the draft so nothing typed is lost.
+  const actionData = useActionData<{ success?: boolean; error?: string }>();
+  const submitted = useRef(false);
+  useEffect(() => {
+    if (!submitted.current || !actionData) return;
+    submitted.current = false;
+    if (actionData.success) onDiscard();
+  }, [actionData, onDiscard]);
   return (
-    <Form method="post" className="p-4 bg-slate-50/70 rounded-2xl border border-dashed border-slate-300 space-y-3">
+    <Form
+      method="post"
+      onSubmit={() => {
+        submitted.current = true;
+      }}
+      className="p-4 bg-slate-50/70 rounded-2xl border border-dashed border-slate-300 space-y-3"
+    >
       <input type="hidden" name="intent" value="add_shift" />
       <input type="hidden" name="adminToken" value={adminToken || ""} />
       <input type="hidden" name="slotStartTime" value={start} />
@@ -3622,7 +3696,7 @@ export default function EventView() {
    * them and says so; a task that runs on only some days says that too.
    */
   const adminShifts = useMemo(() => {
-    type Task = { title: string; capacity: number; days: number; signups: number };
+    type Task = { id: string; title: string; capacity: number; days: number; signups: number };
     type Shift = {
       key: string;
       shiftName: string | null;
@@ -3635,8 +3709,9 @@ export default function EventView() {
     const byKey = new Map<string, number>();
     const dayBuckets = new Map<string, Set<string>>();
     const taskDays = new Map<string, Set<string>>();
+    const seenOnDay = new Map<string, number>();
 
-    slots.forEach((slot) => {
+    [...slots].sort((a, b) => (a.displayOrder ?? 0) - (b.displayOrder ?? 0)).forEach((slot) => {
       const shiftName = ((slot as { shiftName?: string | null }).shiftName || "").trim();
       const key = `${shiftName}||${slot.startTime || ""}||${slot.endTime || ""}`;
       const date = effectiveDateForSlot(slot, event.eventDate) || "";
@@ -3655,10 +3730,17 @@ export default function EventView() {
         dayBuckets.set(key, new Set());
       }
       dayBuckets.get(key)!.add(date);
-      const taskKey = `${key}||${slot.title}`;
+      // Same-named tasks stay separate: the n-th "Greeter" on a day is its own
+      // task, matched across days by that position (the server's identity too).
+      const dayTitle = `${key}||${date}||${slot.title}`;
+      const n = seenOnDay.get(dayTitle) ?? 0;
+      seenOnDay.set(dayTitle, n + 1);
+      const taskId = `${n}:${slot.title}`;
+      const taskKey = `${key}||${taskId}`;
       if (!taskDays.has(taskKey)) {
         taskDays.set(taskKey, new Set());
         shifts[index].tasks.push({
+          id: taskId,
           title: slot.title,
           capacity: slot.capacity,
           days: 0,
@@ -3666,7 +3748,7 @@ export default function EventView() {
         });
       }
       taskDays.get(taskKey)!.add(date);
-      const task = shifts[index].tasks.find((t) => t.title === slot.title)!;
+      const task = shifts[index].tasks.find((t) => t.id === taskId)!;
       task.days = taskDays.get(taskKey)!.size;
       task.signups += initialSignups.filter((su) => su && su.slotId === slot.id).length;
     });

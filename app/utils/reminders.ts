@@ -23,7 +23,7 @@
 // - Dedupe lives in the reminder_sends table (one row per event + date +
 //   kind). A retried cron run never double-emails.
 
-import { and, eq, inArray } from "drizzle-orm";
+import { and, eq, inArray, or } from "drizzle-orm";
 import {
   events,
   eventSlots,
@@ -95,7 +95,8 @@ export function reminderInstant(
  * endpoint and cron paths).
  */
 export function targetReminderDate(target: ReminderTarget): string | null {
-  if (target.kind === "signup_sheet") return target.event.eventDate;
+  // A multi-day sheet is reminded once per occurrence, keyed by that day.
+  if (target.kind === "signup_sheet") return target.reminderDate || target.event.eventDate;
   return effectiveDateForSlot(target.winningSlot, target.event.eventDate);
 }
 
@@ -187,25 +188,23 @@ export async function collectReminderTargets(
   // event_date (every sheet created before multi-day existed) or a slot dated
   // that day (multi-day / repeating sheets). Dateless sheets can't have a
   // day-before reminder.
+  // One statement with two bound values, so no row limit can truncate the
+  // list and no ID list can outgrow D1's 100-variable cap.
   const sheets = await db
     .select()
     .from(events)
-    .where(and(eq(events.type, "SIGNUP_SHEET"), eq(events.eventDate, date)));
-  const datedSlotRows = await db
-    .select({ eventId: eventSlots.eventId })
-    .from(eventSlots)
-    .where(eq(eventSlots.slotDate, date))
-    .limit(500);
-  const extraIds = [...new Set(datedSlotRows.map((r) => r.eventId))].filter(
-    (id) => !sheets.some((e) => e.id === id)
-  );
-  if (extraIds.length > 0) {
-    const extras = await db
-      .select()
-      .from(events)
-      .where(and(eq(events.type, "SIGNUP_SHEET"), inArray(events.id, extraIds)));
-    sheets.push(...extras);
-  }
+    .where(
+      and(
+        eq(events.type, "SIGNUP_SHEET"),
+        or(
+          eq(events.eventDate, date),
+          inArray(
+            events.id,
+            db.select({ id: eventSlots.eventId }).from(eventSlots).where(eq(eventSlots.slotDate, date))
+          )
+        )
+      )
+    );
   for (const e of sheets) {
     // A multi-day sheet is measured from its last date; only pay for that
     // query once the sheet already looks expired by creation date.
@@ -568,7 +567,7 @@ export function buildSignupOrganizerEmail(
         hasUnlimited = true;
       }
       const when = whenLineFor({
-        eventDate: e.eventDate,
+        eventDate: slot.slotDate || target.reminderDate || e.eventDate,
         startTime: slot.startTime,
         endTime: slot.endTime,
         timezone: e.timezone,

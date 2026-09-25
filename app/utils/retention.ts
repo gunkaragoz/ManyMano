@@ -1,4 +1,4 @@
-import { lt, inArray, eq } from "drizzle-orm";
+import { and, eq, gte, inArray, lt, notExists, sql } from "drizzle-orm";
 import { events, eventSlots, signups, pollVotes, pollVoteEntries } from "~/db";
 
 /** Default data retention: events expire this many days after creation. */
@@ -95,50 +95,41 @@ export async function pruneExpiredEvents(
   retentionDays: number = RETENTION_DAYS
 ): Promise<number> {
   const cutoff = cutoffIso(now, retentionDays);
+  // A multi-day / repeating event stays alive while any of its dates is still
+  // inside the retention window. That rule lives in the query rather than a
+  // filter after it: otherwise 50 still-running series old enough to match
+  // would fill every batch forever and hide the expired events behind them.
+  // Events with no dated slots (everything created before multi-day existed)
+  // are unaffected.
+  const cutoffDay = cutoff.slice(0, 10);
   const stale = await db
     .select({ id: events.id })
     .from(events)
-    .where(lt(events.createdAt, cutoff))
+    .where(
+      and(
+        lt(events.createdAt, cutoff),
+        notExists(
+          db
+            .select({ one: sql`1` })
+            .from(eventSlots)
+            .where(and(eq(eventSlots.eventId, events.id), gte(eventSlots.slotDate, cutoffDay)))
+        )
+      )
+    )
     .limit(50);
   if (stale.length === 0) return 0;
-  const candidateIds = stale.map((r: { id: string }) => r.id as string);
+  const ids = stale.map((r: { id: string }) => r.id as string);
 
-  const candidateSlots = await db
-    .select({ id: eventSlots.id, eventId: eventSlots.eventId, slotDate: eventSlots.slotDate })
-    .from(eventSlots)
-    .where(inArray(eventSlots.eventId, candidateIds));
-
-  // Keep a multi-day / repeating event alive while any of its dates is still
-  // inside the retention window. Events with no dated slots (everything
-  // created before multi-day existed) are unaffected.
-  const cutoffDay = cutoff.slice(0, 10);
-  const stillLive = new Set<string>(
-    candidateSlots
-      .filter((s: { slotDate: string | null }) => s.slotDate && s.slotDate >= cutoffDay)
-      .map((s: { eventId: string }) => s.eventId)
-  );
-  const ids = candidateIds.filter((id: string) => !stillLive.has(id));
-  if (ids.length === 0) return 0;
-
-  const slotIds = candidateSlots
-    .filter((s: { eventId: string }) => ids.includes(s.eventId))
-    .map((s: { id: string }) => s.id as string);
-
-  const votes = await db
-    .select({ id: pollVotes.id })
-    .from(pollVotes)
-    .where(inArray(pollVotes.eventId, ids));
-  const voteIds = votes.map((v: { id: string }) => v.id as string);
-
-  if (slotIds.length > 0) {
-    await db.delete(signups).where(inArray(signups.slotId, slotIds));
-    await db.delete(pollVoteEntries).where(inArray(pollVoteEntries.slotId, slotIds));
-  }
+  // Children are matched through subqueries on the (at most 50) event IDs, so
+  // no statement binds one variable per slot — a year-long series has
+  // hundreds, well past D1's 100-variable cap.
+  const slotIdsOf = db.select({ id: eventSlots.id }).from(eventSlots).where(inArray(eventSlots.eventId, ids));
+  const voteIdsOf = db.select({ id: pollVotes.id }).from(pollVotes).where(inArray(pollVotes.eventId, ids));
+  await db.delete(signups).where(inArray(signups.slotId, slotIdsOf));
+  await db.delete(pollVoteEntries).where(inArray(pollVoteEntries.slotId, slotIdsOf));
   // Signups/votes keyed only by event (defensive; slot deletes cover most).
   await db.delete(signups).where(inArray(signups.eventId, ids));
-  if (voteIds.length > 0) {
-    await db.delete(pollVoteEntries).where(inArray(pollVoteEntries.pollVoteId, voteIds));
-  }
+  await db.delete(pollVoteEntries).where(inArray(pollVoteEntries.pollVoteId, voteIdsOf));
   await db.delete(pollVotes).where(inArray(pollVotes.eventId, ids));
   await db.delete(eventSlots).where(inArray(eventSlots.eventId, ids));
   await db.delete(events).where(inArray(events.id, ids));

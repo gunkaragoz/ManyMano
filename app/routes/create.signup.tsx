@@ -248,6 +248,9 @@ export async function action({ request, context }: ActionFunctionArgs) {
     dateSpec.mode === "single"
       ? []
       : expandDates(dateSpec, eventDate as string, MAX_SERIES_DAYS + 1);
+  if (dateSpec.mode !== "single" && dates.length === 0) {
+    return data({ error: "Those settings don't include any days — pick a different repeat or end date." }, { status: 400 });
+  }
   // A sheet covers at most a year, so a runaway rule can't generate forever
   // and the 90-day retention window still means something.
   if (dates.length > 0 && dates[dates.length - 1] > maxSeriesEnd(eventDate as string)) {
