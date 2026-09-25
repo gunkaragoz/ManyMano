@@ -49,6 +49,7 @@ import {
   maxSeriesEnd,
   parseDateSpec,
   parseDayFilter,
+  serializeDayFilter,
   weekdayOf,
   writeDateSpec,
 } from "~/utils/recurrence";
@@ -221,6 +222,21 @@ export async function action({ request, context }: ActionFunctionArgs) {
         { status: 400 }
       );
     }
+  }
+  // Two tasks with the same name in the same shift (name + time) must run on
+  // the same days. The page and editor tell them apart by their order within
+  // a day, which only holds when every day has the same set of them.
+  const daysByTask = new Map<string, string>();
+  for (const s of validSlots) {
+    const k = `${s.shiftName || ""}||${s.startTime || ""}||${s.endTime || ""}||${s.title.toLowerCase()}`;
+    const d = serializeDayFilter(s.days);
+    if (daysByTask.has(k) && daysByTask.get(k) !== d) {
+      return data(
+        { error: `"${s.title}" appears twice in the same shift with different days — rename one or give them the same days.` },
+        { status: 400 }
+      );
+    }
+    daysByTask.set(k, d);
   }
   if (slotTitles.length > MAX_TASKS_PER_DATE) {
     return data(

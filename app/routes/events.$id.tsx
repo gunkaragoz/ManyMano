@@ -1664,6 +1664,14 @@ export async function action({ request, params, context }: ActionFunctionArgs) {
         existing.length -
         existing.filter((s) => droppedDates.includes(dayOf(s))).length +
         addedDates.reduce((n, d) => n + templateFor(d).length, 0);
+      if (totalRows === 0) {
+        // e.g. narrowing a range to the one day its shifts skip: every day
+        // with tasks would be removed and nothing added in their place.
+        return data(
+          { error: "No task runs on any of those days — keep a day that has tasks, or add a shift first." },
+          { status: 400 }
+        );
+      }
       if (totalRows > MAX_SLOT_ROWS_PER_EVENT) {
         return data(
           {
@@ -1946,6 +1954,15 @@ export async function action({ request, params, context }: ActionFunctionArgs) {
       if (!title) return data({ error: "Give the first task a name." }, { status: 400 });
       const slotError = validateSlotFields("", startTime, endTime);
       if (slotError) return data({ error: slotError }, { status: 400 });
+      // Same name and time IS the same shift (the page groups by it). Merging
+      // silently could give it same-named tasks on different days, which the
+      // editor can't tell apart — so point at the existing card instead.
+      if (allSlots.some((s) => shiftKey(s) === shiftKey({ shiftName, startTime, endTime }))) {
+        return data(
+          { error: "A shift with that name and time already exists — add the task to it instead." },
+          { status: 400 }
+        );
+      }
 
       const days = sheetDays.length ? sheetDays : [null];
       const hasDated = allSlots.some((s) => (s as { slotDate?: string | null }).slotDate);
@@ -2044,6 +2061,13 @@ export async function action({ request, params, context }: ActionFunctionArgs) {
     const endTime = cleanText(formData.get("slotEndTime"), 16) || null;
     const slotError = validateSlotFields("", startTime, endTime);
     if (slotError) return data({ error: slotError }, { status: 400 });
+    const newKey = shiftKey({ shiftName, startTime, endTime });
+    if (newKey !== targetKey && allSlots.some((s) => shiftKey(s) === newKey)) {
+      return data(
+        { error: "Another shift already has that name and time — change one of them." },
+        { status: 400 }
+      );
+    }
 
     const titles = formData.getAll("taskTitle") as string[];
     // "taskOriginalTitle" is what a page loaded before task IDs posts.
@@ -2761,19 +2785,24 @@ function NewShiftCard({
   const [end, setEnd] = useState("");
   // Once this draft is saved the shift arrives as a real card, so the draft
   // must go — left filled in, a second "Save shift" would add it all again.
-  // A rejected save keeps the draft so nothing typed is lost.
+  // A rejected save keeps the draft so nothing typed is lost. actionData
+  // still holds the PREVIOUS result while this save is in flight, so only a
+  // result object different from the one seen at submit time is ours.
   const actionData = useActionData<{ success?: boolean; error?: string }>();
-  const submitted = useRef(false);
+  const NOT_PENDING = useRef<object>({}).current;
+  const pendingSince = useRef<unknown>(NOT_PENDING);
+  const discard = useRef(onDiscard);
+  discard.current = onDiscard;
   useEffect(() => {
-    if (!submitted.current || !actionData) return;
-    submitted.current = false;
-    if (actionData.success) onDiscard();
-  }, [actionData, onDiscard]);
+    if (pendingSince.current === NOT_PENDING || actionData === pendingSince.current) return;
+    pendingSince.current = NOT_PENDING;
+    if (actionData?.success) discard.current();
+  }, [actionData, NOT_PENDING]);
   return (
     <Form
       method="post"
       onSubmit={() => {
-        submitted.current = true;
+        pendingSince.current = actionData;
       }}
       className="p-4 bg-slate-50/70 rounded-2xl border border-dashed border-slate-300 space-y-3"
     >
