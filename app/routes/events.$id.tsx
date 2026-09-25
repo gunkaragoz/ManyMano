@@ -2532,19 +2532,22 @@ function EditDatesField({
   initialDate: string;
 }) {
   const today = new Date().toISOString().split("T")[0];
-  const [startDate, setStartDate] = useState(initialDate || today);
-  const [sel, setSel] = useState<DateSelection>(() =>
-    selectionFromSpec(initialSpec, initialDate || today)
-  );
-  const spec = selectionToSpec(sel, startDate);
+  // The posted date stays empty for a sheet that never had one — saving the
+  // title must not quietly give it today's date (and day-before reminders).
+  // Today is only the anchor the repeat presets and preview are written from
+  // until a date is picked; the server refuses more days without one.
+  const [startDate, setStartDate] = useState(initialDate);
+  const anchor = startDate || today;
+  const [sel, setSel] = useState<DateSelection>(() => selectionFromSpec(initialSpec, anchor));
+  const spec = selectionToSpec(sel, anchor);
   const dates =
-    spec.mode === "single" ? [startDate] : expandDates(spec, startDate, MAX_SERIES_DAYS + 1);
+    spec.mode === "single" ? [anchor] : expandDates(spec, anchor, MAX_SERIES_DAYS + 1);
 
   return (
     <>
       <div className="sm:col-span-2">
         <label className="block text-xs font-semibold text-slate-700 mb-1.5">Event Type</label>
-        <DateModeTabs start={startDate} value={sel} onChange={setSel} />
+        <DateModeTabs start={anchor} value={sel} onChange={setSel} />
       </div>
       <div>
         <label className="block text-xs font-semibold text-slate-700 mb-1.5">
@@ -2555,7 +2558,7 @@ function EditDatesField({
       <DateEndField value={sel} onChange={setSel} />
       {sel.mode === "repeat" && (
         <div className="sm:col-span-2">
-          <RepeatRuleField start={startDate} value={sel} onChange={setSel} />
+          <RepeatRuleField start={anchor} value={sel} onChange={setSel} />
         </div>
       )}
       {sel.mode !== "single" && (
@@ -3825,12 +3828,27 @@ export default function EventView() {
   // an endless scroll; short ones always show every date.
   const windowedSections = useMemo(() => {
     if (!isMultiDate || showAllDates || dateSections.length <= 7) return dateSections;
-    const today = new Date().toISOString().slice(0, 10);
-    const horizon = new Date(Date.now() + 28 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+    // "Today" on the sheet's own calendar — in UTC, an evening in New York is
+    // already tomorrow and today's shifts would drop out of view.
+    const dayIn = (ms: number) => {
+      try {
+        return new Intl.DateTimeFormat("en-CA", {
+          timeZone: (event as { timezone?: string | null }).timezone || "UTC",
+        }).format(new Date(ms));
+      } catch {
+        return new Date(ms).toISOString().slice(0, 10);
+      }
+    };
+    const today = dayIn(Date.now());
+    const horizon = dayIn(Date.now() + 28 * 24 * 60 * 60 * 1000);
     const upcoming = dateSections.filter((s) => (s.date || "") >= today);
     const windowed = upcoming.filter((s) => (s.date || "") <= horizon);
-    return windowed.length > 0 ? windowed : upcoming.slice(0, 4);
-  }, [dateSections, isMultiDate, showAllDates]);
+    if (windowed.length > 0) return windowed;
+    if (upcoming.length > 0) return upcoming.slice(0, 4);
+    // A finished series still shows something: its last few days, where the
+    // organizer checking the roster afterwards is looking.
+    return dateSections.slice(-4);
+  }, [dateSections, isMultiDate, showAllDates, event]);
   const hiddenDateCount = dateSections.length - windowedSections.length;
 
   // Organizer-only volunteer roster rows (SIGNUP_SHEET): shift, task, name,
@@ -4804,7 +4822,7 @@ export default function EventView() {
                 onClick={() => setShowAllDates(false)}
                 className="w-full px-4 py-3 rounded-2xl border border-slate-200 bg-white text-sm font-semibold text-slate-600 hover:border-blue-400 hover:text-blue-600 transition-all"
               >
-                Show the next 4 weeks only
+                Show fewer days
               </button>
             )}
           </div>
