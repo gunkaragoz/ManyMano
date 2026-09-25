@@ -597,7 +597,7 @@ export default function CreateMeetingPoll() {
               Create Meeting Time Poll
             </h1>
             <p className="text-xs text-slate-500 mt-0.5">
-              Pick a duration, add days, and let attendees vote on their availability. No account needed. Your email receives your private organizer link — lose it and you can get a new one from the event page.
+              Pick a duration, add days, and let attendees vote on their availability.
             </p>
           </div>
         </div>
