@@ -1,6 +1,6 @@
-// Day-before reminder emails (see GET /api/reminders).
+// Reminder emails (see GET /api/reminders).
 //
-// What is sent, a day before the event/shift:
+// What is sent, 12 hours before the event/shift starts:
 //   1. Organizer: event details + per-task roster with fill counts
 //      ("Setup – 1/3 volunteers", names + emails), so they see at a glance
 //      what is covered and what is still open.
@@ -8,15 +8,17 @@
 //      details as the signup confirmation email (When/Location/Description,
 //      event page, calendar links). Signups without an email address can't
 //      be reminded and are skipped.
-//   3. Finalized meetings (TIME_POLL with a locked-in winning time dated
-//      tomorrow): every voter with an email gets a "tomorrow" reminder with
-//      the locked-in time, and the organizer gets the attendee roster.
-//      Open polls have no decided date, so they are skipped.
+//   3. Finalized meetings (TIME_POLL with a locked-in winning time): every
+//      voter with an email gets a reminder with the locked-in time, and the
+//      organizer gets the attendee roster. Open polls have no decided date,
+//      so they are skipped.
 //
 // Notes:
-// - "Tomorrow" is matched on the UTC calendar day (event dates are stored
-//   as organizer-local YYYY-MM-DD days; matching UTC keeps the cron simple
-//   and predictable — override with ?date= for testing).
+// - "12 hours before" is measured from the event's start: the earliest slot
+//   startTime on the event date (the winning slot for finalized meetings),
+//   in the event's timezone. Sheets with no slot times assume a 9:00 AM
+//   start. The 48h understaffed alert below is still date-based (9:00 AM
+//   event-local, 2 days ahead) — only the standard reminder moved to 12h.
 // - Stored edit tokens are hashes, so reminders can't rebuild personal
 //   cancel links. They link to the event page instead, where participants
 //   can manage their entry.
@@ -32,7 +34,7 @@ import {
   reminderSends,
   type AppDb,
 } from "~/db";
-import { buildGoogleCalendarUrl, effectiveDateForSlot, formatLongDateLabel } from "./calendar";
+import { buildGoogleCalendarUrl, effectiveDateForSlot, formatLongDateLabel, parseTimeString } from "./calendar";
 import { zonedWallTimeToUtc } from "./timezones";
 import { isExpired, latestSlotDate, RETENTION_DAYS } from "./retention";
 import { isValidEmail } from "./validation";
@@ -40,7 +42,7 @@ import { escapeHtml, locationHtml } from "./sanitize";
 import { emailFooter } from "./email";
 import type { SiteConfig } from "./site";
 
-export type ReminderKind = "organizer" | "participants" | "organizer_24h" | "organizer_48h";
+export type ReminderKind = "organizer" | "participants" | "organizer_12h" | "organizer_48h" | "organizer_24h";
 
 /**
  * Pre-v8 dedupe kind for the organizer mail. The scheduled runner checks it
@@ -50,11 +52,25 @@ export type ReminderKind = "organizer" | "participants" | "organizer_24h" | "org
 export const LEGACY_ORGANIZER_KIND = "organizer";
 
 /**
- * Reminder hour in the EVENT's timezone (9:00 AM local). Later this becomes
- * a per-event setting defaulting to 9 — callers must go through
- * reminderInstant() so the override plugs in at one place.
+ * Pre-12h dedupe kind for the standard organizer mail (the day-before
+ * default). Checked as a fallback for organizer_12h for the same reason.
+ */
+export const LEGACY_ORGANIZER_24H_KIND = "organizer_24h";
+
+/**
+ * Assumed event start (wall-clock) when no slot carries a startTime.
+ * Later this becomes a per-event setting defaulting to 9 — callers must go
+ * through eventStartInstant() so the override plugs in at one place.
  */
 export const REMINDER_HOUR = 9;
+
+/**
+ * Default lead time: the standard reminder (organizers + participants)
+ * fires this many hours before the event starts. Later this becomes a
+ * per-event setting (e.g. 24h + 2h double notification) — callers must go
+ * through reminderDueInstant() so the override plugs in at one place.
+ */
+export const REMINDER_LEAD_HOURS = 12;
 
 /** YYYY-MM-DD shifted by N days (UTC calendar arithmetic — DST-safe). */
 export function addDaysIso(dateStr: string, days: number): string | null {
@@ -73,9 +89,10 @@ export function addDaysIso(dateStr: string, days: number): string | null {
 }
 
 /**
- * UTC instant when a reminder fires: 9:00 AM event-local, `daysBefore`
- * days ahead of the event date. Null for bad dates (caller skips).
- * Unknown zones fall back to UTC via zonedWallTimeToUtc.
+ * UTC instant for the date-based 48h understaffed alert: 9:00 AM
+ * event-local, `daysBefore` days ahead of the event date. Null for bad
+ * dates (caller skips). Unknown zones fall back to UTC via
+ * zonedWallTimeToUtc.
  */
 export function reminderInstant(
   eventDate: string | null | undefined,
@@ -86,6 +103,43 @@ export function reminderInstant(
   const day = addDaysIso(eventDate, -daysBefore);
   if (!day) return null;
   return zonedWallTimeToUtc(day, `${REMINDER_HOUR}:00`, timeZone);
+}
+
+/**
+ * UTC instant the event starts: the earliest slot startTime on the event
+ * date (the winning slot for finalized meetings), in the event's timezone.
+ * Sheets with no slot times assume a REMINDER_HOUR start. Null when the
+ * date is missing or bad (caller skips).
+ */
+export function eventStartInstant(target: ReminderTarget): Date | null {
+  const tz = target.event.timezone;
+  if (target.kind === "finalized_meeting") {
+    const date = target.winningSlot.slotDate ?? target.event.eventDate;
+    return zonedWallTimeToUtc(date, target.winningSlot.startTime ?? `${REMINDER_HOUR}:00`, tz);
+  }
+  const date = target.event.eventDate;
+  if (!date) return null;
+  let earliest: { hours: number; minutes: number } | null = null;
+  for (const slot of target.slots) {
+    const t = parseTimeString(slot.startTime);
+    if (!t) continue;
+    if (!earliest || t.hours * 60 + t.minutes < earliest.hours * 60 + earliest.minutes) {
+      earliest = t;
+    }
+  }
+  const start = earliest
+    ? `${String(earliest.hours).padStart(2, "0")}:${String(earliest.minutes).padStart(2, "0")}`
+    : `${REMINDER_HOUR}:00`;
+  return zonedWallTimeToUtc(date, start, tz);
+}
+
+/**
+ * UTC instant the standard reminder fires: REMINDER_LEAD_HOURS before the
+ * event starts. Null when the start can't be determined (caller skips).
+ */
+export function reminderDueInstant(target: ReminderTarget): Date | null {
+  const start = eventStartInstant(target);
+  return start ? new Date(start.getTime() - REMINDER_LEAD_HOURS * 3600_000) : null;
 }
 
 /**
@@ -504,8 +558,8 @@ export function buildSignupParticipantEmail(
   const eventUrl = eventPageUrl(origin, e.id);
   const subject =
     tasks.length === 1
-      ? `Reminder: "${tasks[0].label}" for ${e.title} is tomorrow`
-      : `Reminder: your ${tasks.length} shifts for "${e.title}" are tomorrow`;
+      ? `Reminder: "${tasks[0].label}" for ${e.title} is coming up`
+      : `Reminder: your ${tasks.length} shifts for "${e.title}" are coming up`;
   const taskBlocks = tasks
     .map(
       (t) => `
@@ -524,9 +578,9 @@ export function buildSignupParticipantEmail(
     subject,
     html: `
       <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto; padding: 24px; color: #1e293b;">
-        <h2 style="color: #0f172a; margin-top: 0;">See you tomorrow!</h2>
+        <h2 style="color: #0f172a; margin-top: 0;">See you soon!</h2>
         <p>Hi ${escapeHtml(recipientName)},</p>
-        <p>Quick reminder — you're signed up for <strong>${escapeHtml(e.title)}</strong> tomorrow.</p>
+        <p>Quick reminder — you're signed up for <strong>${escapeHtml(e.title)}</strong>.</p>
         ${taskBlocks}
         ${locationHtml(e.location)}
         ${descriptionBlock(e.description)}
@@ -546,9 +600,9 @@ export function buildSignupOrganizerEmail(
   site: SiteConfig,
   origin: string,
   target: SignupSheetTarget,
-  opts?: { horizon?: "24h" | "48h" }
+  opts?: { horizon?: "12h" | "48h" }
 ): { subject: string; html: string } {
-  const horizon = opts?.horizon ?? "24h";
+  const horizon = opts?.horizon ?? "12h";
   const e = target.event;
   const eventUrl = eventPageUrl(origin, e.id);
   let filledTotal = 0;
@@ -598,15 +652,15 @@ export function buildSignupOrganizerEmail(
   // The day being reminded about — one date of a series, not the sheet's first.
   const headlineDate = target.reminderDate || e.eventDate;
   const whenHeadline = headlineDate ? formatLongDateLabel(headlineDate) : "";
-  const timing = horizon === "48h" ? "is in 2 days" : "is tomorrow";
+  const timing = horizon === "48h" ? "is in 2 days" : "is coming up";
   return {
     subject:
       horizon === "48h"
         ? `Only ${headline} for "${e.title}" — 2 days left to fill spots`
-        : `Reminder: "${e.title}" is tomorrow — ${headline}`,
+        : `Reminder: "${e.title}" is coming up — ${headline}`,
     html: `
       <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto; padding: 24px; color: #1e293b;">
-        <h2 style="color: #0f172a; margin-top: 0;">${horizon === "48h" ? "Your event needs more volunteers" : "Your event is tomorrow"}</h2>
+        <h2 style="color: #0f172a; margin-top: 0;">${horizon === "48h" ? "Your event needs more volunteers" : "Your event is coming up"}</h2>
         <p>Hi ${escapeHtml(e.organizerName)},</p>
         <p><strong>${escapeHtml(e.title)}</strong>${whenHeadline ? ` is on <strong>${escapeHtml(whenHeadline)}</strong>` : ` ${timing}`} — ${escapeHtml(headline)}.</p>
         ${locationHtml(e.location)}
@@ -679,12 +733,12 @@ export function buildMeetingParticipantEmail(
     endTime: target.winningSlot.endTime,
   });
   return {
-    subject: `Reminder: "${e.title}" is tomorrow — ${whenBase || target.winningSlot.title}`,
+    subject: `Reminder: "${e.title}" is coming up — ${whenBase || target.winningSlot.title}`,
     html: `
       <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto; padding: 24px; color: #1e293b;">
-        <h2 style="color: #0f172a; margin-top: 0;">See you tomorrow!</h2>
+        <h2 style="color: #0f172a; margin-top: 0;">See you soon!</h2>
         <p>Hi ${escapeHtml(recipientName)},</p>
-        <p>Quick reminder — <strong>${escapeHtml(e.title)}</strong> is happening tomorrow:</p>
+        <p>Quick reminder — <strong>${escapeHtml(e.title)}</strong> is coming up:</p>
         ${whenLine ? `<p><strong>When:</strong> ${escapeHtml(whenLine)}</p>` : ""}
         ${locationHtml(e.location)}
         ${descriptionBlock(e.description)}
@@ -719,12 +773,12 @@ export function buildMeetingOrganizerEmail(
       : `<p style="margin: 6px 0 0 0; font-size: 13px; color: #94a3b8;">No votes recorded.</p>`;
   const headcount = `${target.voters.length} voter${target.voters.length === 1 ? "" : "s"}`;
   return {
-    subject: `Reminder: "${e.title}" is tomorrow — ${whenBase || target.winningSlot.title} (${headcount})`,
+    subject: `Reminder: "${e.title}" is coming up — ${whenBase || target.winningSlot.title} (${headcount})`,
     html: `
       <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto; padding: 24px; color: #1e293b;">
-        <h2 style="color: #0f172a; margin-top: 0;">Your meeting is tomorrow</h2>
+        <h2 style="color: #0f172a; margin-top: 0;">Your meeting is coming up</h2>
         <p>Hi ${escapeHtml(e.organizerName)},</p>
-        <p><strong>${escapeHtml(e.title)}</strong> is locked in for tomorrow (${escapeHtml(headcount)}):</p>
+        <p><strong>${escapeHtml(e.title)}</strong> is locked in (${escapeHtml(headcount)}):</p>
         ${whenLine ? `<p><strong>When:</strong> ${escapeHtml(whenLine)}</p>` : ""}
         ${locationHtml(e.location)}
         ${descriptionBlock(e.description)}

@@ -75,7 +75,7 @@ function loadEffectiveEnv() {
 }
 
 // --- 1. Derive the required-var list from the source of truth ---------------
-console.log("\n[1/5] Required env vars match app/utils/site.ts");
+console.log("\n[1/6] Required env vars match app/utils/site.ts");
 const siteTs = readFileSync(resolve(ROOT, "app/utils/site.ts"), "utf8");
 const requiredKeys = [
   ...new Set(
@@ -86,7 +86,7 @@ assert(requiredKeys.length > 0, "could not parse any required() keys from site.t
 console.log(`  required by code: ${requiredKeys.join(", ")}`);
 
 // --- 2. .env.sample must document every required var --------------------------
-console.log("\n[2/5] .env.sample documents every required var");
+console.log("\n[2/6] .env.sample documents every required var");
 const sample = parseDotenvFile(resolve(ROOT, ".env.sample"));
 for (const key of requiredKeys) {
   if (!(key in sample)) fail(`.env.sample is missing key ${key} (document it!)`);
@@ -142,7 +142,7 @@ for (const key of ["SITE_NAME", "SITE_TAGLINE", "SITE_DESCRIPTION"]) {
 }
 
 // --- 3. Effective env must satisfy getSiteConfig ------------------------------
-console.log("\n[3/5] Effective env satisfies getSiteConfig");
+console.log("\n[3/6] Effective env satisfies getSiteConfig");
 const { env, fromFile } = loadEffectiveEnv();
 console.log(`  source: ${fromFile} + process.env overrides`);
 for (const key of requiredKeys) {
@@ -160,7 +160,7 @@ if (((env.SITE_URL ?? "").trim()) && !/^https?:\/\//.test(env.SITE_URL.trim().re
 }
 
 // --- 4. Build artifact + critical routes + worker entry present ---------------
-console.log("\n[4/5] Build artifact, worker entry and critical routes present");
+console.log("\n[4/6] Build artifact, worker entry and critical routes present");
 for (const artifact of ["build/server/index.js", "build/client"]) {
   if (!existsSync(resolve(ROOT, artifact))) {
     fail(`${artifact} not found — run the build before this gate (pnpm run build)`);
@@ -204,7 +204,7 @@ for (const file of criticalRouteFiles) {
 }
 
 // --- 5. Public assets referenced by root meta/links exist ---------------------
-console.log("\n[5/5] Public SEO/PWA assets exist");
+console.log("\n[5/6] Public SEO/PWA assets exist");
 for (const asset of [
   "public/og-cover.png",
   "public/favicon.svg",
@@ -214,6 +214,112 @@ for (const asset of [
 ]) {
   if (!existsSync(resolve(ROOT, asset))) fail(`missing ${asset}`);
   else ok(asset);
+}
+
+// --- 6. Production cron trigger present (reminder scan) ---------------------
+console.log("\n[6/6] Production cron trigger present (reminder scan)");
+// Scope each check to its own [section]: a triggers block under any other
+// env must not satisfy the production assertion (and staging must have
+// none — its scan would run without mail credentials).
+function tomlSection(src, header) {
+  const lines = src.split("\n");
+  const start = lines.findIndex((l) => l.trim() === header);
+  if (start < 0) return null;
+  const body = [];
+  for (let i = start + 1; i < lines.length; i += 1) {
+    if (/^\s*\[[^[\]]+\]\s*$/.test(lines[i])) break;
+    body.push(stripTomlComment(lines[i]));
+  }
+  return body.join("\n");
+}
+/**
+ * Strip a TOML comment: an unquoted # runs to end of line. Quote-aware so
+ * a # inside a quoted value (URL fragment, etc.) survives. Multiline
+ * strings aren't used in wrangler.toml — single-line scan suffices.
+ */
+function stripTomlComment(line) {
+  let out = "";
+  let quote = null;
+  for (const c of line) {
+    if (quote) {
+      out += c;
+      if (c === quote) quote = null;
+    } else if (c === '"' || c === "'") {
+      quote = c;
+      out += c;
+    } else if (c === "#") {
+      break;
+    } else {
+      out += c;
+    }
+  }
+  return out;
+}
+const prodTriggers = tomlSection(wranglerToml, "[env.production.triggers]");
+if (!prodTriggers) {
+  fail("wrangler.toml has no [env.production.triggers] — the hourly reminder scan is detached");
+} else {
+  const m = prodTriggers.match(/crons\s*=\s*\[([^\]]*)\]/);
+  // Filter empties: "".split(",") is [""], so crons = [] / [""] must not
+  // count as a configured schedule. Each entry must also have the 5-field
+  // cron shape (minute hour day month weekday).
+  const crons = m
+    ? m[1]
+        .split(",")
+        .map((s) => s.trim().replace(/^["']|["']$/g, ""))
+        .filter(Boolean)
+    : [];
+  const malformed = crons.filter((c) => !/^(\S+\s+){4}\S+$/.test(c));
+  if (crons.length === 0) fail("[env.production.triggers] has an empty crons list — no reminder scan");
+  else if (malformed.length > 0) fail(`[env.production.triggers] has malformed cron entries: ${malformed.join(", ")}`);
+  else ok(`[env.production.triggers] crons: ${crons.join(", ")}`);
+}
+if (/^\s*\[triggers\]\s*$/m.test(wranglerToml)) {
+  fail('top-level [triggers] present — cron must live under [env.production.triggers] only (staging has none by design)');
+} else {
+  ok("no top-level [triggers] (production-only cron)");
+}
+if (tomlSection(wranglerToml, "[env.staging.triggers]")) {
+  fail("[env.staging.triggers] present — staging must have no cron trigger");
+} else {
+  ok("staging has no cron trigger");
+}
+if (!/async\s+scheduled\s*\(/.test(readFileSync(workerSrc, "utf8"))) {
+  fail("workers/app.ts has no async scheduled() handler — the cron trigger would fire into nothing");
+} else {
+  ok("workers/app.ts: async scheduled() handler");
+}
+// PR previews (Workers Builds fails the preview build without a previews
+// block). Previews inherit nothing from production, so the block must
+// carry staging-safe vars and bind DB to the staging database — a preview
+// pointed at production data or failing fast on missing vars is a bug.
+const previewsVars = tomlSection(wranglerToml, "[previews.vars]");
+if (!previewsVars) {
+  fail("wrangler.toml has no [previews.vars] — PR preview builds fail without a previews block");
+} else {
+  ok("[previews.vars] present");
+  for (const key of ["SITE_URL", "SITE_NAME", "FROM_EMAIL"]) {
+    if (!new RegExp(`^\\s*${key}\\s*=`, "m").test(previewsVars)) {
+      fail(`[previews.vars] missing ${key} (previews don't inherit production vars — app fail-fasts)`);
+    } else ok(`[previews.vars]: ${key}`);
+  }
+}
+function d1IdAfter(header) {
+  const esc = header.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const m = wranglerToml.match(new RegExp(`${esc}[\\s\\S]*?database_id\\s*=\\s*"([^"]+)"`));
+  return m ? m[1] : null;
+}
+const prodD1 = d1IdAfter("[[d1_databases]]");
+const stagingD1 = d1IdAfter("[[env.staging.d1_databases]]");
+const previewsD1 = d1IdAfter("[[previews.d1_databases]]");
+if (!previewsD1) {
+  fail("wrangler.toml has no [[previews.d1_databases]] — preview has no DB binding");
+} else if (previewsD1 === prodD1) {
+  fail("[[previews.d1_databases]] points at the PRODUCTION database — previews must use staging data");
+} else if (previewsD1 !== stagingD1) {
+  fail("[[previews.d1_databases]] should use the shared staging database (see previews guide)");
+} else {
+  ok("[[previews.d1_databases]] uses the staging database");
 }
 
 console.log("");
