@@ -3736,7 +3736,10 @@ export default function EventView() {
                             <span className="text-slate-400">—</span>
                           )}
                         </td>
-                        <td className="p-3.5 align-top whitespace-nowrap text-slate-600">
+                        <td
+                          className="p-3.5 align-top whitespace-nowrap text-slate-600"
+                          suppressHydrationWarning
+                        >
                           {formatSignedUpAt(r.signedUpAt)}
                         </td>
                       </tr>
