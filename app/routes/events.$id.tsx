@@ -270,7 +270,7 @@ export async function loader({ params, request, context, url }: LoaderFunctionAr
   // pay for that extra query once it already looks expired by creation date.
   if (
     isExpired(event.createdAt, new Date(), retentionDays) &&
-    isExpired(event.createdAt, new Date(), retentionDays, await latestSlotDate(db, eventId))
+    isExpired(event.createdAt, new Date(), retentionDays, await latestSlotDate(db, event))
   ) {
     throw new Response("This event expired and was auto-deleted.", { status: 410 });
   }
@@ -341,7 +341,8 @@ export async function loader({ params, request, context, url }: LoaderFunctionAr
     .where(eq(eventSlots.eventId, eventId))
     .orderBy(eventSlots.displayOrder);
   // Latest dated slot, for the retention banner (null on single-day sheets).
-  const lastSlotDateForEvent = rawSlots.reduce<string | null>((latest, s) => {
+  // Sheets only — poll options are dated too but polls expire by creation.
+  const lastSlotDateForEvent = event.type !== "SIGNUP_SHEET" ? null : rawSlots.reduce<string | null>((latest, s) => {
     const d = (s as { slotDate?: string | null }).slotDate;
     return d && (!latest || d > latest) ? d : latest;
   }, null);
@@ -552,7 +553,7 @@ export async function action({ request, params, context }: ActionFunctionArgs) {
   }
   if (
     isExpired(event.createdAt, new Date(), retentionDays) &&
-    isExpired(event.createdAt, new Date(), retentionDays, await latestSlotDate(db, eventId))
+    isExpired(event.createdAt, new Date(), retentionDays, await latestSlotDate(db, event))
   ) {
     return data({ error: "This event expired and was auto-deleted." }, { status: 410 });
   }
@@ -1610,7 +1611,34 @@ export async function action({ request, params, context }: ActionFunctionArgs) {
         return day ? slotsByDay.get(day) ?? [] : [];
       };
 
-      const keptDates = new Set(spec.mode === "single" ? currentDates.slice(0, 1) : newDates);
+      // Collapsing a multi-day sheet to one day keeps the day the organizer
+      // picked when it is one of the sheet's days. Otherwise the first day is
+      // kept and moved to the picked date — which would silently move its
+      // volunteers to a day they never signed up for, so that is refused when
+      // the day is booked. (A sheet that was always one day keeps the old
+      // behaviour: changing its date moves the whole sheet, by design.)
+      let singleDay = currentDates[0];
+      if (spec.mode === "single" && existing.some((s) => s.slotDate)) {
+        singleDay = eventDate && currentDates.includes(eventDate) ? eventDate : currentDates[0];
+        if (singleDay && singleDay !== eventDate) {
+          const dayIds = (slotsByDay.get(singleDay) ?? []).map((s) => s.id);
+          const booked = (
+            await db
+              .select({ slotId: signups.slotId })
+              .from(signups)
+              .where(and(eq(signups.eventId, eventId), eq(signups.status, "CONFIRMED")))
+          ).some((b) => dayIds.includes(b.slotId));
+          if (booked) {
+            return data(
+              {
+                error: `${formatSlotDateLabel(singleDay)} has volunteers signed up — pick one of the sheet's days as the one day to keep, so nobody's sign-up moves to another date.`,
+              },
+              { status: 400 }
+            );
+          }
+        }
+      }
+      const keptDates = new Set(spec.mode === "single" ? (singleDay ? [singleDay] : []) : newDates);
       const droppedDates = currentDates.filter((d) => !keptDates.has(d));
 
       if (droppedDates.length > 0) {
@@ -1964,7 +1992,20 @@ export async function action({ request, params, context }: ActionFunctionArgs) {
         );
       }
 
-      const days = sheetDays.length ? sheetDays : [null];
+      // Every day the schedule covers — not just the days that have rows. A
+      // day can be empty on purpose (its shifts were limited to other days),
+      // and a new shift is presented as running across the whole series.
+      const spec = readDateSpec(event.settings);
+      const scheduled =
+        spec.mode !== "single" && event.eventDate
+          ? expandDates(spec, event.eventDate, MAX_SERIES_DAYS + 1)
+          : [];
+      const datedRows = sheetDays.filter((d): d is string => Boolean(d));
+      const days: Array<string | null> = scheduled.length
+        ? [...new Set([...scheduled, ...datedRows])].sort()
+        : sheetDays.length
+          ? sheetDays
+          : [null];
       const hasDated = allSlots.some((s) => (s as { slotDate?: string | null }).slotDate);
       const cap = hasDated ? MAX_SLOT_ROWS_PER_EVENT : MAX_SLOTS_PER_EVENT;
       if (allSlots.length + days.length > cap) {
@@ -3738,20 +3779,33 @@ export default function EventView() {
     });
     return sections.sort((a, b) => (a.date || "").localeCompare(b.date || ""));
   }, [shiftGroups]);
-  const isMultiDate = dateSections.length > 1;
+  // From what the sheet IS, not how many days happen to have tasks: a series
+  // whose tasks all land on one day (say, a custom repeat that only runs on
+  // Wednesdays and ends after one) still dates its slots, and that day is
+  // not necessarily events.event_date. Single-day sheets never date a slot.
+  const isMultiDate =
+    event.type === "SIGNUP_SHEET" &&
+    (dateSections.length > 1 ||
+      slots.some((s) => Boolean((s as { slotDate?: string | null }).slotDate)) ||
+      ((event as { dateSpec?: DateSpec }).dateSpec?.mode ?? "single") !== "single");
   // Header badge: one date, or the span of a multi-day sheet and how it runs,
   // so a 13-week series doesn't read as a one-off on its first day.
   const headerDateLabel = useMemo(() => {
     if (!event.eventDate) return "";
     const long = (d: string) =>
       new Date(d + "T00:00:00").toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric", year: "numeric" });
-    if (!isMultiDate) return long(event.eventDate);
+    if (!isMultiDate || dateSections.length === 0) return long(event.eventDate);
     const first = dateSections[0].date || event.eventDate;
     const last = dateSections[dateSections.length - 1].date || first;
     const short = (d: string) =>
       new Date(d + "T00:00:00").toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" });
     const spec = (event as { dateSpec?: DateSpec }).dateSpec;
-    const how = spec?.mode === "repeat" ? describeSpec(spec, event.eventDate) : `${dateSections.length} days`;
+    const how =
+      spec?.mode === "repeat"
+        ? describeSpec(spec, event.eventDate)
+        : `${dateSections.length} ${dateSections.length === 1 ? "day" : "days"}`;
+    // One populated day: that day (not the first date of the schedule).
+    if (first === last) return spec?.mode === "repeat" ? `${long(first)} · ${how}` : long(first);
     return `${short(first)} – ${long(last)} · ${how}`;
   }, [event, isMultiDate, dateSections]);
   /**

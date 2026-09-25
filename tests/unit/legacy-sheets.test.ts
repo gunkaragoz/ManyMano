@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { parseDateSpec, parseDayFilter, readDateSpec, dayFilterMatches } from "~/utils/recurrence";
 import { effectiveDateForSlot } from "~/utils/calendar";
-import { expiryDateFor, isExpired } from "~/utils/retention";
+import { expiryDateFor, isExpired, latestSlotDate } from "~/utils/retention";
 
 /**
  * Every sheet created before multi-day exists in production as: one row per
@@ -58,5 +58,14 @@ describe("sheets created before multi-day existed", () => {
     const days = (Date.parse(expiryDateFor(created, 90)) - Date.parse(created)) / 86400_000;
     expect(days).toBeGreaterThan(89);
     expect(days).toBeLessThan(91);
+  });
+});
+
+// Polls store a date on every option too, but their retention stays measured
+// from creation — a far-future option must not keep an old poll alive.
+describe("last-date retention is for sign-up sheets only", () => {
+  it("never looks at a poll's option dates", async () => {
+    const db = new Proxy({}, { get: () => { throw new Error("queried the database for a poll"); } });
+    expect(await latestSlotDate(db, { id: "p1", type: "TIME_POLL" })).toBeNull();
   });
 });

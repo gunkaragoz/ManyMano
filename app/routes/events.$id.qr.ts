@@ -33,7 +33,7 @@ export async function loader({ params, request, context }: LoaderFunctionArgs) {
   } catch {}
 
   const [event] = await db
-    .select({ id: events.id, title: events.title, createdAt: events.createdAt })
+    .select({ id: events.id, type: events.type, title: events.title, createdAt: events.createdAt })
     .from(events)
     .where(eq(events.id, eventId))
     .limit(1);
@@ -44,7 +44,7 @@ export async function loader({ params, request, context }: LoaderFunctionArgs) {
   // extra query once the event already looks expired by creation date.
   if (
     isExpired(event.createdAt, new Date(), retentionDays) &&
-    isExpired(event.createdAt, new Date(), retentionDays, await latestSlotDate(db, eventId))
+    isExpired(event.createdAt, new Date(), retentionDays, await latestSlotDate(db, event))
   ) {
     throw new Response("This event expired and was auto-deleted.", { status: 410 });
   }

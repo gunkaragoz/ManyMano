@@ -33,7 +33,7 @@ export async function loader({ params, request, context }: LoaderFunctionArgs) {
   // extra query once the event already looks expired by creation date.
   if (
     isExpired(event.createdAt, new Date(), retentionDays) &&
-    isExpired(event.createdAt, new Date(), retentionDays, await latestSlotDate(db, eventId))
+    isExpired(event.createdAt, new Date(), retentionDays, await latestSlotDate(db, event))
   ) {
     throw new Response("This event expired and was auto-deleted.", { status: 410 });
   }

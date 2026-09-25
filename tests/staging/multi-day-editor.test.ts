@@ -130,6 +130,14 @@ async function slots(sheet: Sheet): Promise<Slot[]> {
   return route.data.slots;
 }
 
+/** The event row as the page loads it. */
+async function eventOf(sheet: Sheet): Promise<{ eventDate: string | null }> {
+  const res = await request(`/events/${sheet.id}.data`, { headers: { cookie: sheet.cookie } });
+  const decoded = await decodeTurboStream(res.body!, globalThis);
+  await decoded.done;
+  return (decoded.value as Record<string, { data: { event: { eventDate: string | null } } }>)["routes/events.$id"].data.event;
+}
+
 const days = async (sheet: Sheet) => [...new Set((await slots(sheet)).map((s) => s.slotDate))].sort();
 
 /** The editor's details form, with the date fields the RepeatPicker posts. */
@@ -216,6 +224,17 @@ describe.skipIf(!LIVE)("multi-day sheets: create", () => {
   });
 });
 
+describe.skipIf(!LIVE)("multi-day sheets: the page", () => {
+  it("names the real day when a series has only one populated day", async () => {
+    // Starts Monday Nov 16, repeats weekly on Wednesday only, once: Nov 18.
+    const sheet = await mustCreate({ eventDate: "2026-11-16", ...weekly("3", 1), slotTitle: ["Desk"], slotCapacity: [1] });
+    expect(await days(sheet)).toEqual(["2026-11-18"]);
+    const html = await (await request(`/events/${sheet.id}`)).text();
+    // The day heading — the page must not present this as a Monday one-off.
+    expect(html).toContain("Wednesday, November 18th, 2026");
+  });
+});
+
 describe.skipIf(!LIVE)("multi-day sheets: editing the dates", () => {
   it("new days copy the nearest day on the same weekday", async () => {
     const sheet = await mustCreate({
@@ -297,6 +316,31 @@ describe.skipIf(!LIVE)("multi-day sheets: editing the dates", () => {
     );
     expect(r.status).toBe(400);
     expect(await slots(sheet)).toHaveLength(2);
+  });
+
+  it("collapsing to one day keeps the picked day, and its sign-ups stay on it", async () => {
+    const sheet = await mustCreate({ eventDate: "2026-11-16", dateMode: "range", dateEnd: "2026-11-18", slotTitle: ["Desk"], slotCapacity: [1] });
+    const tuesday = (await slots(sheet)).find((s) => s.slotDate === "2026-11-17")!;
+    const signup = await act({ ...sheet, admin: "" }, { intent: "signup", slotId: tuesday.id, participantName: "Smoke Volunteer" });
+    expect(signup.ok, signup.message).toBe(true);
+    const r = await act(sheet, editDetails({ eventDate: "2026-11-17", dateMode: "single" }));
+    expect(r.ok, r.message).toBe(true);
+    const rows = await slots(sheet);
+    // The booked Tuesday row is the one kept; the sheet's date is Tuesday.
+    expect(rows.map((s) => s.id)).toEqual([tuesday.id]);
+    expect((await eventOf(sheet)).eventDate).toBe("2026-11-17");
+  });
+
+  it("refuses to collapse onto another date when the kept day is booked", async () => {
+    const sheet = await mustCreate({ eventDate: "2026-11-16", dateMode: "range", dateEnd: "2026-11-18", slotTitle: ["Desk"], slotCapacity: [1] });
+    const monday = (await slots(sheet)).find((s) => s.slotDate === "2026-11-16")!;
+    const signup = await act({ ...sheet, admin: "" }, { intent: "signup", slotId: monday.id, participantName: "Smoke Volunteer" });
+    expect(signup.ok, signup.message).toBe(true);
+    // Nov 20 isn't one of the sheet's days: Monday would move there, sign-up and all.
+    const r = await act(sheet, editDetails({ eventDate: "2026-11-20", dateMode: "single" }));
+    expect(r.status).toBe(400);
+    expect(await days(sheet)).toEqual(["2026-11-16", "2026-11-17", "2026-11-18"]);
+    expect((await eventOf(sheet)).eventDate).toBe("2026-11-16");
   });
 
   it("turns a one-day sheet with no date into a multi-day one with tasks on every day", async () => {
@@ -388,6 +432,28 @@ describe.skipIf(!LIVE)("multi-day sheets: shift cards", () => {
     r = await act(sheet, { intent: "delete_shift", shiftKey: "Afternoon||13:00||15:00" });
     expect(r.ok, r.message).toBe(true);
     expect((await slots(sheet)).map((s) => s.title)).toEqual(["Desk", "Desk", "Desk"]);
+  });
+
+  it("add_shift reaches days the schedule has but no task uses yet", async () => {
+    // Mon–Wed, the only shift limited to Mon and Wed: Tuesday is scheduled but empty.
+    const sheet = await mustCreate({
+      eventDate: "2026-11-16",
+      dateMode: "range",
+      dateEnd: "2026-11-18",
+      slotTitle: ["Desk"],
+      slotCapacity: [1],
+      slotShiftName: ["AM"],
+      slotStartTime: ["09:00"],
+      slotEndTime: ["10:00"],
+      slotDays: ["2026-11-16,2026-11-18"],
+    });
+    const r = await act(sheet, { intent: "add_shift", slotShiftName: "PM", slotStartTime: "13:00", slotEndTime: "14:00", slotTitle: "Lead", slotCapacity: 1 });
+    expect(r.ok, r.message).toBe(true);
+    expect((await slots(sheet)).filter((s) => s.shiftName === "PM").map((s) => s.slotDate).sort()).toEqual([
+      "2026-11-16",
+      "2026-11-17",
+      "2026-11-18",
+    ]);
   });
 
   it("won't rename a task onto a same-named task that runs on other days", async () => {

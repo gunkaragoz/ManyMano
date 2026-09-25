@@ -1,4 +1,4 @@
-import { and, eq, gte, inArray, lt, notExists, sql } from "drizzle-orm";
+import { and, eq, gte, inArray, lt, ne, notExists, or, sql } from "drizzle-orm";
 import { events, eventSlots, signups, pollVotes, pollVoteEntries } from "~/db";
 
 /** Default data retention: events expire this many days after creation. */
@@ -63,11 +63,18 @@ export function isExpired(
 }
 
 /**
- * The last dated slot of an event ("YYYY-MM-DD"), or null when its slots carry
- * no dates. Only worth querying for an event that already looks expired by
- * creation date — see the call sites' guard.
+ * The last dated slot of a sign-up sheet ("YYYY-MM-DD"), or null when its
+ * slots carry no dates. Only sheets get this: a meeting poll stores a date on
+ * every option too, but a poll keeps the plain creation-based retention — a
+ * far-future option must not keep it alive. Only worth querying for an event
+ * that already looks expired by creation date — see the call sites' guard.
  */
-export async function latestSlotDate(db: any, eventId: string): Promise<string | null> {
+export async function latestSlotDate(
+  db: any,
+  event: { id: string; type: string }
+): Promise<string | null> {
+  if (event.type !== "SIGNUP_SHEET") return null;
+  const eventId = event.id;
   const rows = await db
     .select({ slotDate: eventSlots.slotDate })
     .from(eventSlots)
@@ -95,7 +102,7 @@ export async function pruneExpiredEvents(
   retentionDays: number = RETENTION_DAYS
 ): Promise<number> {
   const cutoff = cutoffIso(now, retentionDays);
-  // A multi-day / repeating event stays alive while any of its dates is still
+  // A multi-day / repeating sign-up sheet stays alive while any of its dates is still
   // inside the retention window. That rule lives in the query rather than a
   // filter after it: otherwise 50 still-running series old enough to match
   // would fill every batch forever and hide the expired events behind them.
@@ -108,11 +115,15 @@ export async function pruneExpiredEvents(
     .where(
       and(
         lt(events.createdAt, cutoff),
-        notExists(
+        // Sheets only: poll options are dated too, but polls expire by creation.
+        or(
+          ne(events.type, "SIGNUP_SHEET"),
+          notExists(
           db
             .select({ one: sql`1` })
             .from(eventSlots)
             .where(and(eq(eventSlots.eventId, events.id), gte(eventSlots.slotDate, cutoffDay)))
+          )
         )
       )
     )

@@ -210,7 +210,7 @@ export async function collectReminderTargets(
     // query once the sheet already looks expired by creation date.
     if (
       isExpired(e.createdAt, new Date(), retentionDays) &&
-      isExpired(e.createdAt, new Date(), retentionDays, await latestSlotDate(db, e.id))
+      isExpired(e.createdAt, new Date(), retentionDays, await latestSlotDate(db, e))
     )
       continue;
     const allSlots = await db
