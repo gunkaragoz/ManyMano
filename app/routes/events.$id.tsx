@@ -3676,7 +3676,13 @@ export default function EventView() {
       .filter(Boolean)
       .map((s) => {
         const slot = slotById.get(s!.slotId) as
-          | { title?: string; shiftName?: string | null; startTime?: string | null; endTime?: string | null }
+          | {
+              title?: string;
+              shiftName?: string | null;
+              slotDate?: string | null;
+              startTime?: string | null;
+              endTime?: string | null;
+            }
           | undefined;
         const shiftName = (slot?.shiftName || "").trim();
         const time = [slot?.startTime, slot?.endTime]
@@ -3685,6 +3691,9 @@ export default function EventView() {
           .join(" – ");
         return {
           id: s!.id,
+          // Which day they signed up FOR — on a multi-day sheet the shift and
+          // task repeat, so without this two volunteers look identical.
+          date: slot?.slotDate || event.eventDate,
           shift: [shiftName, time].filter(Boolean).join(" | ") || "—",
           task: slot?.title || "Unknown",
           name: s!.participantName,
@@ -3693,11 +3702,12 @@ export default function EventView() {
         };
       })
       .sort((a, b) =>
+        (a.date || "").localeCompare(b.date || "") ||
         a.shift.localeCompare(b.shift) ||
         a.task.localeCompare(b.task) ||
         a.signedUpAt.localeCompare(b.signedUpAt)
       );
-  }, [initialSignups, slots]);
+  }, [initialSignups, slots, event.eventDate]);
   const rosterExportHref =
     adminToken
       ? `/events/${event.id}/export?admin=${encodeURIComponent(adminToken)}`
@@ -4671,6 +4681,7 @@ export default function EventView() {
                 <table className="w-full text-left border-collapse text-xs min-w-[720px]">
                   <thead>
                     <tr className="bg-slate-50/80 border-y border-slate-200/80 text-slate-600 uppercase text-[10px] tracking-wider font-bold">
+                      {isMultiDate && <th scope="col" className="p-3.5">Day</th>}
                       <th scope="col" className="p-3.5">Shift</th>
                       <th scope="col" className="p-3.5">Task</th>
                       <th scope="col" className="p-3.5">Name</th>
@@ -4681,6 +4692,11 @@ export default function EventView() {
                   <tbody className="divide-y divide-slate-100 font-medium text-slate-800">
                     {rosterRows.map((r) => (
                       <tr key={r.id} className="hover:bg-slate-50/60 transition-colors">
+                        {isMultiDate && (
+                          <td className="p-3.5 align-top whitespace-nowrap">
+                            {r.date ? formatSlotDateLabel(r.date) : "—"}
+                          </td>
+                        )}
                         <td className="p-3.5 align-top">{r.shift}</td>
                         <td className="p-3.5 align-top font-semibold text-slate-900">{r.task}</td>
                         <td className="p-3.5 align-top">{r.name}</td>
@@ -4715,6 +4731,11 @@ export default function EventView() {
                       <tr key={r.id}>
                         <td className="px-3 py-2 align-baseline font-semibold text-slate-900 truncate max-w-[140px]">
                           {r.name}
+                          {isMultiDate && r.date && (
+                            <span className="block text-[10px] font-medium text-slate-400">
+                              {formatSlotDateLabel(r.date)}
+                            </span>
+                          )}
                         </td>
                         <td className="px-3 py-2 align-baseline text-right">
                           {r.email ? (
