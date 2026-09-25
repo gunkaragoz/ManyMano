@@ -118,13 +118,16 @@ Open the URL from your `.dev.vars` `SITE_URL` in your browser (the dev server po
 
 ## 🛠️ Tech Stack
 
-- **Framework**: [React Router 8](https://reactrouter.com/) with Vite
-- **Edge Runtime**: [Cloudflare Workers](https://developers.cloudflare.com/workers/)
+- **Framework**: [React Router 8](https://reactrouter.com/) + [React 19](https://react.dev/) (SSR on the edge)
+- **Build**: [Vite 8](https://vite.dev/) + [@cloudflare/vite-plugin](https://developers.cloudflare.com/workers/vite-plugin/)
+- **Edge Runtime**: [Cloudflare Workers](https://developers.cloudflare.com/workers/) (fetch handler + hourly [Cron Trigger](https://developers.cloudflare.com/workers/configuration/cron-triggers/) for reminder emails)
 - **Database**: [Cloudflare D1](https://developers.cloudflare.com/d1/) (Serverless edge SQLite)
-- **ORM & Migrations**: [Drizzle ORM](https://orm.drizzle.team/)
-- **Styling**: [Tailwind CSS](https://tailwindcss.com/)
+- **ORM & Migrations**: [Drizzle ORM](https://orm.drizzle.team/) + Drizzle Kit
+- **Styling**: [Tailwind CSS](https://tailwindcss.com/) + [Lucide](https://lucide.dev/) icons
 - **Calendar**: Edge-native RFC 5545 `.ics` generator
-- **Email**: [Resend](https://resend.com/) (default) or generic SMTP incl. Amazon SES, with graceful offline fallback
+- **Email**: [Resend](https://resend.com/) (default) or generic SMTP incl. Amazon SES via `worker-mailer`, with graceful offline fallback
+- **Bot Protection**: [Cloudflare Turnstile](https://developers.cloudflare.com/turnstile/)
+- **QR Codes**: Server-rendered event share codes via `qrcode`
 
 ---
 

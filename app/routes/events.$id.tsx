@@ -3048,7 +3048,7 @@ export default function EventView() {
               <span className="font-bold">Organizer Admin Mode Active</span>
               <span className="mx-2 text-amber-300">•</span>
               <span className="font-normal text-amber-700/90">
-                You are viewing with your private admin token. You can edit details, manage options, cancel entries and finalize.
+                You can edit details, manage options, cancel entries and finalize.
               </span>
             </p>
           </div>
