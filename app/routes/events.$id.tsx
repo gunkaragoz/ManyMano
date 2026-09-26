@@ -68,6 +68,32 @@ import {
   pruneExpiredEvents,
   resolveRetentionDays,
 } from "~/utils/retention";
+import {
+  CLOSING_SOON_MS,
+  closedSlotIds,
+  closingPhraseForInstant,
+  closingPhraseForSlot,
+  eventCloseInstant,
+  eventEndInstant,
+  formatOrganizerInstant,
+  isEventClosed,
+  isEventPast,
+  isSlotClosed,
+  isSlotHappeningNow,
+  isSlotPast,
+  msUntilSlotClose,
+  pastSlotIds,
+  slotEndInstant,
+  todayInZone,
+} from "~/utils/event-expiry";
+import {
+  dropClosedResponses,
+  ownerCancelBlocked,
+  ownerDeleteVoteBlocked,
+  proposeCloseRejection,
+  signupCloseRejection,
+  voteCloseState,
+} from "~/utils/guest-policy";
 import { verifyTurnstile, turnstileFailure, hasTurnstileToken } from "~/utils/turnstile";
 import { assessGuestRequest, needsVerification } from "~/utils/bot-protection";
 import Turnstile from "~/components/Turnstile";
@@ -106,7 +132,6 @@ import {
   SLOT_TITLE_MAX,
   TITLE_MAX,
   cleanText,
-  isPastIsoDate,
   isValidEmail,
   isValidIsoDate,
   isValidTime,
@@ -158,7 +183,8 @@ export const meta: MetaFunction<typeof loader> = ({ loaderData, matches }) => {
 function publicEventShape(
   e: typeof events.$inferSelect,
   retentionDays: number,
-  lastSlotDate?: string | null
+  lastSlotDate?: string | null,
+  hasEnded: boolean = false
 ) {
   return {
     id: e.id,
@@ -174,6 +200,9 @@ function publicEventShape(
     durationMinutes: (e as { durationMinutes?: number | null }).durationMinutes ?? null,
     createdAt: e.createdAt,
     updatedAt: e.updatedAt,
+    // Derived from the event's own dates (not stored status): once the time
+    // has passed, guest writes close but the page + roster stay readable.
+    hasEnded,
     // The stored date rule, so the edit form can open on what the sheet
     // actually is instead of on defaults.
     dateSpec: readDateSpec(e.settings),
@@ -187,10 +216,11 @@ function publicEventShape(
 function adminEventShape(
   e: typeof events.$inferSelect,
   retentionDays: number,
-  lastSlotDate?: string | null
+  lastSlotDate?: string | null,
+  hasEnded: boolean = false
 ) {
   return {
-    ...publicEventShape(e, retentionDays, lastSlotDate),
+    ...publicEventShape(e, retentionDays, lastSlotDate, hasEnded),
     organizerEmail: e.organizerEmail,
   };
 }
@@ -358,6 +388,47 @@ export async function loader({ params, request, context, url }: LoaderFunctionAr
           return (a.displayOrder ?? 0) - (b.displayOrder ?? 0);
         })
       : rawSlots;
+  // Time-based closing: guest writes stop at each slot's start (end of day
+  // for all-day slots). Derived on every read so no cron or status update
+  // is needed; adding a future date reopens automatically.
+  const nowForExpiry = new Date();
+  const hasEnded = event.status === "CLOSED" || isEventClosed(event, rawSlots, nowForExpiry);
+  const closedIds = closedSlotIds(event, rawSlots, nowForExpiry);
+  const pastIds = pastSlotIds(event, rawSlots, nowForExpiry);
+  // "Closes …" warnings for slots closing within 24h (relative under 6h,
+  // absolute organizer-local beyond that — never stale in background tabs).
+  const closingSoon: Record<string, string> = {};
+  for (const s of rawSlots) {
+    if (closedIds.includes(s.id)) continue;
+    const ms = msUntilSlotClose(s, event.eventDate, event.timezone, nowForExpiry);
+    if (ms !== null && ms <= CLOSING_SOON_MS) {
+      const phrase = closingPhraseForSlot(s, event.eventDate, event.timezone, nowForExpiry);
+      if (phrase) closingSoon[s.id] = phrase;
+    }
+  }
+  const closeInstant = eventCloseInstant(event, rawSlots);
+  const endInstant = eventEndInstant(event, rawSlots);
+  const eventClosesIn =
+    closeInstant &&
+    closeInstant.getTime() > nowForExpiry.getTime() &&
+    closeInstant.getTime() - nowForExpiry.getTime() <= CLOSING_SOON_MS
+      ? closingPhraseForInstant(closeInstant, event.timezone || "UTC", nowForExpiry)
+      : null;
+  // Closed (last start passed) vs fully past (last end passed): between the
+  // two the banner reads "Happening now", never "Ended <future time>".
+  const eventPast = isEventPast(event, rawSlots, nowForExpiry);
+  const eventHappening =
+    !eventPast &&
+    rawSlots.some((s) => isSlotHappeningNow(s, event.eventDate, event.timezone, nowForExpiry));
+  // Finalized badge keeps the result after close: whether the winning time
+  // already took place.
+  const winningSlot = event.winningSlotId
+    ? (rawSlots.find((s) => s.id === event.winningSlotId) ?? null)
+    : null;
+  const winningPast = winningSlot
+    ? (slotEndInstant(winningSlot, event.eventDate, event.timezone)?.getTime() ?? Infinity) <=
+      nowForExpiry.getTime()
+    : false;
 
   if (event.type === "SIGNUP_SHEET") {
     // Fetch signups — never expose edit tokens to the client. Emails are
@@ -383,8 +454,8 @@ export async function loader({ params, request, context, url }: LoaderFunctionAr
     return data(
       {
         event: isAdmin
-          ? adminEventShape(event, retentionDays, lastSlotDateForEvent)
-          : publicEventShape(event, retentionDays, lastSlotDateForEvent),
+          ? adminEventShape(event, retentionDays, lastSlotDateForEvent, hasEnded)
+          : publicEventShape(event, retentionDays, lastSlotDateForEvent, hasEnded),
         slots,
         signups: safeSignups,
         isAdmin,
@@ -393,6 +464,15 @@ export async function loader({ params, request, context, url }: LoaderFunctionAr
         adminToken: isAdmin ? presented : null,
         pollData: null,
         pendingCancel,
+        closedSlotIds: closedIds,
+        pastSlotIds: pastIds,
+        closingSoon,
+        eventClosesIn,
+        eventPast,
+        eventHappening,
+        winningPast,
+        lastCloseAt: closeInstant?.toISOString() ?? null,
+        lastEndAt: endInstant?.toISOString() ?? null,
         turnstileSiteKey: env.TURNSTILE_SITE_KEY ?? null,
         origin: url.origin,
         siteName: site.siteName,
@@ -456,8 +536,8 @@ export async function loader({ params, request, context, url }: LoaderFunctionAr
     return data(
       {
         event: isAdmin
-          ? adminEventShape(event, retentionDays, lastSlotDateForEvent)
-          : publicEventShape(event, retentionDays, lastSlotDateForEvent),
+          ? adminEventShape(event, retentionDays, lastSlotDateForEvent, hasEnded)
+          : publicEventShape(event, retentionDays, lastSlotDateForEvent, hasEnded),
         slots,
         signups: [],
         isAdmin,
@@ -467,6 +547,15 @@ export async function loader({ params, request, context, url }: LoaderFunctionAr
           tallies: slotTallies,
         },
         pendingCancel,
+        closedSlotIds: closedIds,
+        pastSlotIds: pastIds,
+        closingSoon,
+        eventClosesIn,
+        eventPast,
+        eventHappening,
+        winningPast,
+        lastCloseAt: closeInstant?.toISOString() ?? null,
+        lastEndAt: endInstant?.toISOString() ?? null,
         turnstileSiteKey: env.TURNSTILE_SITE_KEY ?? null,
         origin: url.origin,
         siteName: site.siteName,
@@ -639,6 +728,23 @@ export async function action({ request, params, context }: ActionFunctionArgs) {
     if (!targetSlot || targetSlot.eventId !== eventId) {
       return data({ error: "Slot not found." }, { status: 404 });
     }
+    // Slots close at their start (end of day for all-day slots). Policy in
+    // ~/utils/guest-policy (unit-tested); the modal keys off `closed`.
+    // The cheap per-slot check avoids an extra query while open.
+    if (
+      event.status === "CLOSED" ||
+      isSlotClosed(targetSlot, event.eventDate, event.timezone, new Date())
+    ) {
+      const allSlots = await db.select().from(eventSlots).where(eq(eventSlots.eventId, eventId));
+      const rejection = signupCloseRejection({
+        status: event.status,
+        event,
+        targetSlot,
+        allSlots,
+        now: new Date(),
+      });
+      if (rejection) return data(rejection, { status: 410 });
+    }
 
     const signupId = generateInternalId();
     const editTokenPlain = generateSecretToken();
@@ -782,6 +888,21 @@ export async function action({ request, params, context }: ActionFunctionArgs) {
       return data({ error: "Unauthorized to cancel this signup." }, { status: 403 });
     }
 
+    // History protection: guests can't rewrite a shift that already
+    // happened — dropping out mid-shift ("can't make it") stays allowed on
+    // purpose, organizers can always remove anyone. Policy unit-tested.
+    if (!adminOk) {
+      const [ownSlot] = existing.slotId
+        ? await db.select().from(eventSlots).where(eq(eventSlots.id, existing.slotId)).limit(1)
+        : [null];
+      if (ownerCancelBlocked(ownSlot ?? null, event, new Date())) {
+        return data(
+          { error: "That shift already happened — entries can't be removed.", closed: true },
+          { status: 410 }
+        );
+      }
+    }
+
     await db.delete(signups).where(eq(signups.id, signupId));
 
     // Organizer-initiated removal: notify the person by email (best-effort —
@@ -894,6 +1015,15 @@ export async function action({ request, params, context }: ActionFunctionArgs) {
     }
 
     const voteSlots = await db.select().from(eventSlots).where(eq(eventSlots.eventId, eventId));
+    // Closed options are coerced to NO below (stale pages can't vote on
+    // passed options); history rows are never rewritten.
+    const { rejected: voteRejected, closedIds: closedVoteSlotIds } = voteCloseState({
+      status: event.status,
+      event,
+      slots: voteSlots,
+      now: new Date(),
+    });
+    if (voteRejected) return data(voteRejected, { status: 410 });
     const clientVoteId = cleanText(formData.get("clientVoteId"), 32) || null;
     const clientVoteToken = cleanText(formData.get("clientVoteToken"), 128) || null;
 
@@ -908,17 +1038,31 @@ export async function action({ request, params, context }: ActionFunctionArgs) {
     const existingVotes = await db.select().from(pollVotes).where(eq(pollVotes.eventId, eventId));
 
     const saveEntries = async (pollVoteId: string) => {
+      const submitted = new Map<string, string>();
       for (const s of voteSlots) {
         const resp = (formData.get(`slot_${s.id}`) as string) || "NO";
-        if (resp === "YES" || resp === "MAYBE") {
-          await db.insert(pollVoteEntries).values({
-            id: generateInternalId(),
-            pollVoteId,
-            slotId: s.id,
-            response: resp,
-          });
-        }
+        if (resp === "YES" || resp === "MAYBE") submitted.set(s.id, resp);
       }
+      for (const [slotId, resp] of dropClosedResponses(submitted, closedVoteSlotIds)) {
+        await db.insert(pollVoteEntries).values({
+          id: generateInternalId(),
+          pollVoteId,
+          slotId,
+          response: resp,
+        });
+      }
+    };
+
+    // Responses already recorded on now-closed options are history — an
+    // update of the open options deletes and rewrites open entries only.
+    const deleteOpenEntries = async (pollVoteId: string) => {
+      const openIds = voteSlots.filter((s) => !closedVoteSlotIds.has(s.id)).map((s) => s.id);
+      if (openIds.length === 0) return;
+      await db
+        .delete(pollVoteEntries)
+        .where(
+          and(eq(pollVoteEntries.pollVoteId, pollVoteId), inArray(pollVoteEntries.slotId, openIds))
+        );
     };
 
     const takenMessage = reclaimViaEmailMessage;
@@ -938,7 +1082,7 @@ export async function action({ request, params, context }: ActionFunctionArgs) {
           .update(pollVotes)
           .set({ participantName, participantEmail, updatedAt: now })
           .where(eq(pollVotes.id, ownVote.id));
-        await db.delete(pollVoteEntries).where(eq(pollVoteEntries.pollVoteId, ownVote.id));
+        await deleteOpenEntries(ownVote.id);
         await saveEntries(ownVote.id);
 
         return data({
@@ -973,7 +1117,7 @@ export async function action({ request, params, context }: ActionFunctionArgs) {
             updatedAt: now,
           })
           .where(eq(pollVotes.id, nameCollision.id));
-        await db.delete(pollVoteEntries).where(eq(pollVoteEntries.pollVoteId, nameCollision.id));
+        await deleteOpenEntries(nameCollision.id);
         await saveEntries(nameCollision.id);
 
         return data({
@@ -1091,8 +1235,11 @@ export async function action({ request, params, context }: ActionFunctionArgs) {
     const participantName = cleanText(formData.get("participantName"), PARTICIPANT_NAME_MAX);
     const rawProposeEmail = cleanText(formData.get("participantEmail"), EMAIL_MAX);
     const participantEmail = rawProposeEmail || null;
-
-    if (!participantName) {
+    // Verified once per intent (only mismatches burn rate-limit budget).
+    const isAdminProposing = await requireAdmin();
+    // Organizers reopening a passed poll propose the slot only — no name,
+    // no vote counted under it.
+    if (!participantName && !isAdminProposing) {
       return data({ error: "Your name is required to propose a time." }, { status: 400 });
     }
     if (participantEmail && !isValidEmail(participantEmail)) {
@@ -1141,7 +1288,9 @@ export async function action({ request, params, context }: ActionFunctionArgs) {
     if (!slotDateRaw || !isValidIsoDate(slotDateRaw)) {
       return data({ error: "Please pick a valid day for your proposed time." }, { status: 400 });
     }
-    if (isPastIsoDate(slotDateRaw)) {
+    // The poll's own calendar decides past, not UTC-yesterday: a day check
+    // alone would accept 9 AM proposed at 10 AM, and yesterday outright.
+    if (slotDateRaw < todayInZone(event.timezone || "UTC")) {
       return data({ error: "That day has already passed — please propose a future time." }, { status: 400 });
     }
     let startTime: string | null = null;
@@ -1155,8 +1304,36 @@ export async function action({ request, params, context }: ActionFunctionArgs) {
     }
     const slotError = validateSlotFields(slotDateRaw, startTime, endTime);
     if (slotError) return data({ error: slotError }, { status: 400 });
+    // Same-day proposals must start in the future — a day check alone would
+    // accept 9 AM proposed at 10 AM.
+    if (startTime) {
+      const proposedStart = zonedWallTimeToUtc(slotDateRaw, startTime, event.timezone || "UTC");
+      if (proposedStart && proposedStart.getTime() <= Date.now()) {
+        return data(
+          { error: "That time already passed today — please propose a later time." },
+          { status: 400 }
+        );
+      }
+    }
 
     const existingSlots = await db.select().from(eventSlots).where(eq(eventSlots.eventId, eventId));
+    const proposeNow = new Date();
+    // Server-side reopen gate (unit-tested): a manually closed poll stays
+    // shut; a passed poll reopens through this action for organizers only —
+    // the hidden form alone must never stop a guest POST.
+    const proposeRejected = proposeCloseRejection({
+      status: event.status,
+      event,
+      slots: existingSlots,
+      isAdmin: isAdminProposing,
+      now: proposeNow,
+    });
+    if (proposeRejected) return data(proposeRejected, { status: 410 });
+    const closedProposeSlotIds = new Set(
+      existingSlots
+        .filter((s) => isSlotClosed(s, event.eventDate, event.timezone, proposeNow))
+        .map((s) => s.id)
+    );
     if (existingSlots.length >= MAX_SLOTS_PER_EVENT) {
       return data(
         { error: `Too many options — maximum ${MAX_SLOTS_PER_EVENT} per poll.` },
@@ -1192,6 +1369,16 @@ export async function action({ request, params, context }: ActionFunctionArgs) {
       displayOrder: maxOrder + 1,
     });
 
+    // Organizer proposing without a name (reopening a passed poll): the
+    // slot alone, with no vote counted under it.
+    if (!participantName) {
+      return data({
+        success: true,
+        message: "Your proposed time was added.",
+        proposedSlotId: newSlotId,
+      });
+    }
+
     // Attach the proposal to the proposer's vote (same identity rules as
     // vote_poll): own token updates in place, same name+email reclaims,
     // otherwise a fresh vote. The new slot is always YES for the proposer.
@@ -1216,7 +1403,7 @@ export async function action({ request, params, context }: ActionFunctionArgs) {
     }
 
     const saveAccompanying = async (pollVoteId: string) => {
-      for (const [slotId, resp] of submittedResponses) {
+      for (const [slotId, resp] of dropClosedResponses(submittedResponses, closedProposeSlotIds)) {
         await db.insert(pollVoteEntries).values({
           id: generateInternalId(),
           pollVoteId,
@@ -1234,9 +1421,17 @@ export async function action({ request, params, context }: ActionFunctionArgs) {
       });
     };
     // Replace-all path used when the client sent its current matrix: keeps
-    // the proposer's on-screen selections alongside the new YES.
+    // the proposer's on-screen selections alongside the new YES. Entries on
+    // now-closed options are history and survive the replace.
     const replaceAllWithProposal = async (pollVoteId: string) => {
-      await db.delete(pollVoteEntries).where(eq(pollVoteEntries.pollVoteId, pollVoteId));
+      const openIds = existingSlots.filter((s) => !closedProposeSlotIds.has(s.id)).map((s) => s.id);
+      if (openIds.length > 0) {
+        await db
+          .delete(pollVoteEntries)
+          .where(
+            and(eq(pollVoteEntries.pollVoteId, pollVoteId), inArray(pollVoteEntries.slotId, openIds))
+          );
+      }
       await saveAccompanying(pollVoteId);
       await addYesForNewSlot(pollVoteId);
     };
@@ -1310,7 +1505,7 @@ export async function action({ request, params, context }: ActionFunctionArgs) {
         normEmail !== "" &&
         (nameCollision.participantEmail || "").trim().toLowerCase() === normEmail;
       // Voters edit from their original device or the emailed link.
-      if (reclaimable && !(await requireAdmin())) {
+      if (reclaimable && !isAdminProposing) {
         return data({ error: reclaimViaEmailMessage }, { status: 409 });
       }
       if (reclaimable) {
@@ -1381,6 +1576,17 @@ export async function action({ request, params, context }: ActionFunctionArgs) {
     const ownerOk = editToken ? await secretMatches(editToken, existing.editToken) : false;
     if (!adminOk && !ownerOk) {
       return data({ error: "Unauthorized." }, { status: 403 });
+    }
+    // History protection: guests can't delete votes once voting closed
+    // (organizers still can). Policy unit-tested.
+    if (!adminOk) {
+      const voteSlots = await db.select().from(eventSlots).where(eq(eventSlots.eventId, eventId));
+      if (ownerDeleteVoteBlocked(event, voteSlots, new Date())) {
+        return data(
+          { error: "Voting is closed — votes can't be removed.", closed: true },
+          { status: 410 }
+        );
+      }
     }
     await db.delete(pollVoteEntries).where(eq(pollVoteEntries.pollVoteId, voteId));
     await db.delete(pollVotes).where(eq(pollVotes.id, voteId));
@@ -1553,6 +1759,20 @@ export async function action({ request, params, context }: ActionFunctionArgs) {
     }
     if (eventDate && !isValidIsoDate(eventDate)) {
       return data({ error: "Please pick a valid event date." }, { status: 400 });
+    }
+    // Moving the event into the past would close it at birth — but only a
+    // newly picked past date is refused, so title/description edits on old
+    // events still save.
+    if (
+      event.type === "SIGNUP_SHEET" &&
+      eventDate &&
+      eventDate !== event.eventDate &&
+      eventDate < todayInZone(timezone)
+    ) {
+      return data(
+        { error: "That date has already passed — please pick today or a future date." },
+        { status: 400 }
+      );
     }
 
     // Dates: the edit form posts the same fields as create, so a sheet can
@@ -1808,6 +2028,26 @@ export async function action({ request, params, context }: ActionFunctionArgs) {
     }
     const slotError = validateSlotFields(slotDateRaw, startTime, endTime);
     if (slotError) return data({ error: slotError }, { status: 400 });
+    // New options must not be born closed: the day must be today or later
+    // on the event's calendar, and a same-day start must be in the future.
+    if (slotDate) {
+      const orgToday = todayInZone(event.timezone || "UTC");
+      if (slotDate < orgToday) {
+        return data(
+          { error: "That day has already passed — please pick today or a future day." },
+          { status: 400 }
+        );
+      }
+      if (slotDate === orgToday && startTime) {
+        const startInstant = zonedWallTimeToUtc(slotDate, startTime, event.timezone || "UTC");
+        if (startInstant && startInstant.getTime() <= Date.now()) {
+          return data(
+            { error: "That time already passed today — please pick a later time." },
+            { status: 400 }
+          );
+        }
+      }
+    }
 
     const existingSlots = await db.select().from(eventSlots).where(eq(eventSlots.eventId, eventId));
     // Multi-day sheets hold one row per (date x task), so they are capped by
@@ -2277,6 +2517,30 @@ export async function action({ request, params, context }: ActionFunctionArgs) {
     }
     const slotError = validateSlotFields(slotDateRaw, startTime, endTime);
     if (slotError) return data({ error: slotError }, { status: 400 });
+    // A newly picked day must not be in the past (an omitted field keeps the
+    // stored date untouched, and an unchanged date stays editable, so legacy
+    // options stay editable — saving a label on a historical option works).
+    if (!slotDateOmitted && slotDate) {
+      const storedDate = (target as { slotDate?: string | null }).slotDate ?? null;
+      if (slotDate !== storedDate) {
+        const orgToday = todayInZone(event.timezone || "UTC");
+        if (slotDate < orgToday) {
+          return data(
+            { error: "That day has already passed — please pick today or a future day." },
+            { status: 400 }
+          );
+        }
+        if (slotDate === orgToday && startTime) {
+          const startInstant = zonedWallTimeToUtc(slotDate, startTime, event.timezone || "UTC");
+          if (startInstant && startInstant.getTime() <= Date.now()) {
+            return data(
+              { error: "That time already passed today — please pick a later time." },
+              { status: 400 }
+            );
+          }
+        }
+      }
+    }
     const parsedCap = capacityRaw ? parseInt(capacityRaw, 10) : NaN;
 
     await db
@@ -2359,6 +2623,14 @@ export async function action({ request, params, context }: ActionFunctionArgs) {
     const candidates = await db.select().from(signups).where(eq(signups.eventId, eventId));
     for (const s of candidates) {
       if (await secretMatches(cancelToken, s.editToken)) {
+        // History protection, same as cancel_signup: a shift that already
+        // happened keeps its record.
+        const [cancelSlot] = s.slotId
+          ? await db.select().from(eventSlots).where(eq(eventSlots.id, s.slotId)).limit(1)
+          : [null];
+        if (cancelSlot && isSlotPast(cancelSlot, event.eventDate, event.timezone, new Date())) {
+          return redirect(`/events/${eventId}?cancel_closed=1`);
+        }
         await db.delete(signups).where(eq(signups.id, s.id));
         return redirect(`/events/${eventId}?cancelled=1`);
       }
@@ -2366,6 +2638,10 @@ export async function action({ request, params, context }: ActionFunctionArgs) {
     const voteCandidates = await db.select().from(pollVotes).where(eq(pollVotes.eventId, eventId));
     for (const v of voteCandidates) {
       if (await secretMatches(cancelToken, v.editToken)) {
+        const voteSlots = await db.select().from(eventSlots).where(eq(eventSlots.eventId, eventId));
+        if (isEventClosed(event, voteSlots, new Date())) {
+          return redirect(`/events/${eventId}?cancel_closed=1`);
+        }
         await db.delete(pollVoteEntries).where(eq(pollVoteEntries.pollVoteId, v.id));
         await db.delete(pollVotes).where(eq(pollVotes.id, v.id));
         return redirect(`/events/${eventId}?cancelled=1`);
@@ -2566,9 +2842,12 @@ function endForDuration(start: string, durationMinutes: number | null | undefine
 function EditDatesField({
   initialSpec,
   initialDate,
+  timeZone,
 }: {
   initialSpec: DateSpec;
   initialDate: string;
+  /** Event timezone: the picker floor follows it, not the browser day. */
+  timeZone?: string | null;
 }) {
   const today = new Date().toISOString().split("T")[0];
   // The posted date stays empty for a sheet that never had one — saving the
@@ -2592,9 +2871,14 @@ function EditDatesField({
         <label className="block text-xs font-semibold text-slate-700 mb-1.5">
           {dateFieldLabel(sel.mode)}
         </label>
-        <DatePicker name="eventDate" value={startDate} onChange={setStartDate} />
+        <DatePicker
+          name="eventDate"
+          value={startDate}
+          onChange={setStartDate}
+          timeZone={timeZone}
+        />
       </div>
-      <DateEndField value={sel} onChange={setSel} />
+      <DateEndField value={sel} onChange={setSel} min={timeZone ? todayInZone(timeZone) : undefined} />
       {sel.mode === "repeat" && (
         <div className="sm:col-span-2">
           <RepeatRuleField start={anchor} value={sel} onChange={setSel} />
@@ -3008,11 +3292,13 @@ function PollTimeOptionRow({
   durationMinutes,
   adminToken,
   isSubmitting,
+  timeZone,
 }: {
   slot: { id: string; title: string; slotDate?: string | null; startTime?: string | null; endTime?: string | null };
   durationMinutes: number | null;
   adminToken: string | null;
   isSubmitting: boolean;
+  timeZone?: string | null;
 }) {
   const isAllDay = durationMinutes === null;
   const [date, setDate] = useState(slot.slotDate || "");
@@ -3042,6 +3328,7 @@ function PollTimeOptionRow({
           name="slotDate"
           value={date}
           onChange={setDate}
+          timeZone={timeZone}
           className="col-span-2 sm:col-span-1 min-w-0"
         />
         {!isAllDay && (
@@ -3106,10 +3393,12 @@ function PollTimeNewOptionRow({
   durationMinutes,
   adminToken,
   isSubmitting,
+  timeZone,
 }: {
   durationMinutes: number | null;
   adminToken: string | null;
   isSubmitting: boolean;
+  timeZone?: string | null;
 }) {
   const isAllDay = durationMinutes === null;
   const [date, setDate] = useState("");
@@ -3132,6 +3421,7 @@ function PollTimeNewOptionRow({
           value={date}
           onChange={setDate}
           placeholder="Pick a day"
+          timeZone={timeZone}
           className="col-span-2 sm:col-span-1 min-w-0"
         />
         {!isAllDay && (
@@ -3303,11 +3593,20 @@ export default function EventView() {
     adminToken,
     pollData: serverPollData,
     pendingCancel,
+    closedSlotIds: serverClosedSlotIds,
+    pastSlotIds: serverPastSlotIds,
+    closingSoon: serverClosingSoon,
+    eventClosesIn: serverEventClosesIn,
+    eventPast: serverEventPast,
+    eventHappening: serverEventHappening,
+    winningPast: serverWinningPast,
+    lastCloseAt: serverLastCloseAt,
+    lastEndAt: serverLastEndAt,
     turnstileSiteKey,
     origin,
     siteName,
   } = useLoaderData<typeof loader>();
-  const actionData = useActionData<{ success?: boolean; message?: string; error?: string; voteId?: string; voteToken?: string; proposedSlotId?: string; needsVerification?: boolean }>();
+  const actionData = useActionData<{ success?: boolean; message?: string; error?: string; closed?: boolean; voteId?: string; voteToken?: string; proposedSlotId?: string; needsVerification?: boolean }>();
   const [searchParams] = useSearchParams();
   const navigation = useNavigation();
   const isSubmitting = navigation.state === "submitting";
@@ -3343,6 +3642,39 @@ export default function EventView() {
   const slots = live?.slots ?? serverSlots;
   const initialSignups = live?.signups ?? serverSignups;
   const pollData = live?.pollData ?? serverPollData;
+  // Closing state comes from the loader (server clock, SSR-safe) and
+  // refreshes with the live poll above — never Date.now() in render.
+  const hasEnded = Boolean((event as { hasEnded?: boolean }).hasEnded);
+  type LiveClose = {
+    closedSlotIds?: string[];
+    pastSlotIds?: string[];
+    closingSoon?: Record<string, string>;
+    eventClosesIn?: string | null;
+    eventPast?: boolean;
+    eventHappening?: boolean;
+    winningPast?: boolean;
+    lastCloseAt?: string | null;
+    lastEndAt?: string | null;
+  };
+  const liveClose = (live ?? null) as LiveClose | null;
+  const closedIds = new Set<string>(liveClose?.closedSlotIds ?? serverClosedSlotIds ?? []);
+  const pastIds = new Set<string>(liveClose?.pastSlotIds ?? serverPastSlotIds ?? []);
+  const closingSoon = liveClose?.closingSoon ?? serverClosingSoon ?? {};
+  const eventClosesIn = liveClose?.eventClosesIn ?? serverEventClosesIn ?? null;
+  const eventPast = liveClose?.eventPast ?? serverEventPast ?? false;
+  const eventHappening = liveClose?.eventHappening ?? serverEventHappening ?? false;
+  const winningPast = liveClose?.winningPast ?? serverWinningPast ?? false;
+  const lastCloseAt = liveClose?.lastCloseAt ?? serverLastCloseAt ?? null;
+  const lastEndAt = liveClose?.lastEndAt ?? serverLastEndAt ?? null;
+  const isFinalized = event.status === "FINALIZED";
+  const organizerTzForLabels = organizerTzOf(event as { timezone?: string | null });
+  const endedAtLabel = formatOrganizerInstant(lastEndAt, organizerTzForLabels);
+  // Zone suffix in the same city · offset style as the dual clocks elsewhere
+  // on the page ("New York · GMT-04:00"), at the ended instant (DST-correct).
+  const endedTzLabel = organizerTzLabel(
+    organizerTzForLabels,
+    lastEndAt ? new Date(lastEndAt) : null
+  );
 
   useEffect(() => {
     if (pollFetcher.data) setLastSyncedAt(Date.now());
@@ -3412,6 +3744,7 @@ export default function EventView() {
   const justCreated = Boolean(searchParams.get("created"));
   const justCancelled = Boolean(searchParams.get("cancelled"));
   const cancelError = Boolean(searchParams.get("cancel_error"));
+  const cancelClosed = Boolean(searchParams.get("cancel_closed"));
   const [selectedSlotForSignup, setSelectedSlotForSignup] = useState<{ id: string; title: string } | null>(null);
   // Close the signup modal on success; keep it open on error/challenge so
   // the on-demand Turnstile stays visible for a retry.
@@ -3598,8 +3931,8 @@ export default function EventView() {
   // so hide that vote from the read-only roster — otherwise the same name
   // appears twice (once saved, once editable). Tallies and per-slot voter
   // chips stay inclusive so counts keep matching. When the poll is finalized
-  // there is no editable row, so show every vote.
-  const isVotingOpen = event.status !== "FINALIZED";
+  // or its time has passed there is no editable row, so show every vote.
+  const isVotingOpen = event.status !== "FINALIZED" && !hasEnded;
   const visibleVotes =
     isVotingOpen && ownVote && pollData
       ? pollData.votes.filter((v) => v.id !== ownVote.id)
@@ -3626,6 +3959,8 @@ export default function EventView() {
     setUserVotes(() => {
       const next: Record<string, "NO" | "YES" | "MAYBE"> = {};
       slots.forEach((s) => {
+        // Passed options take no new votes.
+        if (closedIds.has(s.id)) return;
         next[s.id] = value;
       });
       return next;
@@ -3876,10 +4211,22 @@ export default function EventView() {
     return shifts;
   }, [slots, event.eventDate, initialSignups]);
   const [showAllDates, setShowAllDates] = useState(false);
+  // Past-shift history starts collapsed; the page opens on upcoming shifts.
+  const [showPast, setShowPast] = useState(false);
+  // "See open shifts" scroll target for the just-closed modal state.
+  const shiftsSectionRef = useRef<HTMLDivElement>(null);
+  // Scroll target for the organizer "Propose new times" next step.
+  const proposeSectionRef = useRef<HTMLDivElement>(null);
   // Long series (a school year) open on the next four weeks so the page isn't
-  // an endless scroll; short ones always show every date.
-  const windowedSections = useMemo(() => {
-    if (!isMultiDate || showAllDates || dateSections.length <= 7) return dateSections;
+  // an endless scroll; short ones always show every date. Windowing counts
+  // only dates with something still open — past dates live in the collapsed
+  // history and must not inflate "N hidden". Plain computation (not memo):
+  // pastIds refreshes with every live poll.
+  const openSections = dateSections.filter((s) =>
+    s.groups.some((g) => g.tasks.some((t) => !pastIds.has(t.id)))
+  );
+  const windowedSections: typeof dateSections = (() => {
+    if (!isMultiDate || showAllDates || openSections.length <= 7) return openSections;
     // "Today" on the sheet's own calendar — in UTC, an evening in New York is
     // already tomorrow and today's shifts would drop out of view.
     const dayIn = (ms: number) => {
@@ -3893,15 +4240,15 @@ export default function EventView() {
     };
     const today = dayIn(Date.now());
     const horizon = dayIn(Date.now() + 28 * 24 * 60 * 60 * 1000);
-    const upcoming = dateSections.filter((s) => (s.date || "") >= today);
+    const upcoming = openSections.filter((s) => (s.date || "") >= today);
     const windowed = upcoming.filter((s) => (s.date || "") <= horizon);
     if (windowed.length > 0) return windowed;
     if (upcoming.length > 0) return upcoming.slice(0, 4);
-    // A finished series still shows something: its last few days, where the
-    // organizer checking the roster afterwards is looking.
-    return dateSections.slice(-4);
-  }, [dateSections, isMultiDate, showAllDates, event]);
-  const hiddenDateCount = dateSections.length - windowedSections.length;
+    // A finished series shows no open dates — its history is all in the
+    // collapsed "Past shifts" block above.
+    return [];
+  })();
+  const hiddenDateCount = openSections.length - windowedSections.length;
 
   // Organizer-only volunteer roster rows (SIGNUP_SHEET): shift, task, name,
   // email, signed-up-at. Emails are present only for verified admins (the
@@ -3949,6 +4296,23 @@ export default function EventView() {
     adminToken
       ? `/events/${event.id}/export?admin=${encodeURIComponent(adminToken)}`
       : `/events/${event.id}/export`;
+  // Winning option for the finalized badge (day + time stay visible after
+  // close — the result is the most useful fact on the page).
+  const winningSlotForBadge = useMemo(
+    () =>
+      event.winningSlotId
+        ? (slots.find((s) => s.id === event.winningSlotId) ?? null)
+        : null,
+    [slots, event.winningSlotId]
+  );
+  const winningBadgeLabel = useMemo(() => {
+    if (!winningSlotForBadge) return null;
+    const day = formatSlotDateLabel(
+      (winningSlotForBadge as { slotDate?: string | null }).slotDate || event.eventDate
+    );
+    const time = winningSlotForBadge.startTime ? formatTime(winningSlotForBadge.startTime) : "";
+    return { day, time };
+  }, [winningSlotForBadge, event.eventDate]);
 
   // SSR-safe absolute links: `origin` comes from the loader (request URL),
   // so server and client render identical hrefs/values (no hydration
@@ -3993,6 +4357,9 @@ export default function EventView() {
   );
   const viewerTz = useViewerTimezone();
   const showViewerTz = Boolean(viewerTz && viewerTz !== organizerTz);
+  // Ended-time zone suffix follows the same rule as every other clock on
+  // this page: only when the viewer's zone differs from the event's.
+  const showEndedTz = Boolean(viewerTz && viewerTz !== organizerTzForLabels);
   const headerTzAt = useMemo(() => {
     const date = calendarSlot
       ? effectiveDateForSlot(calendarSlot, event.eventDate)
@@ -4136,6 +4503,16 @@ export default function EventView() {
           <span>That cancel link was invalid or already used.</span>
         </div>
       )}
+      {cancelClosed && (
+        <div className="p-4 rounded-2xl bg-slate-100 border border-slate-200 text-slate-700 text-sm font-semibold flex items-center gap-2.5 animate-fade-in">
+          <Lock className="w-4 h-4 shrink-0" />
+          <span>
+            {event.type === "TIME_POLL"
+              ? "Voting is closed — votes can no longer be removed. Contact the organizer if you need a change."
+              : "That shift already happened — entries can no longer be removed. Contact the organizer if you need a change."}
+          </span>
+        </div>
+      )}
       {pendingCancel && cancelTokenParam && (
         <div className="p-5 rounded-2xl bg-amber-50 border border-amber-200/80 text-amber-900 text-sm animate-fade-in">
           <p className="font-semibold">
@@ -4230,15 +4607,30 @@ export default function EventView() {
             </span>
             <span
               className={`text-[11px] px-3 py-1 rounded-full font-semibold border inline-flex items-center gap-1.5 ${
-                event.status === "FINALIZED"
+                isFinalized
                   ? "bg-purple-50 text-purple-700 border-purple-200"
-                  : "bg-green-50 text-green-700 border-green-200"
+                  : hasEnded
+                    ? "bg-slate-100 text-slate-600 border-slate-200"
+                    : "bg-green-50 text-green-700 border-green-200"
               }`}
             >
-              {event.status === "FINALIZED" ? (
-                <>
-                  Meeting Finalized <Target className="w-3 h-3" />
-                </>
+              {isFinalized ? (
+                winningBadgeLabel ? (
+                  winningPast ? (
+                    <>Took place {winningBadgeLabel.day}</>
+                  ) : (
+                    <>
+                      Finalized · {winningBadgeLabel.day}
+                      {winningBadgeLabel.time ? `, ${winningBadgeLabel.time}` : ""} <Target className="w-3 h-3" />
+                    </>
+                  )
+                ) : (
+                  <>
+                    Meeting Finalized <Target className="w-3 h-3" />
+                  </>
+                )
+              ) : hasEnded ? (
+                event.type === "TIME_POLL" ? "Voting closed" : "Sign-ups closed"
               ) : (
                 "Open for Responses"
               )}
@@ -4336,6 +4728,32 @@ export default function EventView() {
               {event.description}
             </p>
           )}
+          {(() => {
+            // Closed but not fully past means the last slot is running right
+            // now — "Happening now", never "Ended <future time>".
+            const whenSuffix = endedAtLabel
+              ? ` · Ended ${endedAtLabel}${showEndedTz ? ` (${endedTzLabel})` : ""}`
+              : "";
+            const stateSuffix = !eventPast && eventHappening ? " · Happening now" : whenSuffix;
+            return (
+              <>
+                {hasEnded && !isFinalized && (
+                  <p className="text-xs font-semibold text-slate-600 bg-slate-100 border border-slate-200 rounded-2xl px-4 py-3">
+                    {event.type === "TIME_POLL"
+                      ? `Voting closed${stateSuffix || " — all options passed"}.`
+                      : `Sign-ups closed${stateSuffix || " — this event already happened"}.`}
+                  </p>
+                )}
+                {!hasEnded && !isFinalized && eventClosesIn !== null && (
+                  <p className="text-xs font-semibold text-amber-800 bg-amber-50 border border-amber-200/80 rounded-2xl px-4 py-3">
+                    {event.type === "TIME_POLL"
+                      ? `Voting closes ${eventClosesIn}.`
+                      : `Sign-ups close ${eventClosesIn}.`}
+                  </p>
+                )}
+              </>
+            );
+          })()}
         </div>
         </div>
 
@@ -4541,6 +4959,7 @@ export default function EventView() {
                 <EditDatesField
                   initialSpec={(event as { dateSpec?: DateSpec }).dateSpec ?? { mode: "single" }}
                   initialDate={event.eventDate || ""}
+                  timeZone={(event as { timezone?: string | null }).timezone}
                 />
               )}
               <div>
@@ -4618,12 +5037,14 @@ export default function EventView() {
                     durationMinutes={(event as { durationMinutes?: number | null }).durationMinutes ?? null}
                     adminToken={adminToken}
                     isSubmitting={isSubmitting}
+                    timeZone={(event as { timezone?: string | null }).timezone}
                   />
                 ))}
                 <PollTimeNewOptionRow
                   durationMinutes={(event as { durationMinutes?: number | null }).durationMinutes ?? null}
                   adminToken={adminToken}
                   isSubmitting={isSubmitting}
+                  timeZone={(event as { timezone?: string | null }).timezone}
                 />
               </div>
             ) : (
@@ -4642,7 +5063,7 @@ export default function EventView() {
             <div className="pt-6 border-t border-rose-100 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
               <div className="text-xs text-slate-500">
                 <span className="font-bold text-slate-700 block">Delete this event</span>
-                <span>Removes the event, signups/votes and roster immediately. Cannot be undone.</span>
+                <span>Removes the event and all sign-ups immediately. Cannot be undone.</span>
               </div>
               <Form
                 method="post"
@@ -4668,10 +5089,10 @@ export default function EventView() {
       {/* SECTION 1: SIGNUP SHEET VIEW                                */}
       {/* ===================================================================== */}
       {event.type === "SIGNUP_SHEET" && (
-        <div className="space-y-6">
+        <div className="space-y-6" ref={shiftsSectionRef}>
           <div className="flex items-center justify-between px-1">
             <h2 className="text-xl font-bold text-slate-900 tracking-tight inline-flex items-center gap-2">
-              Available Shifts & Tasks
+              {hasEnded ? "Shifts & Tasks" : "Available Shifts & Tasks"}
               {liveBadge}
             </h2>
             <span className="text-xs font-medium text-slate-500">
@@ -4679,18 +5100,128 @@ export default function EventView() {
             </span>
           </div>
 
+          {/* Organizer ended panel sits with the list it summarizes — guests
+              see the grey banner in the header instead. */}
+          {hasEnded && isAdmin && (
+            <div className="bg-slate-900 text-white rounded-3xl p-5 sm:p-6 flex flex-col sm:flex-row sm:items-center justify-between gap-4 shadow-sm">
+              <div>
+                <p className="font-bold text-sm">
+                  {!eventPast && eventHappening
+                    ? "Happening now"
+                    : `Ended${endedAtLabel ? ` ${endedAtLabel}${showEndedTz ? ` (${endedTzLabel})` : ""}` : ""}`} ·{" "}
+                  {initialSignups.length} {initialSignups.length === 1 ? "sign-up" : "sign-ups"} across{" "}
+                  {shiftGroups.length} {shiftGroups.length === 1 ? "shift" : "shifts"}
+                </p>
+                <p className="text-xs text-slate-300/90 mt-1">
+                  Sign-ups are closed. The signup list below stays visible to you.
+                </p>
+              </div>
+              <div className="flex flex-wrap items-center gap-2 shrink-0">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowEdit(true);
+                    window.setTimeout(() => {
+                      editPanelRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+                    }, 60);
+                  }}
+                  className="px-4 py-2.5 rounded-xl bg-white text-slate-900 hover:bg-slate-100 text-xs font-bold transition-all"
+                >
+                  Update event date to reopen
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* Past shifts collapse into one history row per task: "Done · 5
+              helped". Upcoming stays on top so a long series opens where
+              people can actually sign up. */}
+          {(() => {
+            const past: Array<{ slot: SlotRow; date: string | null; shiftName: string | null; count: number }> = [];
+            for (const section of dateSections) {
+              for (const group of section.groups) {
+                for (const task of group.tasks) {
+                  if (!pastIds.has(task.id)) continue;
+                  past.push({
+                    slot: task,
+                    date: group.date,
+                    shiftName: group.shiftName,
+                    count: initialSignups.filter((s) => Boolean(s && s.slotId === task.id)).length,
+                  });
+                }
+              }
+            }
+            if (past.length === 0) return null;
+            return (
+              <div className="bg-white border border-slate-200/80 rounded-3xl shadow-[0_2px_12px_rgba(0,0,0,0.03)] overflow-hidden">
+                <button
+                  type="button"
+                  onClick={() => setShowPast((v) => !v)}
+                  aria-expanded={showPast}
+                  className="w-full px-5 sm:px-6 py-4 flex items-center justify-between gap-3 text-left hover:bg-slate-50/60 transition-colors"
+                >
+                  <span className="text-sm font-bold text-slate-700">
+                    Past shifts ({past.length})
+                  </span>
+                  <span className="text-xs font-bold text-blue-700 shrink-0">
+                    {showPast ? "Hide" : "Show"}
+                  </span>
+                </button>
+                {showPast && (
+                  <ul className="px-5 sm:px-6 pb-5 space-y-2">
+                    {past.map(({ slot, date, shiftName, count }) => (
+                      <li
+                        key={slot.id}
+                        className="flex items-center justify-between gap-3 text-xs bg-slate-50/70 border border-slate-200/70 rounded-xl px-3.5 py-2.5"
+                      >
+                        <span className="font-semibold text-slate-700 truncate">
+                          {date && isMultiDate ? `${formatSlotDateLabel(date)} · ` : ""}
+                          {shiftName ? `${shiftName} – ` : ""}
+                          {slot.title}
+                          {(slot.startTime || slot.endTime) && (
+                            <span className="font-normal text-slate-500">
+                              {" "}· {formatTime(slot.startTime)}
+                              {slot.endTime ? ` – ${formatTime(slot.endTime)}` : ""}
+                            </span>
+                          )}
+                        </span>
+                        <span className="shrink-0 font-semibold text-slate-500">
+                          Done · {count === 0 ? "no sign-ups" : `${count} helped`}
+                        </span>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+            );
+          })()}
+
           <div className="space-y-5">
-            {windowedSections.map((section) => (
+            {windowedSections.map((section) => {
+              // Past tasks live in the collapsed history above — sections and
+              // groups with nothing upcoming render nothing here.
+              const openGroups = section.groups
+                .map((group) => ({
+                  group,
+                  openTasks: group.tasks.filter((t) => !pastIds.has(t.id)),
+                }))
+                .filter((g) => g.openTasks.length > 0);
+              if (openGroups.length === 0) return null;
+              return (
               <div key={section.date || "undated"} className="space-y-5">
                 {isMultiDate && section.date && (
                   <h3 className="text-sm font-extrabold uppercase tracking-wider text-slate-500 px-1 pt-2">
                     {formatLongDateLabel(section.date)}
                   </h3>
                 )}
-                {section.groups.map((group) => {
+                {openGroups.map(({ group, openTasks }) => {
               const renderTask = (slot: SlotRow) => {
                 const slotSignups = initialSignups.filter((s) => Boolean(s && s.slotId === slot.id));
                 const isFull = slot.capacity > 0 && slotSignups.length >= slot.capacity;
+                const isClosed = closedIds.has(slot.id);
+                // Closed but not past means a timed slot between start and end.
+                const happening = isClosed && !pastIds.has(slot.id);
+                const closesIn = !isClosed ? (closingSoon[slot.id] ?? null) : null;
                 const spotsLeft = slot.capacity > 0 ? slot.capacity - slotSignups.length : 999;
                 const fillPercent =
                   slot.capacity > 0 ? Math.min(100, Math.round((slotSignups.length / slot.capacity) * 100)) : 0;
@@ -4705,7 +5236,19 @@ export default function EventView() {
                       <div className="space-y-2 max-w-xl">
                         <div className="flex items-center gap-3 flex-wrap">
                           <h4 className="font-bold text-base text-slate-900">{slot.title}</h4>
-                          {slot.capacity > 0 ? (
+                          {happening ? (
+                            <span className="text-xs px-3 py-1 rounded-full bg-blue-50 text-blue-700 border border-blue-200 font-semibold">
+                              Happening now
+                            </span>
+                          ) : closesIn !== null ? (
+                            <span className="text-xs px-3 py-1 rounded-full bg-amber-50 text-amber-700 border border-amber-200 font-semibold">
+                              Closes {closesIn}
+                            </span>
+                          ) : isClosed ? (
+                            <span className="text-xs px-3 py-1 rounded-full bg-slate-100 text-slate-500 border border-slate-200 font-semibold">
+                              Closed
+                            </span>
+                          ) : slot.capacity > 0 ? (
                             <span
                               className={`text-xs px-3 py-1 rounded-full font-semibold border ${
                                 isFull
@@ -4737,24 +5280,27 @@ export default function EventView() {
                         )}
                       </div>
 
-                      <button
-                        type="button"
-                        disabled={isFull}
-                        onClick={() => setSelectedSlotForSignup({ id: slot.id, title: signupLabel })}
-                        className={`px-6 py-3 rounded-2xl text-xs font-bold transition-all shadow-sm shrink-0 inline-flex items-center gap-1.5 ${
-                          isFull
-                            ? "bg-slate-100 text-slate-400 cursor-not-allowed border border-slate-200"
-                            : "bg-blue-600 text-white hover:bg-blue-700 hover:scale-[1.02] active:scale-[0.98]"
-                        }`}
-                      >
-                        {isFull ? (
-                          "Full"
-                        ) : (
-                          <>
-                            Sign Up <ArrowRight className="w-3.5 h-3.5" />
-                          </>
-                        )}
-                      </button>
+                      {/* No button once closed — the pill above is the one label. */}
+                      {!isClosed && (
+                        <button
+                          type="button"
+                          disabled={isFull}
+                          onClick={() => setSelectedSlotForSignup({ id: slot.id, title: signupLabel })}
+                          className={`px-6 py-3 rounded-2xl text-xs font-bold transition-all shadow-sm shrink-0 inline-flex items-center gap-1.5 ${
+                            isFull
+                              ? "bg-slate-100 text-slate-400 cursor-not-allowed border border-slate-200"
+                              : "bg-blue-600 text-white hover:bg-blue-700 hover:scale-[1.02] active:scale-[0.98]"
+                          }`}
+                        >
+                          {isFull ? (
+                            "Full"
+                          ) : (
+                            <>
+                              Sign Up <ArrowRight className="w-3.5 h-3.5" />
+                            </>
+                          )}
+                        </button>
+                      )}
                     </div>
 
                     {/* Confirmed Roster Container */}
@@ -4765,7 +5311,13 @@ export default function EventView() {
 
                       {slotSignups.length === 0 ? (
                         <div className="text-xs text-slate-400 italic py-1">
-                          No one has signed up for this task yet. Claim the first spot!
+                          {happening
+                            ? isAdmin
+                              ? "No one signed up for this shift. Sign-ups closed when it started."
+                              : "Sign-ups closed when this shift started. No one signed up."
+                            : isClosed
+                              ? "Sign-ups are closed. No one signed up."
+                              : "No one has signed up for this task yet. Claim the first spot!"}
                         </div>
                       ) : (
                         <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-2.5">
@@ -4849,26 +5401,27 @@ export default function EventView() {
                     )}
                   </div>
 
-                  {group.shiftName || group.startTime || group.endTime || group.tasks.length > 1 ? (
-                    <div className="space-y-4">{group.tasks.map(renderTask)}</div>
+                  {group.shiftName || group.startTime || group.endTime || openTasks.length > 1 ? (
+                    <div className="space-y-4">{openTasks.map(renderTask)}</div>
                   ) : (
-                    renderTask(group.tasks[0])
+                    renderTask(openTasks[0])
                   )}
                 </div>
               );
                 })}
               </div>
-            ))}
+              );
+            })}
             {hiddenDateCount > 0 && (
               <button
                 type="button"
                 onClick={() => setShowAllDates(true)}
                 className="w-full px-4 py-3 rounded-2xl border border-slate-200 bg-white text-sm font-semibold text-slate-600 hover:border-blue-400 hover:text-blue-600 transition-all"
               >
-                Show all {dateSections.length} days ({hiddenDateCount} hidden)
+                Show all {openSections.length} days ({hiddenDateCount} hidden)
               </button>
             )}
-            {showAllDates && dateSections.length > 7 && (
+            {showAllDates && openSections.length > 7 && (
               <button
                 type="button"
                 onClick={() => setShowAllDates(false)}
@@ -5061,28 +5614,62 @@ export default function EventView() {
             </div>
           )}
 
+          {/* All options passed without a locked time: the poll dies quietly
+              unless the organizer gets a next step. Guests see the closed
+              banner above; organizers get the main action here. */}
+          {hasEnded && !isFinalized && isAdmin && (
+            <div className="bg-amber-50/60 border border-amber-200/80 rounded-3xl p-5 sm:p-6 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+              <div>
+                <p className="font-bold text-amber-900 text-sm">All proposed times have passed.</p>
+                <p className="text-xs text-amber-800/90 mt-1">
+                  {pollData.votes.length} {pollData.votes.length === 1 ? "response" : "responses"} kept below. Propose new times to reopen voting.
+                </p>
+              </div>
+              <div className="flex flex-wrap items-center gap-2 shrink-0">
+                <a
+                  href={rosterExportHref}
+                  download
+                  className="inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl border border-amber-300 bg-white hover:bg-amber-100/50 text-amber-900 text-xs font-bold transition-all"
+                >
+                  <Download className="w-4 h-4" />
+                  <span>Export votes</span>
+                </a>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowPropose(true);
+                    proposeSectionRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+                  }}
+                  className="px-5 py-2.5 rounded-xl bg-green-600 hover:bg-green-700 text-white text-xs font-bold shadow-sm transition-all inline-flex items-center gap-2"
+                >
+                  <CalendarPlus className="w-4 h-4" /> Propose new times
+                </button>
+              </div>
+            </div>
+          )}
+
           {/* Voting + Results Card — responsive: cards on mobile, matrix on desktop */}
           <div className="bg-white border border-slate-200/80 rounded-3xl shadow-[0_2px_12px_rgba(0,0,0,0.03)] overflow-hidden">
             {/* Card header */}
             <div className="p-5 sm:p-6 border-b border-slate-100 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
               <div>
                 <h3 className="font-bold text-slate-900 text-base">
-                  {event.status === "FINALIZED" ? "Results" : "Vote your availability"}
+                  {!isVotingOpen ? "Results" : "Vote your availability"}
                 </h3>
                 <p className="text-xs text-slate-500 mt-0.5 flex items-center gap-2 flex-wrap">
                   <span>
                     {pollData.votes.length} {pollData.votes.length === 1 ? "response" : "responses"} so far
-                  {event.status !== "FINALIZED" && (
+                  {isVotingOpen && (
                     <span className="hidden sm:inline"> · Tap a cell to cycle No → Yes → Maybe</span>
                   )}
-                  {event.status !== "FINALIZED" && (
+                  {isVotingOpen && (
                     <span className="sm:hidden"> · Tap an option below</span>
                   )}
                   </span>
                   {liveBadge}
                 </p>
               </div>
-              {event.status !== "FINALIZED" && (
+              {isVotingOpen && (
                 <div className="flex items-center gap-2 text-xs">
                   <button
                     type="button"
@@ -5103,7 +5690,7 @@ export default function EventView() {
             </div>
 
             {/* Voter identity — shared by mobile cards + desktop matrix */}
-            {event.status !== "FINALIZED" && (
+            {isVotingOpen && (
               <div className="p-5 sm:p-6 bg-blue-50/40 border-b border-slate-100 grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
                   <label htmlFor="voter-name" className="block text-xs font-bold text-slate-700 mb-1.5">
@@ -5167,8 +5754,10 @@ export default function EventView() {
                 const autoTitle = `${dayLabel} · ${timeLabel}`;
                 const rawTitle = (s.title || "").trim();
                 const customLabel = rawTitle && rawTitle !== autoTitle ? s.title : "";
+                // Options whose start passed are history: faded, no vote cells.
+                const optionClosed = closedIds.has(s.id);
                 return (
-                  <div key={s.id} className={`px-3 py-2 space-y-1.5 ${isWinning ? "bg-purple-50/50" : ""}`}>
+                  <div key={s.id} className={`px-3 py-2 space-y-1.5 ${isWinning ? "bg-purple-50/50" : ""} ${optionClosed ? "opacity-60" : ""}`}>
                     <div className="min-w-0">
                       <div className="flex items-center gap-x-1.5 gap-y-1 min-w-0 flex-wrap">
                         <span className="text-[10px] font-bold uppercase tracking-wider text-slate-500 shrink-0">
@@ -5201,13 +5790,18 @@ export default function EventView() {
                             <Trophy className="w-3 h-3" /> Final
                           </span>
                         )}
+                        {optionClosed && !isWinning && (
+                          <span className="inline-flex items-center gap-0.5 text-[10px] font-bold text-slate-500 bg-slate-100 border border-slate-200 px-1.5 py-px rounded-full shrink-0">
+                            Passed
+                          </span>
+                        )}
                       </div>
                       {customLabel && (
                         <div className="text-[11px] text-slate-500 truncate mt-0.5">{customLabel}</div>
                       )}
                     </div>
 
-                    {event.status !== "FINALIZED" ? (
+                    {isVotingOpen && !optionClosed ? (
                       <div
                         role="group"
                         aria-label={`Your availability for ${slotDayLabel[s.id]} ${timeLabel}`}
@@ -5368,12 +5962,13 @@ export default function EventView() {
                       const rawTitleForCustom = (s.title || "").trim();
                       const customLabel =
                         rawTitleForCustom && rawTitleForCustom !== autoTitleForCustom ? s.title : "";
+                      const headerClosed = closedIds.has(s.id);
                       return (
                         <th
                           key={s.id}
                           className={`p-4 text-center border-r border-slate-200/80 min-w-[150px] ${
                             isWinning ? "bg-purple-50/60 text-purple-900" : ""
-                          }`}
+                          } ${headerClosed && !isWinning ? "opacity-60" : ""}`}
                         >
                           <div className="font-bold text-slate-900">
                             <DualSlotTime
@@ -5396,6 +5991,11 @@ export default function EventView() {
                           {isWinning && (
                             <span className="mt-1 text-[10px] px-2.5 py-0.5 rounded-full bg-purple-100 text-purple-800 font-bold inline-flex items-center gap-1">
                               <Trophy className="w-3 h-3" /> Selected Meeting Time
+                            </span>
+                          )}
+                          {headerClosed && !isWinning && (
+                            <span className="mt-1 text-[10px] px-2.5 py-0.5 rounded-full bg-slate-100 text-slate-500 font-bold inline-flex items-center gap-1">
+                              Passed
                             </span>
                           )}
                         </th>
@@ -5459,7 +6059,7 @@ export default function EventView() {
                   ))}
 
                   {/* Active Voting Row — desktop: 44px targets + labels */}
-                  {event.status !== "FINALIZED" && (
+                  {isVotingOpen && (
                     <tr className="bg-blue-50/30 border-t-2 border-blue-400/80">
                       <td className="p-4 sticky left-0 bg-blue-50 border-r border-slate-200/80">
                         <div className="text-xs font-bold text-blue-900">
@@ -5473,6 +6073,15 @@ export default function EventView() {
                       </td>
 
                       {slots.map((s) => {
+                        // Passed options keep their recorded votes above but
+                        // take no new ones — no cell here.
+                        if (closedIds.has(s.id)) {
+                          return (
+                            <td key={s.id} className="p-2.5 text-center border-r border-slate-200/80">
+                              <span className="text-slate-300 text-lg leading-none" aria-label="Voting closed for this option">—</span>
+                            </td>
+                          );
+                        }
                         const cur = userVotes[s.id] || "NO";
                         const label = cur === "YES" ? "Yes" : cur === "MAYBE" ? "Maybe" : "No";
                         return (
@@ -5538,7 +6147,7 @@ export default function EventView() {
             </div>
 
             {/* Voting footer / submit — shared */}
-            {event.status !== "FINALIZED" && (
+            {isVotingOpen && (
               <div className="p-5 sm:p-6 bg-[#fafafc] border-t border-slate-200/80 flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-4">
                 <div className="flex items-center gap-4 text-xs text-slate-500 flex-wrap">
                   <span className="flex items-center gap-1.5">
@@ -5628,13 +6237,17 @@ export default function EventView() {
             )}
           </div>
 
-          {/* Volunteer-proposed time — guests can add a missing option.
-              The proposer is auto-counted as Yes for their suggestion.
+          {/* Volunteer-proposed time — also the organizer's reopen path once
+              all options passed, so admins keep it while closed. The proposer
+              is auto-counted as Yes for their suggestion.
               NOTE: no overflow-hidden on the card below — the DatePicker
               calendar popup is absolutely positioned and would be clipped
               by it (the toggle carries its own top rounding instead). */}
-          {event.status !== "FINALIZED" && (
-            <div className="bg-white border border-slate-200/80 rounded-3xl shadow-[0_2px_12px_rgba(0,0,0,0.03)]">
+          {(isVotingOpen || (isAdmin && hasEnded && !isFinalized)) && (
+            <div
+              ref={proposeSectionRef}
+              className="bg-white border border-slate-200/80 rounded-3xl shadow-[0_2px_12px_rgba(0,0,0,0.03)] scroll-mt-24"
+            >
               <button
                 type="button"
                 onClick={() => setShowPropose((v) => !v)}
@@ -5664,7 +6277,9 @@ export default function EventView() {
                   method="post"
                   className="p-5 sm:p-6 pt-0 space-y-4"
                   onSubmit={(e) => {
-                    if (!voterName.trim()) {
+                    // Organizers reopening a passed poll propose the slot
+                    // alone — no name, no vote counted under it.
+                    if (!voterName.trim() && !isAdmin) {
                       e.preventDefault();
                       document.getElementById("voter-name")?.focus();
                       alert("Please enter your name above first!");
@@ -5729,6 +6344,7 @@ export default function EventView() {
                           placeholder="Pick a day"
                           accent="green"
                           required
+                          timeZone={organizerTz}
                           className="min-w-0"
                         />
                         {!isAllDay && (
@@ -5763,15 +6379,24 @@ export default function EventView() {
                           disabled={isSubmitting}
                           className="h-10 px-5 rounded-xl bg-green-600 hover:bg-green-700 text-white text-xs font-bold shadow-sm transition-all hover:scale-[1.02] active:scale-[0.98] disabled:opacity-50 whitespace-nowrap w-full sm:w-auto"
                         >
-                          {isSubmitting ? "Adding…" : "+ Add & vote Yes"}
+                          {isSubmitting
+                            ? "Adding…"
+                            : !voterName.trim() && isAdmin
+                              ? "+ Add time"
+                              : "+ Add & vote Yes"}
                         </button>
                       </div>
                     );
                   })()}
 
-                  {!voterName.trim() && (
+                  {!voterName.trim() && !isAdmin && (
                     <p className="text-[11px] text-slate-500">
                       Enter your name in “Your name” above first — your proposal is saved under it.
+                    </p>
+                  )}
+                  {!voterName.trim() && isAdmin && (
+                    <p className="text-[11px] text-slate-500">
+                      Proposing without a name adds the time without counting you as a voter.
                     </p>
                   )}
                   {needsHumanCheck && turnstileSiteKey && (
@@ -5865,6 +6490,23 @@ export default function EventView() {
                 <p className="text-xs font-medium text-amber-700 bg-amber-50 border border-amber-200 rounded-xl px-3 py-2">
                   {actionData.error}
                 </p>
+              )}
+              {actionData?.closed && actionData?.error && (
+                <div className="bg-slate-100 border border-slate-200 rounded-xl px-3 py-2.5 space-y-2">
+                  <p className="text-xs font-bold text-slate-700">{actionData.error}</p>
+                  {!hasEnded && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setSelectedSlotForSignup(null);
+                        shiftsSectionRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+                      }}
+                      className="px-4 py-2 rounded-xl bg-slate-900 hover:bg-slate-800 text-white text-xs font-bold transition-colors"
+                    >
+                      See open shifts
+                    </button>
+                  )}
+                </div>
               )}
               {needsHumanCheck && turnstileSiteKey && (
                 <Turnstile siteKey={turnstileSiteKey} action="event-signup" resetKey={navigation.state} />

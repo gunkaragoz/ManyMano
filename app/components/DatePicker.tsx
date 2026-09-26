@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { CalendarDays, ChevronLeft, ChevronRight } from "lucide-react";
+import { todayInZone } from "~/utils/event-expiry";
 
 interface DatePickerProps {
   value?: string;
@@ -11,6 +12,20 @@ interface DatePickerProps {
   className?: string;
   /** Accent color for selected day, focus ring, and Today affordances. Defaults to blue. */
   accent?: "blue" | "green";
+  /**
+   * Earliest pickable day (YYYY-MM-DD). Defaults to today, so event dates
+   * can't be picked in the past. The server checks past dates too on every
+   * path that sets one (create, propose, add/update option, and changed
+   * event dates) — unchanged legacy dates still display.
+   * Pass "" or null for no minimum.
+   */
+  min?: string | null;
+  /**
+   * Event timezone the default minimum is derived from. The browser's day
+   * can differ from the event's (wrong calendar otherwise) — creation forms
+   * pass their selected zone; explicit `min` still wins.
+   */
+  timeZone?: string | null;
 }
 
 function parseISO(v: string | undefined): { y: number; m: number; d: number } | null {
@@ -52,6 +67,8 @@ export default function DatePicker({
   placeholder = "Pick a day",
   className = "",
   accent = "blue",
+  min,
+  timeZone,
 }: DatePickerProps) {
   const controlled = value !== undefined;
   const [internal, setInternal] = useState(defaultValue || "");
@@ -117,6 +134,7 @@ export default function DatePicker({
   }, [viewY, viewM]);
 
   const commit = (iso: string) => {
+    if (isDisabledDay(iso)) return;
     if (!controlled) setInternal(iso);
     onChange?.(iso);
     setOpen(false);
@@ -135,6 +153,12 @@ export default function DatePicker({
 
   const selectedKey = parsed ? toISO(parsed.y, parsed.m, parsed.d) : "";
   const todayKey = toISO(today.getFullYear(), today.getMonth() + 1, today.getDate());
+  // Floor for picking: explicit min, else today in the event's timezone when
+  // given, else the browser's today. ISO days compare lexicographically, so
+  // past cells are simply key < minKey.
+  const minKey =
+    min === undefined ? (timeZone ? todayInZone(timeZone) : todayKey) : min || "";
+  const isDisabledDay = (key: string) => Boolean(minKey && key < minKey);
 
   const accentStyles =
     accent === "green"
@@ -224,18 +248,23 @@ export default function DatePicker({
               const key = toISO(c.y, c.m, c.d);
               const isSelected = key === selectedKey;
               const isToday = key === todayKey;
+              const disabled = isDisabledDay(key);
               return (
                 <button
                   key={`${key}-${i}`}
                   type="button"
+                  disabled={disabled}
                   onClick={() => commit(key)}
+                  aria-disabled={disabled}
                   className={[
                     "h-8 w-8 mx-auto rounded-full text-xs flex items-center justify-center transition-all",
                     isSelected
                       ? accentStyles.selectedDay
-                      : c.inMonth
-                        ? accentStyles.dayHover
-                        : "text-slate-300 hover:bg-slate-50",
+                      : disabled
+                        ? "text-slate-300 cursor-not-allowed"
+                        : c.inMonth
+                          ? accentStyles.dayHover
+                          : "text-slate-300 hover:bg-slate-50",
                     !isSelected && isToday ? accentStyles.todayRing : "",
                   ].join(" ")}
                 >
@@ -246,16 +275,18 @@ export default function DatePicker({
           </div>
 
           <div className="flex items-center justify-between mt-2 pt-2 border-t border-slate-100">
-            <button
-              type="button"
-              onClick={() => {
-                const t = new Date();
-                commit(toISO(t.getFullYear(), t.getMonth() + 1, t.getDate()));
-              }}
-              className={accentStyles.todayButton}
-            >
-              Today
-            </button>
+            {!isDisabledDay(todayKey) && (
+              <button
+                type="button"
+                onClick={() => {
+                  const t = new Date();
+                  commit(toISO(t.getFullYear(), t.getMonth() + 1, t.getDate()));
+                }}
+                className={accentStyles.todayButton}
+              >
+                Today
+              </button>
+            )}
             {current && !required && (
               <button
                 type="button"

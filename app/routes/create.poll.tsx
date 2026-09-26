@@ -32,12 +32,13 @@ import {
   SLOT_TITLE_MAX,
   TITLE_MAX,
   cleanText,
-  isPastIsoDate,
   isValidEmail,
   isValidIsoDate,
   parseTimezoneInput,
 } from "~/utils/validation";
 import { pruneExpiredEvents, resolveRetentionDays } from "~/utils/retention";
+import { rebaseDatesToToday, todayInZone } from "~/utils/event-expiry";
+import { zonedWallTimeToUtc } from "~/utils/timezones";
 import { getSiteConfig } from "~/utils/site";
 import { addMinutesToTimeString, formatSlotDateLabel, formatLongDateLabel, formatDurationLabel } from "~/utils/calendar";
 import {
@@ -191,7 +192,7 @@ export async function action({ request, context }: ActionFunctionArgs) {
     if (!DATE_RE.test(date) || !isValidIsoDate(date)) {
       return data({ error: `Row ${idx + 1}: please pick a valid day.` }, { status: 400 });
     }
-    if (isPastIsoDate(date)) {
+    if (date < todayInZone(timezone)) {
       return data({ error: `Row ${idx + 1}: that day has already passed.` }, { status: 400 });
     }
     const optionKey = `${date}|${durationMinutes === null ? "" : (slotStartTimes[idx] || "").trim()}`;
@@ -213,6 +214,17 @@ export async function action({ request, context }: ActionFunctionArgs) {
     const start = (slotStartTimes[idx] || "").trim();
     if (!TIME_RE.test(start)) {
       return data({ error: `Row ${idx + 1}: please pick a start time.` }, { status: 400 });
+    }
+    // Same-day options must start in the future — voting on them would
+    // already be closed at birth. Measured on the poll's own calendar.
+    if (date === todayInZone(timezone)) {
+      const startInstant = zonedWallTimeToUtc(date, start, timezone);
+      if (startInstant && startInstant.getTime() <= Date.now()) {
+        return data(
+          { error: `Row ${idx + 1}: that time already passed today — pick a later time.` },
+          { status: 400 }
+        );
+      }
     }
     // One duration for the whole poll: the end is always derived from it, so
     // a posted end time can't contradict the start (overnight wrap is fine).
@@ -436,6 +448,18 @@ export default function CreateMeetingPoll() {
     const detected = detectLocalTimezone();
     if (detected && details.timezone === "UTC") {
       setDetails((prev) => (prev.timezone === "UTC" ? { ...prev, timezone: detected } : prev));
+      // Day rows defaulted on the UTC calendar can be behind the event day
+      // in zones ahead of UTC — rebase every dated row forward together so
+      // gaps survive and no two rows stack onto one day.
+      const today = todayInZone(detected);
+      setDays((prev) => {
+        const rebased = rebaseDatesToToday(
+          prev.map((d) => d.date),
+          today
+        );
+        if (!rebased) return prev;
+        return prev.map((d, i) => ({ ...d, date: rebased[i] || d.date }));
+      });
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -917,6 +941,7 @@ export default function CreateMeetingPoll() {
                         value={day.date}
                         onChange={(iso) => updateDay(day.id, { date: iso })}
                         accent="green"
+                        timeZone={details.timezone}
                         className="col-span-2 sm:col-span-1 min-w-0"
                       />
 
