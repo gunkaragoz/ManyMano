@@ -897,7 +897,7 @@ export async function action({ request, params, context }: ActionFunctionArgs) {
         : [null];
       if (ownerCancelBlocked(ownSlot ?? null, event, new Date())) {
         return data(
-          { error: "That shift already happened — entries can't be removed." },
+          { error: "That shift already happened — entries can't be removed.", closed: true },
           { status: 410 }
         );
       }
@@ -1583,7 +1583,7 @@ export async function action({ request, params, context }: ActionFunctionArgs) {
       const voteSlots = await db.select().from(eventSlots).where(eq(eventSlots.eventId, eventId));
       if (ownerDeleteVoteBlocked(event, voteSlots, new Date())) {
         return data(
-          { error: "Voting is closed — votes can't be removed." },
+          { error: "Voting is closed — votes can't be removed.", closed: true },
           { status: 410 }
         );
       }
