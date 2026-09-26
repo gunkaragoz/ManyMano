@@ -14,7 +14,9 @@ interface DatePickerProps {
   accent?: "blue" | "green";
   /**
    * Earliest pickable day (YYYY-MM-DD). Defaults to today, so event dates
-   * can't be created in the past — the server enforces the same rule.
+   * can't be picked in the past. The server checks past dates too on every
+   * path that sets one (create, propose, add/update option, and changed
+   * event dates) — unchanged legacy dates still display.
    * Pass "" or null for no minimum.
    */
   min?: string | null;

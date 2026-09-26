@@ -1760,6 +1760,20 @@ export async function action({ request, params, context }: ActionFunctionArgs) {
     if (eventDate && !isValidIsoDate(eventDate)) {
       return data({ error: "Please pick a valid event date." }, { status: 400 });
     }
+    // Moving the event into the past would close it at birth — but only a
+    // newly picked past date is refused, so title/description edits on old
+    // events still save.
+    if (
+      event.type === "SIGNUP_SHEET" &&
+      eventDate &&
+      eventDate !== event.eventDate &&
+      eventDate < todayInZone(timezone)
+    ) {
+      return data(
+        { error: "That date has already passed — please pick today or a future date." },
+        { status: 400 }
+      );
+    }
 
     // Dates: the edit form posts the same fields as create, so a sheet can
     // become multi-day (or stop being one) here. Slots are reconciled rather
@@ -2014,6 +2028,26 @@ export async function action({ request, params, context }: ActionFunctionArgs) {
     }
     const slotError = validateSlotFields(slotDateRaw, startTime, endTime);
     if (slotError) return data({ error: slotError }, { status: 400 });
+    // New options must not be born closed: the day must be today or later
+    // on the event's calendar, and a same-day start must be in the future.
+    if (slotDate) {
+      const orgToday = todayInZone(event.timezone || "UTC");
+      if (slotDate < orgToday) {
+        return data(
+          { error: "That day has already passed — please pick today or a future day." },
+          { status: 400 }
+        );
+      }
+      if (slotDate === orgToday && startTime) {
+        const startInstant = zonedWallTimeToUtc(slotDate, startTime, event.timezone || "UTC");
+        if (startInstant && startInstant.getTime() <= Date.now()) {
+          return data(
+            { error: "That time already passed today — please pick a later time." },
+            { status: 400 }
+          );
+        }
+      }
+    }
 
     const existingSlots = await db.select().from(eventSlots).where(eq(eventSlots.eventId, eventId));
     // Multi-day sheets hold one row per (date x task), so they are capped by
@@ -2483,6 +2517,26 @@ export async function action({ request, params, context }: ActionFunctionArgs) {
     }
     const slotError = validateSlotFields(slotDateRaw, startTime, endTime);
     if (slotError) return data({ error: slotError }, { status: 400 });
+    // A newly picked day must not be in the past (an omitted field keeps the
+    // stored date untouched, so legacy options stay editable).
+    if (!slotDateOmitted && slotDate) {
+      const orgToday = todayInZone(event.timezone || "UTC");
+      if (slotDate < orgToday) {
+        return data(
+          { error: "That day has already passed — please pick today or a future day." },
+          { status: 400 }
+        );
+      }
+      if (slotDate === orgToday && startTime) {
+        const startInstant = zonedWallTimeToUtc(slotDate, startTime, event.timezone || "UTC");
+        if (startInstant && startInstant.getTime() <= Date.now()) {
+          return data(
+            { error: "That time already passed today — please pick a later time." },
+            { status: 400 }
+          );
+        }
+      }
+    }
     const parsedCap = capacityRaw ? parseInt(capacityRaw, 10) : NaN;
 
     await db
@@ -4448,7 +4502,11 @@ export default function EventView() {
       {cancelClosed && (
         <div className="p-4 rounded-2xl bg-slate-100 border border-slate-200 text-slate-700 text-sm font-semibold flex items-center gap-2.5 animate-fade-in">
           <Lock className="w-4 h-4 shrink-0" />
-          <span>That shift already happened — entries can no longer be removed. Contact the organizer if you need a change.</span>
+          <span>
+            {event.type === "TIME_POLL"
+              ? "Voting is closed — votes can no longer be removed. Contact the organizer if you need a change."
+              : "That shift already happened — entries can no longer be removed. Contact the organizer if you need a change."}
+          </span>
         </div>
       )}
       {pendingCancel && cancelTokenParam && (

@@ -503,8 +503,6 @@ export default function CreateSignupSheet() {
     return () => window.clearTimeout(t);
   }, [toast]);
 
-  const todayStr = new Date().toISOString().split("T")[0];
-
   // Draft persists across refresh (same tab) via sessionStorage.
   // Cleared on successful create so the next "Create Event" starts clean.
   const [details, setDetails, clearDetails] = usePersistentState<SignupDetails>(
@@ -528,7 +526,11 @@ export default function CreateSignupSheet() {
     () => defaultSelection(new Date().toISOString().split("T")[0])
   );
 
-  const startDate = details.eventDate || todayStr;
+  // Day on the sheet's own calendar (not UTC) — fallbacks and resets anchor
+  // here so zones ahead of UTC never start on yesterday.
+  const orgToday = todayInZone(details.timezone || "UTC");
+
+  const startDate = details.eventDate || orgToday;
   const dateSpec = selectionToSpec(dateSel, startDate);
   // One over the limit, so the picker can say "too many" instead of rendering
   // a list the server would reject anyway.
@@ -582,6 +584,17 @@ export default function CreateSignupSheet() {
       setDetails((prev) =>
         prev.timezone === "UTC" || !prev.timezone ? { ...prev, timezone: detected } : prev
       );
+      // The UTC-day default can be yesterday in zones ahead of UTC — bump a
+      // stale start (and its fresh single-day selection) forward so the form
+      // never opens on a date the server rejects. Restored repeat configs
+      // keep their rule; only the start moves.
+      const today = todayInZone(detected);
+      if (!details.eventDate || details.eventDate < today) {
+        setDetails((prev) =>
+          !prev.eventDate || prev.eventDate < today ? { ...prev, eventDate: today } : prev
+        );
+        setDateSel((prev) => (prev.mode === "single" ? defaultSelection(today) : prev));
+      }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -608,9 +621,9 @@ export default function CreateSignupSheet() {
     clearDetails();
     clearShifts();
     clearDateSel();
-    setDetails((prev) => ({ ...prev, eventDate: todayStr }));
+    setDetails((prev) => ({ ...prev, eventDate: orgToday }));
     setShifts(defaultSignupShifts);
-    setDateSel(defaultSelection(todayStr));
+    setDateSel(defaultSelection(orgToday));
   };
 
   const addShift = () => {
@@ -768,7 +781,7 @@ export default function CreateSignupSheet() {
                 </label>
                 <DatePicker
                   name="eventDate"
-                  value={details.eventDate || todayStr}
+                  value={details.eventDate || orgToday}
                   onChange={(iso) => updateDetails({ eventDate: iso })}
                   timeZone={details.timezone}
                 />
