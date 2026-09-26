@@ -770,10 +770,15 @@ export default function CreateSignupSheet() {
                   name="eventDate"
                   value={details.eventDate || todayStr}
                   onChange={(iso) => updateDetails({ eventDate: iso })}
+                  timeZone={details.timezone}
                 />
               </div>
 
-              <DateEndField value={dateSel} onChange={setDateSel} />
+              <DateEndField
+                value={dateSel}
+                onChange={setDateSel}
+                min={todayInZone(details.timezone)}
+              />
             </div>
 
             <RepeatRuleField start={startDate} value={dateSel} onChange={setDateSel} />

@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { CalendarDays, ChevronLeft, ChevronRight } from "lucide-react";
+import { todayInZone } from "~/utils/event-expiry";
 
 interface DatePickerProps {
   value?: string;
@@ -17,6 +18,12 @@ interface DatePickerProps {
    * Pass "" or null for no minimum.
    */
   min?: string | null;
+  /**
+   * Event timezone the default minimum is derived from. The browser's day
+   * can differ from the event's (wrong calendar otherwise) — creation forms
+   * pass their selected zone; explicit `min` still wins.
+   */
+  timeZone?: string | null;
 }
 
 function parseISO(v: string | undefined): { y: number; m: number; d: number } | null {
@@ -59,6 +66,7 @@ export default function DatePicker({
   className = "",
   accent = "blue",
   min,
+  timeZone,
 }: DatePickerProps) {
   const controlled = value !== undefined;
   const [internal, setInternal] = useState(defaultValue || "");
@@ -143,9 +151,11 @@ export default function DatePicker({
 
   const selectedKey = parsed ? toISO(parsed.y, parsed.m, parsed.d) : "";
   const todayKey = toISO(today.getFullYear(), today.getMonth() + 1, today.getDate());
-  // Floor for picking: today unless the caller says otherwise. ISO days
-  // compare lexicographically, so past cells are simply key < minKey.
-  const minKey = min === undefined ? todayKey : min || "";
+  // Floor for picking: explicit min, else today in the event's timezone when
+  // given, else the browser's today. ISO days compare lexicographically, so
+  // past cells are simply key < minKey.
+  const minKey =
+    min === undefined ? (timeZone ? todayInZone(timeZone) : todayKey) : min || "";
   const isDisabledDay = (key: string) => Boolean(minKey && key < minKey);
 
   const accentStyles =

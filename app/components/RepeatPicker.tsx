@@ -245,9 +245,12 @@ export function DateModeTabs({
 export function DateEndField({
   value,
   onChange,
+  min,
 }: {
   value: DateSelection;
   onChange: (next: DateSelection) => void;
+  /** Floor for the end-date pickers (event timezone day). */
+  min?: string | null;
 }) {
   const patch = (next: Partial<DateSelection>) => onChange({ ...value, ...next });
   if (value.mode === "single") return null;
@@ -256,7 +259,7 @@ export function DateEndField({
     return (
       <div>
         <label className={LABEL}>Last Day *</label>
-        <DatePicker value={value.end} onChange={(iso) => patch({ end: iso })} />
+        <DatePicker value={value.end} onChange={(iso) => patch({ end: iso })} min={min} />
       </div>
     );
   }
@@ -287,7 +290,7 @@ export function DateEndField({
   return (
     <div>
       <label className={LABEL}>Repeat Until *</label>
-      <DatePicker value={value.endDate} onChange={(iso) => patch({ endDate: iso })} />
+      <DatePicker value={value.endDate} onChange={(iso) => patch({ endDate: iso })} min={min} />
     </div>
   );
 }

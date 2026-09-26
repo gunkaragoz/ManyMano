@@ -2784,9 +2784,12 @@ function endForDuration(start: string, durationMinutes: number | null | undefine
 function EditDatesField({
   initialSpec,
   initialDate,
+  timeZone,
 }: {
   initialSpec: DateSpec;
   initialDate: string;
+  /** Event timezone: the picker floor follows it, not the browser day. */
+  timeZone?: string | null;
 }) {
   const today = new Date().toISOString().split("T")[0];
   // The posted date stays empty for a sheet that never had one — saving the
@@ -2810,9 +2813,14 @@ function EditDatesField({
         <label className="block text-xs font-semibold text-slate-700 mb-1.5">
           {dateFieldLabel(sel.mode)}
         </label>
-        <DatePicker name="eventDate" value={startDate} onChange={setStartDate} />
+        <DatePicker
+          name="eventDate"
+          value={startDate}
+          onChange={setStartDate}
+          timeZone={timeZone}
+        />
       </div>
-      <DateEndField value={sel} onChange={setSel} />
+      <DateEndField value={sel} onChange={setSel} min={timeZone ? todayInZone(timeZone) : undefined} />
       {sel.mode === "repeat" && (
         <div className="sm:col-span-2">
           <RepeatRuleField start={anchor} value={sel} onChange={setSel} />
@@ -3226,11 +3234,13 @@ function PollTimeOptionRow({
   durationMinutes,
   adminToken,
   isSubmitting,
+  timeZone,
 }: {
   slot: { id: string; title: string; slotDate?: string | null; startTime?: string | null; endTime?: string | null };
   durationMinutes: number | null;
   adminToken: string | null;
   isSubmitting: boolean;
+  timeZone?: string | null;
 }) {
   const isAllDay = durationMinutes === null;
   const [date, setDate] = useState(slot.slotDate || "");
@@ -3260,6 +3270,7 @@ function PollTimeOptionRow({
           name="slotDate"
           value={date}
           onChange={setDate}
+          timeZone={timeZone}
           className="col-span-2 sm:col-span-1 min-w-0"
         />
         {!isAllDay && (
@@ -3324,10 +3335,12 @@ function PollTimeNewOptionRow({
   durationMinutes,
   adminToken,
   isSubmitting,
+  timeZone,
 }: {
   durationMinutes: number | null;
   adminToken: string | null;
   isSubmitting: boolean;
+  timeZone?: string | null;
 }) {
   const isAllDay = durationMinutes === null;
   const [date, setDate] = useState("");
@@ -3350,6 +3363,7 @@ function PollTimeNewOptionRow({
           value={date}
           onChange={setDate}
           placeholder="Pick a day"
+          timeZone={timeZone}
           className="col-span-2 sm:col-span-1 min-w-0"
         />
         {!isAllDay && (
@@ -4883,6 +4897,7 @@ export default function EventView() {
                 <EditDatesField
                   initialSpec={(event as { dateSpec?: DateSpec }).dateSpec ?? { mode: "single" }}
                   initialDate={event.eventDate || ""}
+                  timeZone={(event as { timezone?: string | null }).timezone}
                 />
               )}
               <div>
@@ -4960,12 +4975,14 @@ export default function EventView() {
                     durationMinutes={(event as { durationMinutes?: number | null }).durationMinutes ?? null}
                     adminToken={adminToken}
                     isSubmitting={isSubmitting}
+                    timeZone={(event as { timezone?: string | null }).timezone}
                   />
                 ))}
                 <PollTimeNewOptionRow
                   durationMinutes={(event as { durationMinutes?: number | null }).durationMinutes ?? null}
                   adminToken={adminToken}
                   isSubmitting={isSubmitting}
+                  timeZone={(event as { timezone?: string | null }).timezone}
                 />
               </div>
             ) : (
@@ -6265,6 +6282,7 @@ export default function EventView() {
                           placeholder="Pick a day"
                           accent="green"
                           required
+                          timeZone={organizerTz}
                           className="min-w-0"
                         />
                         {!isAllDay && (

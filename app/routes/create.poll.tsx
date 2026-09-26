@@ -929,6 +929,7 @@ export default function CreateMeetingPoll() {
                         value={day.date}
                         onChange={(iso) => updateDay(day.id, { date: iso })}
                         accent="green"
+                        timeZone={details.timezone}
                         className="col-span-2 sm:col-span-1 min-w-0"
                       />
 

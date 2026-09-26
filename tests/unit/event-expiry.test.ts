@@ -132,6 +132,15 @@ describe("event closing (close at start, past at end)", () => {
     expect(isSlotPast(slot, null, TZ, new Date("2026-10-18T02:00:00Z"))).toBe(true);
   });
 
+  it("keeps wall-clock end across a DST fall-back", () => {
+    // US DST ends Nov 1 2026 (02:00 → 01:00). A 22:00–02:00 New York shift
+    // ends 02:00 EST = 07:00Z, not 06:00Z (fixed +24h would slip an hour).
+    const slot = { slotDate: "2026-11-01", startTime: "22:00", endTime: "02:00" };
+    expect(slotEndInstant(slot, null, "America/New_York")?.toISOString()).toBe(
+      "2026-11-02T07:00:00.000Z"
+    );
+  });
+
   it("labels closing relatively under 6h, absolutely beyond", () => {
     expect(COUNTDOWN_ABSOLUTE_MS).toBe(6 * 3600_000);
     const slot = { slotDate: "2026-10-17", startTime: "10:00", endTime: "11:00" };

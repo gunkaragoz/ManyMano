@@ -103,11 +103,14 @@ export function slotEndInstant(
   if (end) {
     const endInstant = zonedWallTimeToUtc(date, slot.endTime, tz);
     if (!endInstant) return null;
-    // Overnight shift (22:00 – 02:00): the wall-clock end is next day.
     if (start) {
       const startInstant = zonedWallTimeToUtc(date, slot.startTime, tz);
       if (startInstant && endInstant.getTime() <= startInstant.getTime()) {
-        return new Date(endInstant.getTime() + 86400_000);
+        // Overnight shift (22:00 – 02:00): the wall-clock end is next day.
+        // Convert on the next calendar day so a DST transition keeps the
+        // wall-clock time — a fixed +24h slips an hour on fall-back.
+        const next = addOneDayIso(date);
+        return (next && zonedWallTimeToUtc(next, slot.endTime, tz)) || endInstant;
       }
     }
     return endInstant;
