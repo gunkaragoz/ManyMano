@@ -2518,22 +2518,26 @@ export async function action({ request, params, context }: ActionFunctionArgs) {
     const slotError = validateSlotFields(slotDateRaw, startTime, endTime);
     if (slotError) return data({ error: slotError }, { status: 400 });
     // A newly picked day must not be in the past (an omitted field keeps the
-    // stored date untouched, so legacy options stay editable).
+    // stored date untouched, and an unchanged date stays editable, so legacy
+    // options stay editable — saving a label on a historical option works).
     if (!slotDateOmitted && slotDate) {
-      const orgToday = todayInZone(event.timezone || "UTC");
-      if (slotDate < orgToday) {
-        return data(
-          { error: "That day has already passed — please pick today or a future day." },
-          { status: 400 }
-        );
-      }
-      if (slotDate === orgToday && startTime) {
-        const startInstant = zonedWallTimeToUtc(slotDate, startTime, event.timezone || "UTC");
-        if (startInstant && startInstant.getTime() <= Date.now()) {
+      const storedDate = (target as { slotDate?: string | null }).slotDate ?? null;
+      if (slotDate !== storedDate) {
+        const orgToday = todayInZone(event.timezone || "UTC");
+        if (slotDate < orgToday) {
           return data(
-            { error: "That time already passed today — please pick a later time." },
+            { error: "That day has already passed — please pick today or a future day." },
             { status: 400 }
           );
+        }
+        if (slotDate === orgToday && startTime) {
+          const startInstant = zonedWallTimeToUtc(slotDate, startTime, event.timezone || "UTC");
+          if (startInstant && startInstant.getTime() <= Date.now()) {
+            return data(
+              { error: "That time already passed today — please pick a later time." },
+              { status: 400 }
+            );
+          }
         }
       }
     }

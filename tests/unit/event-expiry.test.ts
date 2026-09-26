@@ -15,6 +15,8 @@ import {
   isSlotPast,
   msUntilSlotClose,
   pastSlotIds,
+  rebaseDatesToToday,
+  shiftIsoDate,
   slotCloseInstant,
   slotEndInstant,
   todayInZone,
@@ -117,6 +119,28 @@ describe("event closing (close at start, past at end)", () => {
     expect(todayInZone("UTC", at)).toBe("2026-10-18");
     expect(todayInZone("America/New_York", at)).toBe("2026-10-17");
     expect(todayInZone("Mars/Olympus", at)).toBe("2026-10-18");
+  });
+
+  it("shifts date strings by N days", () => {
+    expect(shiftIsoDate("2026-10-17", 1)).toBe("2026-10-18");
+    expect(shiftIsoDate("2026-10-17", -1)).toBe("2026-10-16");
+    expect(shiftIsoDate("not-a-date", 3)).toBe("not-a-date");
+  });
+
+  it("rebases every restored date together, preserving gaps", () => {
+    // Consecutive stale rows shift as a block — never stacking onto one day.
+    expect(rebaseDatesToToday(["2026-10-16", "2026-10-17"], "2026-10-17")).toEqual([
+      "2026-10-17",
+      "2026-10-18",
+    ]);
+    // Nothing stale — null (caller keeps state untouched).
+    expect(rebaseDatesToToday(["2026-10-17", "2026-10-18"], "2026-10-17")).toBeNull();
+    expect(rebaseDatesToToday([], "2026-10-17")).toBeNull();
+    // Empty entries pass through in place.
+    expect(rebaseDatesToToday(["2026-10-16", ""], "2026-10-17")).toEqual([
+      "2026-10-17",
+      "",
+    ]);
   });
 
   it("handles overnight shifts (22:00–02:00 ends next day)", () => {

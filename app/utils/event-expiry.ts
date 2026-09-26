@@ -31,6 +31,35 @@ function isIsoDay(value: string | null | undefined): value is string {
   return !!value && isValidIsoDate(value);
 }
 
+/** Shift a YYYY-MM-DD string by N days (UTC arithmetic — DST-safe). */
+export function shiftIsoDate(iso: string, delta: number): string {
+  const m = iso.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!m) return iso;
+  const d = new Date(Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3])) + delta * 86400_000);
+  return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}-${String(d.getUTCDate()).padStart(2, "0")}`;
+}
+
+/**
+ * Rebase restored dates forward so the earliest lands on `today`, shifting
+ * EVERY dated row by the same offset to preserve gaps (shifting only stale
+ * rows could stack two rows onto one day and trip duplicate guards).
+ * Returns null when nothing is stale. Empty entries pass through.
+ */
+export function rebaseDatesToToday(
+  dates: Array<string | null>,
+  today: string
+): Array<string | null> | null {
+  const dated = dates.filter((d): d is string => !!d);
+  if (dated.length === 0) return null;
+  const earliest = [...dated].sort()[0];
+  if (earliest >= today) return null;
+  const shiftBy = Math.round(
+    (Date.parse(`${today}T00:00:00Z`) - Date.parse(`${earliest}T00:00:00Z`)) / 86400_000
+  );
+  if (!(shiftBy > 0)) return null;
+  return dates.map((d) => (d ? shiftIsoDate(d, shiftBy) : d));
+}
+
 /** YYYY-MM-DD plus one day, or null for a bad date. */
 export function addOneDayIso(dateStr: string): string | null {
   const m = dateStr.trim().match(/^(\d{4})-(\d{2})-(\d{2})$/);

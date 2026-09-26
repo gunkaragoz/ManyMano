@@ -37,7 +37,7 @@ import {
   parseTimezoneInput,
 } from "~/utils/validation";
 import { pruneExpiredEvents, resolveRetentionDays } from "~/utils/retention";
-import { todayInZone } from "~/utils/event-expiry";
+import { rebaseDatesToToday, todayInZone } from "~/utils/event-expiry";
 import { zonedWallTimeToUtc } from "~/utils/timezones";
 import { getSiteConfig } from "~/utils/site";
 import { addMinutesToTimeString, formatSlotDateLabel, formatLongDateLabel, formatDurationLabel } from "~/utils/calendar";
@@ -381,14 +381,6 @@ function toISODate(d: Date): string {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 }
 
-/** Shift a YYYY-MM-DD string by N days (UTC arithmetic — DST-safe). */
-function shiftIso(iso: string, delta: number): string {
-  const m = iso.match(/^(\d{4})-(\d{2})-(\d{2})$/);
-  if (!m) return iso;
-  const d = new Date(Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3])) + delta * 86400_000);
-  return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}-${String(d.getUTCDate()).padStart(2, "0")}`;
-}
-
 function defaultDays(): DayRow[] {
   const today = new Date();
   const tomorrow = new Date(today);
@@ -457,21 +449,16 @@ export default function CreateMeetingPoll() {
     if (detected && details.timezone === "UTC") {
       setDetails((prev) => (prev.timezone === "UTC" ? { ...prev, timezone: detected } : prev));
       // Day rows defaulted on the UTC calendar can be behind the event day
-      // in zones ahead of UTC — shift stale rows forward, preserving gaps
-      // and times, so the form never opens on dates the server rejects.
+      // in zones ahead of UTC — rebase every dated row forward together so
+      // gaps survive and no two rows stack onto one day.
       const today = todayInZone(detected);
       setDays((prev) => {
-        const dated = prev.filter((d) => d.date);
-        if (dated.length === 0) return prev;
-        const earliest = dated.map((d) => d.date).sort()[0];
-        if (earliest >= today) return prev;
-        const shiftBy = Math.round(
-          (Date.parse(`${today}T00:00:00Z`) - Date.parse(`${earliest}T00:00:00Z`)) / 86400_000
+        const rebased = rebaseDatesToToday(
+          prev.map((d) => d.date),
+          today
         );
-        if (!(shiftBy > 0)) return prev;
-        return prev.map((d) =>
-          !d.date || d.date >= today ? d : { ...d, date: shiftIso(d.date, shiftBy) }
-        );
+        if (!rebased) return prev;
+        return prev.map((d, i) => ({ ...d, date: rebased[i] || d.date }));
       });
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
