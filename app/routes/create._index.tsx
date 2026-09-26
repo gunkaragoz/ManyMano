@@ -1,6 +1,8 @@
 import type { MetaFunction } from "react-router";
 import { Link } from "react-router";
 import { ArrowRight, CalendarDays, ClipboardList } from "lucide-react";
+import TemplateIcon from "~/components/TemplateIcon";
+import { getTemplate, templateCreatePath, type EventTemplate } from "~/utils/templates";
 import {
   getPageMeta,
   breadcrumbJsonLd,
@@ -22,6 +24,10 @@ export const meta: MetaFunction = ({ matches }) => {
     },
   ]);
 };
+
+const FEATURED = ["potluck", "staff-appreciation-week", "parent-teacher-conferences", "bake-sale", "team-meeting", "pickup-soccer"]
+  .map(getTemplate)
+  .filter((t): t is EventTemplate => t !== null);
 
 export default function CreateChooser() {
   return (
@@ -73,6 +79,34 @@ export default function CreateChooser() {
             <ArrowRight className="w-3.5 h-3.5" />
           </span>
         </Link>
+      </div>
+
+      {/* Templates open the same forms, already filled in. */}
+      <div className="space-y-3 pt-2">
+        <h2 className="text-sm font-bold text-slate-700 text-center">Or start from a template</h2>
+        <ul className="flex flex-wrap justify-center gap-2">
+          {FEATURED.map((t) => (
+            <li key={t.slug}>
+              <Link
+                to={templateCreatePath(t)}
+                className={`inline-flex items-center gap-1.5 px-3.5 py-2 rounded-full border bg-white text-xs font-semibold text-slate-700 transition-all ${
+                  t.type === "TIME_POLL" ? "border-slate-200 hover:border-green-400" : "border-slate-200 hover:border-blue-400"
+                }`}
+              >
+                <TemplateIcon
+                  icon={t.icon}
+                  className={`w-3.5 h-3.5 ${t.type === "TIME_POLL" ? "text-green-600" : "text-blue-600"}`}
+                />
+                {t.name}
+              </Link>
+            </li>
+          ))}
+        </ul>
+        <p className="text-center">
+          <Link to="/templates" className="text-xs font-bold text-slate-500 hover:text-slate-800 inline-flex items-center gap-1">
+            Browse all templates <ArrowRight className="w-3.5 h-3.5" />
+          </Link>
+        </p>
       </div>
     </div>
   );

@@ -244,7 +244,9 @@ export function truncate(str: string, max: number): string {
 export type PageMetaTemplate = { title: string; description: string; path: string };
 
 /** Page titles/descriptions templated on the configured brand. No hardcoded fallback. */
-export function getPageMeta(siteName: string): Record<"createChooser" | "createSignup" | "createPoll", PageMetaTemplate> {
+export function getPageMeta(
+  siteName: string
+): Record<"createChooser" | "createSignup" | "createPoll" | "templates", PageMetaTemplate> {
   if (!siteName) throw new Error("[config] getPageMeta requires siteName (SITE_NAME).");
   return {
     createChooser: {
@@ -264,6 +266,12 @@ export function getPageMeta(siteName: string): Record<"createChooser" | "createS
       description:
         "Free meeting polls with Yes / Maybe / No voting and calendar sync. No accounts, no ads — create and share in seconds.",
       path: "/create/poll",
+    },
+    templates: {
+      title: `Free Sign-Up Sheet & Meeting Poll Templates | ${siteName}`,
+      description:
+        "Ready-made sign-up sheets and meeting polls for schools, fundraisers, teams and friends. Pick one, edit anything, share the link. Free, no accounts.",
+      path: "/templates",
     },
   };
 }

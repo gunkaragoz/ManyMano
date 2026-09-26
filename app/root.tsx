@@ -17,6 +17,7 @@ import {
 import { useEffect, useState } from "react";
 import { HeartHandshake } from "lucide-react";
 import NotFound from "~/components/NotFound";
+import { POPULAR_TEMPLATE_LINKS } from "~/utils/templates";
 
 function GithubIcon({ className }: { className?: string }) {
   return (
@@ -310,12 +311,22 @@ export default function App() {
               <Link to="/create" className="hover:text-slate-900 transition-colors">
                 How it works
               </Link>
+              <Link to="/templates" className="hover:text-slate-900 transition-colors">
+                Templates
+              </Link>
               <Link to="/pulse" className="hover:text-slate-900 transition-colors">
                 Pulse
               </Link>
               <a href="/#faq" className="hover:text-slate-900 transition-colors">
                 FAQ
               </a>
+            </nav>
+            <nav aria-label="Templates" className="flex flex-wrap items-center justify-center gap-x-5 gap-y-2">
+              {POPULAR_TEMPLATE_LINKS.map((l) => (
+                <Link key={l.path} to={l.path} className="hover:text-slate-900 transition-colors">
+                  {l.label}
+                </Link>
+              ))}
             </nav>
           <div className="flex flex-col sm:flex-row items-center justify-between gap-4">
             <div className="flex items-center gap-2">

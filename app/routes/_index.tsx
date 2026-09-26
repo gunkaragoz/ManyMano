@@ -6,6 +6,8 @@ import { ArrowRight, CalendarDays, Check, CircleCheck, ClipboardList, X } from "
 import { getHomeFaq, faqPageJsonLd, mergeParentMeta, rootSiteFromMatches } from "~/utils/seo";
 import type { FaqItem } from "~/utils/seo";
 import { getSiteConfig, toPublicSiteConfig } from "~/utils/site";
+import TemplateIcon from "~/components/TemplateIcon";
+import { getTemplate, templatePath, type EventTemplate } from "~/utils/templates";
 import { data } from "react-router";
 import type { LoaderFunctionArgs } from "react-router";
 
@@ -37,6 +39,18 @@ export const meta: MetaFunction<typeof loader> = ({ loaderData, matches }) => {
     { "script:ld+json": faqPageJsonLd(faq) },
   ]);
 };
+
+// Common uses, each linking to its template page.
+const USE_CASES = [
+  "staff-appreciation-week",
+  "potluck",
+  "food-pantry-volunteers",
+  "concession-stand",
+  "book-club",
+  "team-meeting",
+]
+  .map(getTemplate)
+  .filter((t): t is EventTemplate => t !== null);
 
 export default function Index() {
   const { faq } = useLoaderData<typeof loader>();
@@ -201,6 +215,40 @@ export default function Index() {
           </div>
         </div>
       </div>
+
+      {/* Use cases → templates */}
+      <section className="max-w-4xl mx-auto pt-6 border-t border-slate-200/60 space-y-6">
+        <div className="text-center space-y-1.5">
+          <h2 className="text-2xl font-bold text-slate-900 tracking-tight">Start from a template</h2>
+          <p className="text-sm text-slate-500">
+            PTA and school events, potlucks, sports teams, nonprofits and meetings — ready to edit and share.
+          </p>
+        </div>
+        <ul className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
+          {USE_CASES.map((t) => (
+            <li key={t.slug}>
+              <Link
+                to={templatePath(t)}
+                className="h-full bg-white border border-slate-200/80 rounded-2xl p-4 hover:border-slate-300 hover:shadow-[0_8px_24px_rgba(0,0,0,0.05)] transition-all flex items-start gap-3"
+              >
+                <TemplateIcon
+                  icon={t.icon}
+                  className={`w-5 h-5 shrink-0 ${t.type === "TIME_POLL" ? "text-green-600" : "text-blue-600"}`}
+                />
+                <span>
+                  <span className="block text-sm font-semibold text-slate-900">{t.name}</span>
+                  <span className="block text-xs text-slate-500">{t.tagline}</span>
+                </span>
+              </Link>
+            </li>
+          ))}
+        </ul>
+        <p className="text-center">
+          <Link to="/templates" className="text-sm font-semibold text-blue-600 hover:text-blue-700 inline-flex items-center gap-1">
+            Browse all templates <ArrowRight className="w-4 h-4" />
+          </Link>
+        </p>
+      </section>
 
       {/* FAQ */}
       <section id="faq" className="max-w-3xl mx-auto pt-6 border-t border-slate-200/60">
