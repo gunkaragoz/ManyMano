@@ -32,12 +32,13 @@ import {
   SLOT_TITLE_MAX,
   TITLE_MAX,
   cleanText,
-  isPastIsoDate,
   isValidEmail,
   isValidIsoDate,
   parseTimezoneInput,
 } from "~/utils/validation";
 import { pruneExpiredEvents, resolveRetentionDays } from "~/utils/retention";
+import { todayInZone } from "~/utils/event-expiry";
+import { zonedWallTimeToUtc } from "~/utils/timezones";
 import { getSiteConfig } from "~/utils/site";
 import { addMinutesToTimeString, formatSlotDateLabel, formatLongDateLabel, formatDurationLabel } from "~/utils/calendar";
 import {
@@ -191,7 +192,7 @@ export async function action({ request, context }: ActionFunctionArgs) {
     if (!DATE_RE.test(date) || !isValidIsoDate(date)) {
       return data({ error: `Row ${idx + 1}: please pick a valid day.` }, { status: 400 });
     }
-    if (isPastIsoDate(date)) {
+    if (date < todayInZone(timezone)) {
       return data({ error: `Row ${idx + 1}: that day has already passed.` }, { status: 400 });
     }
     const optionKey = `${date}|${durationMinutes === null ? "" : (slotStartTimes[idx] || "").trim()}`;
@@ -213,6 +214,17 @@ export async function action({ request, context }: ActionFunctionArgs) {
     const start = (slotStartTimes[idx] || "").trim();
     if (!TIME_RE.test(start)) {
       return data({ error: `Row ${idx + 1}: please pick a start time.` }, { status: 400 });
+    }
+    // Same-day options must start in the future — voting on them would
+    // already be closed at birth. Measured on the poll's own calendar.
+    if (date === todayInZone(timezone)) {
+      const startInstant = zonedWallTimeToUtc(date, start, timezone);
+      if (startInstant && startInstant.getTime() <= Date.now()) {
+        return data(
+          { error: `Row ${idx + 1}: that time already passed today — pick a later time.` },
+          { status: 400 }
+        );
+      }
     }
     // One duration for the whole poll: the end is always derived from it, so
     // a posted end time can't contradict the start (overnight wrap is fine).

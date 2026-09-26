@@ -41,6 +41,8 @@ import {
   parseTimezoneInput,
   timeToMinutes,
 } from "~/utils/validation";
+import { todayInZone } from "~/utils/event-expiry";
+import { zonedWallTimeToUtc } from "~/utils/timezones";
 import { pruneExpiredEvents, resolveRetentionDays } from "~/utils/retention";
 import {
   MAX_SERIES_DAYS,
@@ -147,6 +149,15 @@ export async function action({ request, context }: ActionFunctionArgs) {
   }
   if (eventDate && !isValidIsoDate(eventDate)) {
     return data({ error: "Please pick a valid event date." }, { status: 400 });
+  }
+  // No sheets for the past: sign-ups close at each shift's start, so a
+  // sheet born yesterday would be born closed. The sheet's own calendar
+  // decides past, not UTC-yesterday.
+  if (eventDate && eventDate < todayInZone(timezone)) {
+    return data(
+      { error: "That date has already passed — please pick today or a future date." },
+      { status: 400 }
+    );
   }
   if (!timezone) {
     return data({ error: "Please pick a timezone from the list." }, { status: 400 });
@@ -291,6 +302,24 @@ export async function action({ request, context }: ActionFunctionArgs) {
   const limitError = dateLimitError(dates, slotRows.length);
   if (limitError) {
     return data({ error: limitError }, { status: 400 });
+  }
+  // Same-day shifts must start in the future — their sign-ups would already
+  // be closed at birth. Measured on the sheet's own calendar.
+  {
+    const orgToday = todayInZone(timezone);
+    const createNow = new Date();
+    for (const row of slotRows) {
+      if (!row.slot.startTime) continue;
+      const rowDate = row.slotDate || eventDate;
+      if (!rowDate || rowDate !== orgToday) continue;
+      const startInstant = zonedWallTimeToUtc(rowDate, row.slot.startTime, timezone);
+      if (startInstant && startInstant.getTime() <= createNow.getTime()) {
+        return data(
+          { error: `"${row.slot.title}": that time already passed today — pick a later time.` },
+          { status: 400 }
+        );
+      }
+    }
   }
 
   const eventId = await generateUniquePublicId(async (candidate) => {

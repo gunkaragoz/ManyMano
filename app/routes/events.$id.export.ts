@@ -43,7 +43,7 @@ export async function loader({ params, request, context }: LoaderFunctionArgs) {
   const clientIp = request.headers.get("cf-connecting-ip") || "unknown";
   const allowed = await verifyAdminToken(presented, event.adminToken, `export:${clientIp}:${eventId}`);
   if (!allowed) {
-    throw new Response("Unauthorized. This roster export requires the organizer link.", {
+    throw new Response("Unauthorized. This export requires the organizer link.", {
       status: 403,
     });
   }
@@ -150,7 +150,7 @@ export async function loader({ params, request, context }: LoaderFunctionArgs) {
     status: 200,
     headers: {
       "Content-Type": "text/csv; charset=utf-8",
-      "Content-Disposition": `attachment; filename="${event.title.replace(/[^a-zA-Z0-9_-]/g, "_")}_roster.csv"`,
+      "Content-Disposition": `attachment; filename="${event.title.replace(/[^a-zA-Z0-9_-]/g, "_")}_${event.type === "TIME_POLL" ? "votes" : "signup-list"}.csv"`,
       "Cache-Control": "private, no-store",
       "Referrer-Policy": "no-referrer",
     },
