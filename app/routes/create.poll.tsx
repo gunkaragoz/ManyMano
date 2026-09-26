@@ -1,10 +1,21 @@
 import { getCloudflareEnv } from "~/utils/cloudflare-context";
-import type { ActionFunctionArgs, LoaderFunctionArgs, MetaFunction } from "react-router";
+import type { ActionFunctionArgs, HeadersFunction, LoaderFunctionArgs, MetaFunction } from "react-router";
 import { data, redirect } from "react-router";
 import { Form, useActionData, useLoaderData, useNavigation, Link } from "react-router";
 import { useEffect, useRef, useState } from "react";
 import { ArrowLeft, ArrowRight, CalendarDays, Info, TriangleAlert, X } from "lucide-react";
 import { usePersistentState } from "~/utils/usePersistentState";
+import { usePrefill } from "~/utils/usePrefill";
+import PrefillBanner from "~/components/PrefillBanner";
+import { loadCreatePrefill } from "~/utils/prefill.server";
+import {
+  isUnsupported,
+  prefillTimezone,
+  resolvePollPrefill,
+  type PollDayRow as DayRow,
+  type PollDetails,
+  type PollPrefill,
+} from "~/utils/prefill";
 import DatePicker from "~/components/DatePicker";
 import TimePicker from "~/components/TimePicker";
 import TimezoneSelect from "~/components/TimezoneSelect";
@@ -40,7 +51,8 @@ import { pruneExpiredEvents, resolveRetentionDays } from "~/utils/retention";
 import { rebaseDatesToToday, todayInZone } from "~/utils/event-expiry";
 import { zonedWallTimeToUtc } from "~/utils/timezones";
 import { getSiteConfig } from "~/utils/site";
-import { addMinutesToTimeString, formatSlotDateLabel, formatLongDateLabel, formatDurationLabel } from "~/utils/calendar";
+import { addMinutesToTimeString, formatLongDateLabel, formatDurationLabel } from "~/utils/calendar";
+import { formatTimeDisplay, pollDefaultTitle } from "~/utils/pollTitles";
 import {
   getPageMeta,
   breadcrumbJsonLd,
@@ -49,11 +61,17 @@ import {
   rootSiteFromMatches,
 } from "~/utils/seo";
 
-export const meta: MetaFunction = ({ matches }) => {
+export const meta: MetaFunction<typeof loader> = ({ matches, loaderData }) => {
   const site = rootSiteFromMatches(matches);
   const page = getPageMeta(site.siteName).createPoll;
   return mergeParentMeta(matches, [
-    ...pageMetaOverrides({ ...page, siteUrl: site.siteUrl }),
+    // The canonical is always the bare path. A copy (?from=) carries another
+    // event's content, so it is also kept out of search indexes.
+    ...pageMetaOverrides({
+      ...page,
+      siteUrl: site.siteUrl,
+      robots: loaderData?.isCopy ? "noindex, nofollow" : undefined,
+    }),
     {
       "script:ld+json": breadcrumbJsonLd([
         { name: "Home", path: "/" },
@@ -64,25 +82,35 @@ export const meta: MetaFunction = ({ matches }) => {
   ]);
 };
 
-export async function loader({ context }: LoaderFunctionArgs) {
+export async function loader({ context, url }: LoaderFunctionArgs) {
   const env = getCloudflareEnv(context) as {
+    DB: D1Database;
     TURNSTILE_SITE_KEY?: string;
+    RETENTION_DAYS?: string;
   };
-  return data({ turnstileSiteKey: env.TURNSTILE_SITE_KEY ?? null });
+  // `url`, not `request.url`: the latter carries single-fetch `.data`
+  // suffixes, which would leak into the redirect targets below.
+  const prefill = await loadCreatePrefill("poll", url, {
+    db: () => getDb(env.DB),
+    retentionDays: resolveRetentionDays(env),
+  });
+  if ("redirect" in prefill) throw redirect(prefill.redirect);
+  const isCopy = url.searchParams.has("from");
+  const headers = new Headers();
+  // A copy is built from another event's current content — never cache it.
+  if (isCopy) headers.set("Cache-Control", "private, no-store");
+  return data({ turnstileSiteKey: env.TURNSTILE_SITE_KEY ?? null, prefill, isCopy }, { headers });
 }
+
+export const headers: HeadersFunction = ({ loaderHeaders }) => {
+  const headers = new Headers();
+  const cacheControl = loaderHeaders.get("Cache-Control");
+  if (cacheControl) headers.set("Cache-Control", cacheControl);
+  return headers;
+};
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 const TIME_RE = /^([01]\d|2[0-3]):([0-5]\d)$/;
-
-function formatTimeDisplay(t: string): string {
-  const m = t.match(/^(\d{1,2}):(\d{2})/);
-  if (!m) return t;
-  let h = parseInt(m[1], 10);
-  const min = m[2];
-  const ampm = h >= 12 ? "PM" : "AM";
-  h = h % 12 || 12;
-  return `${h}:${min} ${ampm}`;
-}
 
 export async function action({ request, context }: ActionFunctionArgs) {
   const env = getCloudflareEnv(context) as {
@@ -206,7 +234,7 @@ export async function action({ request, context }: ActionFunctionArgs) {
         slotDate: date,
         startTime: null,
         endTime: null,
-        title: label || `${formatSlotDateLabel(date)} · All day`,
+        title: label || pollDefaultTitle(date, null, null),
         displayOrder: validSlots.length,
       });
       continue;
@@ -233,7 +261,7 @@ export async function action({ request, context }: ActionFunctionArgs) {
       slotDate: date,
       startTime: start,
       endTime: end,
-      title: label || `${formatSlotDateLabel(date)} · ${formatTimeDisplay(start)} – ${formatTimeDisplay(end)}`,
+      title: label || pollDefaultTitle(date, start, end),
       displayOrder: validSlots.length,
     });
   }
@@ -350,22 +378,6 @@ export async function action({ request, context }: ActionFunctionArgs) {
   return redirect(`/events/${eventId}?admin=${adminToken}&created=1`, { headers });
 }
 
-type PollDetails = {
-  title: string;
-  description: string;
-  location: string;
-  organizerName: string;
-  organizerEmail: string;
-  timezone: string;
-};
-
-type DayRow = {
-  id: number;
-  date: string;
-  startTime: string;
-  label: string;
-};
-
 const POLL_DETAILS_KEY = "manymano:create-poll:details:v2";
 const POLL_DAYS_KEY = "manymano:create-poll:days:v2";
 const POLL_DURATION_KEY = "manymano:create-poll:duration:v2";
@@ -393,7 +405,7 @@ function defaultDays(): DayRow[] {
 
 export default function CreateMeetingPoll() {
   const actionData = useActionData<{ error?: string }>();
-  const { turnstileSiteKey } = useLoaderData<typeof loader>();
+  const { turnstileSiteKey, prefill } = useLoaderData<typeof loader>();
   const navigation = useNavigation();
   const isSubmitting = navigation.state === "submitting";
   // Floating toast for validation errors. The inline banner below sits at the
@@ -422,7 +434,7 @@ export default function CreateMeetingPoll() {
     return () => window.clearTimeout(t);
   }, [toast]);
 
-  const [details, setDetails, clearDetails] = usePersistentState<PollDetails>(
+  const [details, setDetails, clearDetails, detailsRestored] = usePersistentState<PollDetails>(
     POLL_DETAILS_KEY,
     () => ({
       title: "",
@@ -433,8 +445,8 @@ export default function CreateMeetingPoll() {
       timezone: "UTC",
     })
   );
-  const [days, setDays, clearDays] = usePersistentState<DayRow[]>(POLL_DAYS_KEY, defaultDays);
-  const [durationMinutes, setDurationMinutes, clearDuration] = usePersistentState<number | null>(
+  const [days, setDays, clearDays, daysRestored] = usePersistentState<DayRow[]>(POLL_DAYS_KEY, defaultDays);
+  const [durationMinutes, setDurationMinutes, clearDuration, durationRestored] = usePersistentState<number | null>(
     POLL_DURATION_KEY,
     () => 60
   );
@@ -488,11 +500,38 @@ export default function CreateMeetingPoll() {
     clearDetails();
     clearDays();
     clearDuration();
+    // A fresh draft, like a first visit: the browser's timezone.
+    const timezone = detectLocalTimezone() || "UTC";
+    setDetails((prev) => ({ ...prev, timezone }));
     setDays(defaultDays());
     setDurationMinutes(60);
     setCustomMinutes("");
     setShowCustom(false);
+    dismissPrefill();
   };
+
+  // Template / copy: replaces the whole draft once it has been restored.
+  // The mount-time effect above (timezone detect, all-day → 1 hr) has
+  // already run by then, so a copied timezone — even UTC — is kept.
+  const {
+    pending: prefillPending,
+    notice: prefillNotice,
+    dismiss: dismissPrefill,
+  } = usePrefill<PollPrefill>({
+    load: prefill,
+    restored: detailsRestored && daysRestored && durationRestored,
+    apply: (p) => {
+      const timezone = prefillTimezone(p.details, detectLocalTimezone());
+      const resolved = resolvePollPrefill(p, { today: todayInZone(timezone), timezone });
+      if (isUnsupported(resolved)) return resolved;
+      setDetails(resolved.details);
+      setDays(resolved.days);
+      setDurationMinutes(resolved.durationMinutes);
+      setCustomMinutes("");
+      setShowCustom(false);
+      return { notes: resolved.notes };
+    },
+  });
 
   const MAX_OPTIONS = 31;
 
@@ -626,6 +665,10 @@ export default function CreateMeetingPoll() {
           </div>
         </div>
       </div>
+
+      {prefillNotice && (
+        <PrefillBanner notice={prefillNotice} flow="poll" onDismiss={dismissPrefill} onStartBlank={startOver} />
+      )}
 
       {actionData?.error && (
         <div className="p-4 rounded-2xl bg-rose-50 border border-rose-200/80 text-rose-800 text-sm font-medium flex items-center gap-2">
@@ -1014,7 +1057,7 @@ export default function CreateMeetingPoll() {
           </button>
           <button
             type="submit"
-            disabled={isSubmitting}
+            disabled={isSubmitting || prefillPending}
             className="w-full sm:w-auto px-8 py-4 rounded-2xl bg-green-600 hover:bg-green-700 text-white font-bold text-sm shadow-sm transition-all hover:scale-[1.01] active:scale-[0.99] disabled:opacity-50 flex items-center justify-center gap-2"
           >
             {isSubmitting ? (

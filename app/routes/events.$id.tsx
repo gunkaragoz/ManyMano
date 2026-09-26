@@ -1,7 +1,7 @@
 import { getCloudflareEnv } from "~/utils/cloudflare-context";
 import type { ActionFunctionArgs, HeadersFunction, LoaderFunctionArgs, MetaFunction } from "react-router";
 import { data, redirect } from "react-router";
-import { useLoaderData, useActionData, useNavigation, useSearchParams, useFetcher, Form, isRouteErrorResponse, useRouteError } from "react-router";
+import { useLoaderData, useActionData, useNavigation, useSearchParams, useFetcher, Form, Link, isRouteErrorResponse, useRouteError } from "react-router";
 import { eq, and, inArray, isNull } from "drizzle-orm";
 import { useState, useMemo, useEffect, useRef } from "react";
 import {
@@ -11,6 +11,7 @@ import {
   Check,
   CircleCheck,
   Clock,
+  Copy,
   Download,
   Globe,
   KeyRound,
@@ -4799,6 +4800,18 @@ export default function EventView() {
             <Download className="w-4 h-4 text-slate-500" />
             <span>Apple / Outlook (.ics)</span>
           </a>
+
+          {/* Anyone with the link can start their own event from this one's
+              structure. Only the public ID travels — never an admin token —
+              and no names, sign-ups, or votes are copied. */}
+          <Link
+            to={`/create/${event.type === "TIME_POLL" ? "poll" : "signup"}?from=${encodeURIComponent(event.id)}`}
+            rel="nofollow"
+            className="w-full h-11 px-4 text-[13px] font-semibold rounded-xl border border-slate-200 bg-white hover:bg-slate-50 hover:border-slate-300 text-slate-700 transition-all shadow-sm flex items-center justify-center gap-2"
+          >
+            <Copy className="w-4 h-4 text-slate-500" />
+            <span>Make a copy</span>
+          </Link>
 
           {/* Organizer roster (with optional CSV export) lives in its own
               private section below — no export button here so volunteers

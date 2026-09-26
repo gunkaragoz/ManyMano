@@ -2,135 +2,33 @@ import { useEffect, useRef, useState } from "react";
 import { CalendarDays, CalendarRange, Check, ChevronDown, Repeat } from "lucide-react";
 import DatePicker from "~/components/DatePicker";
 import {
-  MAX_SERIES_DAYS,
   addDays,
   describeSpec,
   presetsFor,
   weekdayOf,
-  type DateSpec,
 } from "~/utils/recurrence";
+import {
+  WEEKDAY_SHORT,
+  dateFieldsFor,
+  selectionToSpec,
+  type DateSelection,
+} from "~/utils/formDates";
 import { formatSlotDateLabel } from "~/utils/calendar";
 import { MAX_SLOT_ROWS_PER_EVENT } from "~/utils/validation";
 
-/**
- * Form state for the event's dates. Kept flat (and JSON-serialisable) so it
- * can live in the same sessionStorage draft as the rest of the create form;
- * the server rebuilds the DateSpec from the hidden inputs and never trusts a
- * client-generated date list.
- *
- * The pieces render as separate fields of the create form rather than one
- * block: the type switcher sits above the date row, the end date sits inside
- * it next to the first date, and the repeat rule follows underneath.
- */
-export type DateSelection = {
-  mode: "single" | "range" | "repeat";
-  /** Last day, when mode is "range". */
-  end: string;
-  /** Preset key from presetsFor(), or "custom". */
-  repeatKey: string;
-  interval: number;
-  unit: "week" | "month";
-  weekdays: number[];
-  endMode: "on" | "after";
-  endDate: string;
-  count: number;
-};
-
-export function defaultSelection(start: string): DateSelection {
-  return {
-    mode: "single",
-    end: addDays(start, 2),
-    repeatKey: "weekly",
-    interval: 1,
-    unit: "week",
-    weekdays: [weekdayOf(start)],
-    endMode: "on",
-    endDate: addDays(start, 84),
-    count: 12,
-  };
-}
-
-export function selectionToSpec(sel: DateSelection, start: string): DateSpec {
-  if (sel.mode === "range") return { mode: "range", end: sel.end };
-  if (sel.mode !== "repeat") return { mode: "single" };
-  const ends = sel.endMode === "after" ? { after: sel.count } : { on: sel.endDate };
-  if (sel.repeatKey === "custom") {
-    return sel.unit === "month"
-      ? { mode: "repeat", rule: { type: "monthlyNth", interval: sel.interval }, ends }
-      : {
-          mode: "repeat",
-          rule: {
-            type: "weekly",
-            interval: sel.interval,
-            weekdays: sel.weekdays.length ? sel.weekdays : [weekdayOf(start)],
-          },
-          ends,
-        };
-  }
-  const preset = presetsFor(start, sel.endDate).find((p) => p.key === sel.repeatKey);
-  if (!preset || preset.spec.mode !== "repeat") return { mode: "single" };
-  return { ...preset.spec, ends };
-}
-
-/**
- * Rebuilds the form state from a stored spec, so the edit screen opens on
- * what the sheet actually is rather than on defaults.
- */
-export function selectionFromSpec(spec: DateSpec, start: string): DateSelection {
-  const base = defaultSelection(start);
-  if (spec.mode === "range") return { ...base, mode: "range", end: spec.end };
-  if (spec.mode !== "repeat") return base;
-
-  const ends =
-    "after" in spec.ends
-      ? { endMode: "after" as const, count: spec.ends.after }
-      : { endMode: "on" as const, endDate: spec.ends.on };
-  const rule = spec.rule;
-
-  if (rule.type === "weekly") {
-    // A plain weekly rule on the start date's own weekday is the "Weekly on X"
-    // preset; anything else needs the custom panel to be shown.
-    const weekdays = rule.weekdays.length ? rule.weekdays : [weekdayOf(start)];
-    const isPreset = rule.interval === 1 && weekdays.length === 1 && weekdays[0] === weekdayOf(start);
-    return {
-      ...base,
-      ...ends,
-      mode: "repeat",
-      repeatKey: isPreset ? "weekly" : "custom",
-      unit: "week",
-      interval: rule.interval,
-      weekdays,
-    };
-  }
-  if (rule.type === "monthlyNth") {
-    return {
-      ...base,
-      ...ends,
-      mode: "repeat",
-      repeatKey: rule.interval === 1 ? "monthly" : "custom",
-      unit: "month",
-      interval: rule.interval,
-    };
-  }
-  return { ...base, ...ends, mode: "repeat", repeatKey: rule.type };
-}
-
-/** The days a shift can be limited to: dates for a range, weekdays for a repeat. */
-export function dayChoicesFor(
-  sel: DateSelection,
-  dates: string[]
-): { key: string; label: string }[] {
-  if (sel.mode === "range" && dates.length > 1 && dates.length <= 31) {
-    return dates.map((d) => ({ key: d, label: formatSlotDateLabel(d) }));
-  }
-  if (sel.mode === "repeat") {
-    const weekdays = [...new Set(dates.map(weekdayOf))].sort((a, b) => a - b);
-    if (weekdays.length > 1) {
-      return weekdays.map((w) => ({ key: `w${w}`, label: WEEKDAY_SHORT[w] }));
-    }
-  }
-  return [];
-}
+// The form's date state and its pure mappings live in ~/utils/formDates so the
+// copy/template prefill can run the same logic; re-exported here so existing
+// imports keep working.
+export {
+  dateFieldsFor,
+  dateLimitError,
+  dayChoicesFor,
+  daysForShift,
+  defaultSelection,
+  selectionFromSpec,
+  selectionToSpec,
+  type DateSelection,
+} from "~/utils/formDates";
 
 /** "Event Date" only stays true for a one-day sheet. */
 export function dateFieldLabel(mode: DateSelection["mode"]): string {
@@ -139,7 +37,6 @@ export function dateFieldLabel(mode: DateSelection["mode"]): string {
   return mode === "range" ? "First Day *" : "First Date *";
 }
 
-const WEEKDAY_SHORT = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 const WEEKDAY_INITIAL = ["S", "M", "T", "W", "T", "F", "S"];
 const WEEKDAY_ORDER = [0, 1, 2, 3, 4, 5, 6];
 
@@ -182,35 +79,14 @@ export function DateModeTabs({
     else if (mode === "repeat") patch({ mode, weekdays: value.weekdays.length ? value.weekdays : [weekdayOf(start)] });
     else patch({ mode: "single" });
   };
-  const spec = selectionToSpec(value, start);
 
   return (
     <>
       {/* Hidden inputs are the contract with the action — the server re-expands
           the spec itself rather than trusting any client-side date list. */}
-      <input type="hidden" name="dateMode" value={value.mode} />
-      {value.mode === "range" && <input type="hidden" name="dateEnd" value={value.end} />}
-      {/* Posted from the same spec the preview describes: a preset's weekday
-          and interval come from the start date, never from whatever the
-          custom panel last held. */}
-      {spec.mode === "repeat" && (
-        <>
-          <input type="hidden" name="repeatType" value={spec.rule.type} />
-          <input
-            type="hidden"
-            name="repeatInterval"
-            value={"interval" in spec.rule ? spec.rule.interval : 1}
-          />
-          <input
-            type="hidden"
-            name="repeatWeekdays"
-            value={spec.rule.type === "weekly" ? spec.rule.weekdays.join(",") : ""}
-          />
-          <input type="hidden" name="repeatEndMode" value={"after" in spec.ends ? "after" : "on"} />
-          <input type="hidden" name="repeatEndDate" value={"on" in spec.ends ? spec.ends.on : ""} />
-          <input type="hidden" name="repeatCount" value={"after" in spec.ends ? spec.ends.after : ""} />
-        </>
-      )}
+      {dateFieldsFor(value, start).map(([name, fieldValue]) => (
+        <input key={name} type="hidden" name={name} value={fieldValue} />
+      ))}
 
       <div role="radiogroup" aria-label="Event type" className="flex gap-1 p-1 rounded-2xl bg-slate-100/80">
         {MODES.map(({ key, label, short, Icon }) => {
@@ -507,13 +383,4 @@ export function DateSummary({
       {text}
     </p>
   );
-}
-
-/** Shared copy for the two limits, so the form and the action say the same thing. */
-export function dateLimitError(dates: string[], taskSlots: number): string | null {
-  if (dates.length > MAX_SERIES_DAYS)
-    return "A sheet can run for up to one year — pick an earlier end.";
-  if (taskSlots > MAX_SLOT_ROWS_PER_EVENT)
-    return `That adds up to ${taskSlots} tasks across ${dates.length} days. A sheet can hold ${MAX_SLOT_ROWS_PER_EVENT} — use fewer days or fewer tasks.`;
-  return null;
 }
