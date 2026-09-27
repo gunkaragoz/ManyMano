@@ -18,7 +18,7 @@ import { useEffect, useState } from "react";
 import { HeartHandshake } from "lucide-react";
 import NotFound from "~/components/NotFound";
 import { POPULAR_TEMPLATE_LINKS } from "~/utils/templates";
-import TemplatesMenu from "~/components/TemplatesMenu";
+import CreateMenu from "~/components/CreateMenu";
 
 function GithubIcon({ className }: { className?: string }) {
   return (
@@ -282,16 +282,8 @@ export default function App() {
               )}
             </div>
 
-            <nav className="flex items-center gap-2 sm:gap-3 shrink-0">
-              <TemplatesMenu />
-              <Link
-                to="/create"
-                className="inline-flex items-center gap-1.5 px-4 py-2 text-xs font-semibold rounded-full bg-slate-900 text-white hover:bg-slate-800 shadow-sm transition-all hover:scale-[1.02] active:scale-[0.98]"
-              >
-                <span>+</span>
-                <span className="sm:hidden">Create</span>
-                <span className="hidden sm:inline">Create Event</span>
-              </Link>
+            <nav className="flex items-center shrink-0">
+              <CreateMenu />
             </nav>
           </div>
         </header>
