@@ -19,6 +19,7 @@ import { HeartHandshake } from "lucide-react";
 import NotFound from "~/components/NotFound";
 import { POPULAR_TEMPLATE_LINKS } from "~/utils/templates";
 import CreateMenu from "~/components/CreateMenu";
+import { LANDING_CAPTURE_SCRIPT, rememberLanding } from "~/utils/attribution";
 
 function GithubIcon({ className }: { className?: string }) {
   return (
@@ -207,6 +208,12 @@ export default function App() {
     return () => window.removeEventListener(CREATE_STICKY_HEADER_EVENT, onSticky);
   }, []);
 
+  // SEO loop: remember the first page of this visit + where it came from,
+  // so a later event creation is credited to it (app/utils/attribution.ts).
+  useEffect(() => {
+    rememberLanding(window.location.pathname, document.referrer);
+  }, []);
+
   // Clear when navigating away (the emitting page also clears on unmount).
   useEffect(() => {
     setStickyHeader(null);
@@ -215,6 +222,7 @@ export default function App() {
   return (
     <html lang="en" className="h-full">
       <head>
+        <script dangerouslySetInnerHTML={{ __html: LANDING_CAPTURE_SCRIPT }} />
         <Meta />
         <Links />
         <script

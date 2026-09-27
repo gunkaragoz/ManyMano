@@ -19,6 +19,7 @@ export async function loader({ request, context }: LoaderFunctionArgs) {
     "User-agent: *",
     "Allow: /",
     "Disallow: /events/",
+    "Disallow: /api/",
     `Sitemap: ${sitemapUrl}`,
     "",
   ].join("\n");

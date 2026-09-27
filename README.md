@@ -129,6 +129,16 @@ Keep the rest short and readable: `feat/multi-day-repeating-sheets`, `fix/timezo
 
 ---
 
+## 🔎 SEO
+
+A weekly, free-tools-only SEO habit lives in [`seo/`](seo/README.md): event
+creations are attributed to their landing page (`GET /api/conversions`), a
+GitHub Actions job checks every sitemap page plus Search Console and PageSpeed
+each Monday and opens an issue, and `/seo-weekly` in Claude Code recommends one
+change at a time.
+
+---
+
 ## 🛠️ Tech Stack
 
 - **Framework**: [React Router 8](https://reactrouter.com/) + [React 19](https://react.dev/) (SSR on the edge)

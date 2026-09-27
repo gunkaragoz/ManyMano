@@ -8,3 +8,4 @@ build
 *.local
 .pnpm-store
 .DS_Store
+seo/data

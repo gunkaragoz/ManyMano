@@ -42,8 +42,9 @@ export default async function handleRequest(
   // CSP: lock down resource origins. React Router renders its hydration
   // runtime (ScrollRestoration, route modules, context payload) as inline
   // <script> with no nonce support — and per-request payloads rule out
-  // hashes — so script-src keeps 'unsafe-inline'. The app itself ships no inline
-  // scripts/handlers; React escaping remains the XSS backstop. Turnstile
+  // hashes — so script-src keeps 'unsafe-inline'. The app's only own inline
+  // script is the static landing-attribution snippet in root.tsx (no
+  // interpolated data); React escaping remains the XSS backstop. Turnstile
   // CDN added for widget script + challenge iframe. Cloudflare Web Analytics
   // beacon (auto-injected) loads from static.cloudflareinsights.com and posts
   // to cloudflareinsights.com — both allowlisted so the browser doesn't block
