@@ -75,19 +75,35 @@ async function pool(items, n, fn) {
 
 // --- 1. Crawl + on-page checks ---------------------------------------------
 
-async function audit() {
-  const robotsRes = await get(`${SITE}/robots.txt`);
-  const robots = robotsRes.ok ? await robotsRes.text() : "";
-  const disallows = robotsDisallows(robots);
-  const siteFindings = [];
-  if (!robotsRes.ok) siteFindings.push({ level: "error", code: "robots", message: `robots.txt HTTP ${robotsRes.status}` });
-  if (!/^sitemap:/im.test(robots)) siteFindings.push({ level: "warn", code: "robots-sitemap", message: "robots.txt has no Sitemap line" });
+/** Fetch text; network failures come back as status 0 instead of throwing. */
+async function fetchText(url) {
+  try {
+    const res = await get(url);
+    return { status: res.status, ok: res.ok, text: res.ok ? await res.text() : "" };
+  } catch (e) {
+    return { status: 0, ok: false, text: "", error: String(e.message ?? e) };
+  }
+}
 
-  const smRes = await get(`${SITE}/sitemap.xml`);
-  if (!smRes.ok) throw new Error(`sitemap.xml HTTP ${smRes.status}`);
+async function audit() {
+  const siteFindings = [];
+  const siteError = (code, message) => siteFindings.push({ level: "error", code, message });
+  const failure = (r) => (r.status ? `HTTP ${r.status}` : r.error);
+
+  const robotsRes = await fetchText(`${SITE}/robots.txt`);
+  const robots = robotsRes.text;
+  const disallows = robotsDisallows(robots);
+  if (!robotsRes.ok) siteError("robots", `robots.txt ${failure(robotsRes)}`);
+  else if (!/^sitemap:/im.test(robots)) siteFindings.push({ level: "warn", code: "robots-sitemap", message: "robots.txt has no Sitemap line" });
+
+  // A broken or empty sitemap is itself the finding: record it and still
+  // write a report, so the weekly issue explains why the run failed.
+  const smRes = await fetchText(`${SITE}/sitemap.xml`);
+  const locs = smRes.ok ? parseSitemap(smRes.text) : [];
+  if (!smRes.ok) siteError("sitemap", `sitemap.xml ${failure(smRes)}`);
+  else if (!locs.length) siteError("sitemap-empty", "sitemap.xml lists no URLs");
   // Sitemap <loc>s use SITE_URL; fetch them on the origin under test so a
   // staging run checks staging, but keep the canonical comparison honest.
-  const locs = parseSitemap(await smRes.text());
   const canonicalOrigin = locs[0] ? new URL(locs[0]).origin : SITE;
 
   const pages = await pool(locs, 4, async (loc) => {
@@ -266,8 +282,15 @@ log(`checking ${SITE}`);
 const [auditOut, gsc, conv] = await Promise.all([audit(), searchConsole(), conversions()]);
 
 const search = gsc.missing ? null : gsc;
-const convOut = conv.missing ? null : conv;
-const scored = search ? scorePages(search.pages, convOut?.rows ?? []) : null;
+// Only count conversions inside the Search Console window (it ends
+// GSC_LAG_DAYS ago); later days have no clicks to compare against.
+const convOut = conv.missing
+  ? null
+  : search
+    ? { ...conv, rows: conv.rows.filter((r) => r.day >= search.startDate && r.day <= search.endDate) }
+    : conv;
+// null conversions = unknown, never "zero": scorePages won't make calls on it.
+const scored = search ? scorePages(search.pages, convOut ? convOut.rows : null) : null;
 
 const psiCount = Number(process.env.SEO_PSI_PAGES ?? 3);
 const psiPaths = ["/", ...(scored?.rows.filter((r) => r.call === "candidate").map((r) => r.path) ?? [])]

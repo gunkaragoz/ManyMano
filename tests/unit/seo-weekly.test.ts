@@ -118,6 +118,15 @@ describe("scorePages", () => {
     expect(rows[0].upsideConversions).toBeGreaterThan(0);
   });
 
+  it("makes no candidate/trap calls when conversion data is missing (unknown ≠ zero)", () => {
+    const { rows, siteSearchConversionRate } = seo.scorePages(gsc, null);
+    expect(rows.map((r: { call: string }) => r.call)).toEqual(["watch", "watch", "watch", "watch"]);
+    expect(rows[0].conversions).toBeNull();
+    expect(rows[0].upsideConversions).toBeNull();
+    expect(rows[0].reason).toMatch(/missing/);
+    expect(siteSearchConversionRate).toBeNull();
+  });
+
   it("reports n/a upside when there is no conversion data at all", () => {
     const { rows, siteSearchConversionRate } = seo.scorePages([{ ...gsc[0], clicks: 0 }], []);
     expect(siteSearchConversionRate).toBeNull();
@@ -144,5 +153,24 @@ describe("aggregateGsc + diffSnapshots", () => {
     expect(d.fixedFindings.map((f: { code: string }) => f.code)).toEqual(["thin"]);
     expect(d.moves).toEqual([{ path: "/a", from: 12, to: 7, delta: -5 }]);
     expect(seo.diffSnapshots(null, snap([], 1)).first).toBe(true);
+  });
+});
+
+describe("renderReport", () => {
+  it("puts site-wide errors in the health summary", () => {
+    const md = seo.renderReport({
+      date: "2026-09-28",
+      siteUrl: "https://example.test",
+      audit: { pages: [], site: [{ level: "error", code: "sitemap", message: "sitemap.xml HTTP 500" }, { level: "warn", code: "x", message: "note" }] },
+      search: null,
+      conversions: null,
+      speed: [],
+      missing: { gsc: "not set", conversions: "HTTP 500" },
+      diff: { first: true, newFindings: [], fixedFindings: [], moves: [] },
+    });
+    const health = md.slice(md.indexOf("## Health"), md.indexOf("## Search"));
+    expect(health).toMatch(/1 error\(s\)/);
+    expect(health).toMatch(/sitemap\.xml HTTP 500/);
+    expect(md).toMatch(/0 warning\(s\) \+ 1 site-wide note/);
   });
 });

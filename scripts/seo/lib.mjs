@@ -250,11 +250,13 @@ export const THRESHOLDS = { minImpressions: 50, trapImpressions: 200, strikeFrom
 
 /**
  * gscPages: [{ path, clicks, impressions, ctr, position }]
- * conversions: [{ landing, channel, count }]
+ * conversions: [{ landing, channel, count }], or null when conversion data
+ *   is unavailable — then no page gets a candidate/trap call (unknown ≠ zero).
  */
 export function scorePages(gscPages, conversions, t = THRESHOLDS) {
+  const known = conversions != null;
   const conv = new Map();
-  for (const r of conversions) {
+  for (const r of conversions ?? []) {
     const c = conv.get(r.landing) ?? { all: 0, search: 0 };
     c.all += r.count;
     if (r.channel === "search") c.search += r.count;
@@ -262,16 +264,18 @@ export function scorePages(gscPages, conversions, t = THRESHOLDS) {
   }
   const totalClicks = gscPages.reduce((s, p) => s + p.clicks, 0);
   const totalSearchConv = [...conv.values()].reduce((s, c) => s + c.search, 0);
-  const siteRate = totalClicks > 0 ? totalSearchConv / totalClicks : null;
+  const siteRate = known && totalClicks > 0 ? totalSearchConv / totalClicks : null;
 
   const rows = gscPages.map((p) => {
     const c = conv.get(p.path) ?? { all: 0, search: 0 };
-    const rate = p.clicks >= 20 ? c.search / p.clicks : siteRate;
+    const rate = !known ? null : p.clicks >= 20 ? c.search / p.clicks : siteRate;
     const upsideClicks = Math.max(0, p.impressions * (expectedCtr(t.targetPosition) - p.ctr));
     const upsideConversions = rate == null ? null : upsideClicks * rate;
     let call = "watch";
     let reason = "not enough impressions yet";
-    if (p.impressions >= t.minImpressions) {
+    if (!known) {
+      reason = "conversion data missing — no call";
+    } else if (p.impressions >= t.minImpressions) {
       if (c.all === 0 && p.impressions >= t.trapImpressions) {
         call = "trap";
         reason = "visible in search but no conversions — traffic nobody acts on";
@@ -288,8 +292,8 @@ export function scorePages(gscPages, conversions, t = THRESHOLDS) {
     }
     return {
       ...p,
-      conversions: c.all,
-      searchConversions: c.search,
+      conversions: known ? c.all : null,
+      searchConversions: known ? c.search : null,
       upsideClicks: Math.round(upsideClicks),
       upsideConversions: upsideConversions == null ? null : Math.round(upsideConversions * 10) / 10,
       call,
@@ -329,7 +333,10 @@ export function aggregateGsc(dayPageRows) {
 export function diffSnapshots(prev, curr) {
   if (!prev) return { first: true, newFindings: [], fixedFindings: [], moves: [] };
   const key = (x) => `${x.path}|${x.code}`;
-  const flat = (s) => (s.audit?.pages ?? []).flatMap((p) => p.findings.map((f) => ({ ...f, path: p.path })));
+  const flat = (s) => [
+    ...(s.audit?.site ?? []).map((f) => ({ ...f, path: "site" })),
+    ...(s.audit?.pages ?? []).flatMap((p) => p.findings.map((f) => ({ ...f, path: p.path }))),
+  ];
   const before = new Map(flat(prev).map((x) => [key(x), x]));
   const after = new Map(flat(curr).map((x) => [key(x), x]));
   const newFindings = [...after.values()].filter((x) => !before.has(key(x)));
@@ -354,7 +361,11 @@ const pct = (x) => `${(x * 100).toFixed(1)}%`;
 
 export function renderReport(s) {
   const L = [];
-  const errors = s.audit.pages.flatMap((p) => p.findings.filter((f) => f.level === "error").map((f) => ({ ...f, path: p.path })));
+  const errors = [
+    ...s.audit.site.filter((f) => f.level === "error").map((f) => ({ ...f, path: "site" })),
+    ...s.audit.pages.flatMap((p) => p.findings.filter((f) => f.level === "error").map((f) => ({ ...f, path: p.path }))),
+  ];
+  const siteNotes = s.audit.site.filter((f) => f.level !== "error");
   const warns = s.audit.pages.flatMap((p) => p.findings.filter((f) => f.level === "warn").map((f) => ({ ...f, path: p.path })));
 
   L.push(`# SEO weekly check — ${s.date}`, "");
@@ -386,7 +397,7 @@ export function renderReport(s) {
     for (const r of s.scored.rows.slice(0, 15)) {
       const icon = { candidate: "🎯", trap: "⚠️", watch: "·" }[r.call];
       L.push(
-        `| ${icon} ${r.call} | \`${r.path}\` | ${r.impressions} | ${r.clicks} | ${pct(r.ctr)} | ${r.position} | ${r.conversions} (${r.searchConversions}) | ${r.upsideConversions ?? "n/a"} | ${r.reason} |`
+        `| ${icon} ${r.call} | \`${r.path}\` | ${r.impressions} | ${r.clicks} | ${pct(r.ctr)} | ${r.position} | ${r.conversions == null ? "n/a" : `${r.conversions} (${r.searchConversions})`} | ${r.upsideConversions ?? "n/a"} | ${r.reason} |`
       );
     }
     L.push("");
@@ -421,9 +432,9 @@ export function renderReport(s) {
     L.push("");
   }
 
-  L.push("<details><summary>" + `${warns.length} warning(s) + ${s.audit.site.length} site-wide note(s)` + "</summary>", "");
+  L.push("<details><summary>" + `${warns.length} warning(s) + ${siteNotes.length} site-wide note(s)` + "</summary>", "");
   for (const w of warns) L.push(`- \`${w.path}\` ${w.message}`);
-  for (const w of s.audit.site) L.push(`- ${w.message}`);
+  for (const w of siteNotes) L.push(`- ${w.message}`);
   L.push("", "</details>", "");
 
   L.push("## This week's decision", "");
