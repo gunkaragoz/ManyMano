@@ -6050,17 +6050,20 @@ export default function EventView() {
                           <td key={s.id} className="p-3 text-center border-r border-slate-100">
                             {resp === "YES" && (
                               <span className="inline-flex items-center justify-center w-8 h-8 rounded-xl bg-green-500 text-white shadow-sm">
-                                <Check className="w-4 h-4" />
+                                <Check className="w-4 h-4" aria-hidden="true" />
+                                <span className="sr-only">Yes</span>
                               </span>
                             )}
                             {resp === "MAYBE" && (
                               <span className="inline-flex items-center justify-center w-8 h-8 rounded-xl bg-amber-400 text-slate-900 shadow-sm">
-                                <Check className="w-4 h-4" />
+                                <Check className="w-4 h-4" aria-hidden="true" />
+                                <span className="sr-only">Maybe</span>
                               </span>
                             )}
                             {resp === "NO" && (
                               <span className="inline-flex items-center justify-center w-8 h-8 rounded-xl bg-slate-100 text-slate-400">
-                                <Minus className="w-4 h-4" />
+                                <Minus className="w-4 h-4" aria-hidden="true" />
+                                <span className="sr-only">No</span>
                               </span>
                             )}
                           </td>

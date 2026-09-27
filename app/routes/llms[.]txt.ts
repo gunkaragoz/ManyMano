@@ -49,6 +49,8 @@ export async function loader({ request, context }: LoaderFunctionArgs) {
     "## Key pages",
     "",
     ...links,
+    "Every page is also available as Markdown: send `Accept: text/markdown`.",
+    "",
   ].join("\n");
 
   return new Response(body, {
