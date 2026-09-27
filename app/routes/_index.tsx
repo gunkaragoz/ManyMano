@@ -44,7 +44,7 @@ export const meta: MetaFunction<typeof loader> = ({ loaderData, matches }) => {
 const USE_CASES = [
   "staff-appreciation-week",
   "potluck",
-  "recorder-helper",
+  "thursday-folders",
   "concession-stand",
   "book-club",
   "team-meeting",

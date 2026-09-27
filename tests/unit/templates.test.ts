@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  HEADER_MENU_SLUGS,
   POPULAR_TEMPLATE_LINKS,
   TEMPLATES,
   TEMPLATE_CATEGORIES,
@@ -156,8 +157,8 @@ describe("template catalog", () => {
     }
   });
 
-  it("Thursday recorder helper runs Thursdays 2:00–2:30 PM through the school year", () => {
-    const t = getTemplate("recorder-helper");
+  it("Thursday folders helper runs Thursdays 2:00–2:30 PM through the school year", () => {
+    const t = getTemplate("thursday-folders");
     if (!t || t.type !== "SIGNUP_SHEET") throw new Error("missing");
     const at = (today: string) => {
       const r = resolveSignupPrefill(signupPrefillFromTemplate(t), { today, timezone: "UTC" });
@@ -177,5 +178,10 @@ describe("template catalog", () => {
     // Summer: waits for September.
     expect(at("2027-07-10").start).toBe("2027-09-02");
     expect(at("2027-06-14").start).toBe("2027-09-02");
+  });
+
+  it("header menu lists a short set of real templates", () => {
+    expect(HEADER_MENU_SLUGS.length).toBeLessThanOrEqual(10);
+    for (const slug of HEADER_MENU_SLUGS) expect(getTemplate(slug), slug).not.toBeNull();
   });
 });

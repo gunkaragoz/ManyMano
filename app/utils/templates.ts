@@ -45,7 +45,21 @@ export type TemplateIcon =
   | "presentation"
   | "house"
   | "tent"
-  | "music";
+  | "music"
+  | "sandwich"
+  | "backpack"
+  | "film"
+  | "bike"
+  | "globe"
+  | "drumstick"
+  | "star"
+  | "flask"
+  | "cookie"
+  | "bingo"
+  | "medal"
+  | "piggy-bank"
+  | "restaurant"
+  | "folder";
 
 type TemplateBase = {
   slug: string;
@@ -88,6 +102,7 @@ export type EventTemplate = SignupTemplate | PollTemplate;
 
 const MON = 1;
 const TUE = 2;
+const WED = 3;
 const THU = 4;
 const FRI = 5;
 const SAT = 6;
@@ -508,25 +523,25 @@ export const TEMPLATES: EventTemplate[] = [
     },
   },
   {
-    slug: "recorder-helper",
+    slug: "thursday-folders",
     type: "SIGNUP_SHEET",
-    name: "Thursday recorder helper",
-    tagline: "Every Thursday, September to June",
+    name: "Thursday folders helper",
+    tagline: "Stuff weekly take-home folders, September to June",
     category: "school",
-    icon: "music",
+    icon: "folder",
     seo: {
-      title: "Recorder Class Helper Sign-Up — Weekly School Volunteer",
+      title: "Thursday Folders Volunteer Sign-Up — Weekly Room Parent",
       description:
-        "Parent volunteers for recorder class every Thursday at 2:00 PM, September to June. One 30-minute spot a week, claimed with just a name. Free.",
-      h1: "Thursday recorder helper sign-up sheet",
+        "Room parents sign up to stuff Thursday folders (Thursday recorders) with flyers and school updates: 30 minutes every Thursday, September to June.",
+      h1: "Thursday folders helper sign-up sheet",
       intro: [
-        "A room full of beginner recorder players goes better with an extra grown-up to hand out music, help with fingerings and keep the line moving to the practice corner. This sheet repeats every Thursday from 2:00 to 2:30 PM for the whole school year, September to June, with a helper spot each week.",
-        "Parents see every Thursday in one list and claim the weeks that fit their schedule — once a month or every week. You see at a glance which weeks still need someone.",
+        "Many schools send a weekly take-home folder — Thursday folders, Thursday recorders or Friday folders — with flyers, graded work and school news. Someone has to sort all that paper into every student's folder, and it goes quickly with a rotating room-parent helper.",
+        "This sheet repeats every Thursday at 2:00 PM for 30 minutes through the school year, September to June. Parents claim the weeks that fit their schedule, and the teacher can see who's coming each week.",
       ],
       tips: [
-        "There's no class during winter and spring break — say so in the description so nobody signs up for those weeks.",
-        "Add the classroom and sign-in steps to the location, since helpers come during the school day.",
-        "Ask helpers to add an email so they get a reminder before their Thursday.",
+        "There are no folders during winter and spring break — say so in the description so nobody signs up for those weeks.",
+        "Leave the flyers and class list in the same spot each week so helpers can start right away.",
+        "Add the workroom and sign-in steps to the location, since helpers come during the school day.",
       ],
       faqs: [
         {
@@ -535,24 +550,24 @@ export const TEMPLATES: EventTemplate[] = [
             "The sheet repeats every Thursday until mid-June. Put your school's break dates in the description so parents don't sign up for those weeks.",
         },
         {
-          question: "Can a parent sign up for more than one Thursday?",
-          answer: "Yes. Each Thursday is listed separately, and a parent can claim as many weeks as they like.",
+          question: "Our folders go home on Fridays. Can I change the day?",
+          answer: "Yes. Pick a different first date and weekday before creating the sheet — the shift follows the new day.",
         },
       ],
     },
     prefill: {
       details: {
-        title: "Thursday Recorder Helper",
+        title: "Thursday Folders Helper",
         description:
-          "Help our young musicians during recorder class! Please check in at the front office first. No class during winter break ([dates]) or spring break ([dates]) — please don't sign up for those weeks.",
-        location: "[Your school] music room",
+          "Help stuff our class's Thursday folders with flyers and school updates. Please sign in at the front office. No folders during winter break ([dates]) or spring break ([dates]) — please don't sign up for those weeks.",
+        location: "[Your school] workroom",
         timezone: null,
       },
       // From the next Thursday — or the first Thursday of September when the
       // template is opened over the summer — until the next June 15.
       anchor: { kind: "weekday", weekday: THU, minOffsetDays: 1, outside: { from: "06-16", to: "08-31" } },
       dates: { mode: "repeat", rule: { type: "weekly", interval: 1, weekdays: [THU] }, ends: { untilMonthDay: "06-15" } },
-      shifts: [{ name: "Recorder class", startTime: "14:00", endTime: "14:30", days: { kind: "all" }, tasks: [task("Recorder helper", 1)] }],
+      shifts: [{ name: "Thursday folders", startTime: "14:00", endTime: "14:30", days: { kind: "all" }, tasks: [task("Folder helper", 1)] }],
     },
   },
   {
@@ -600,6 +615,661 @@ export const TEMPLATES: EventTemplate[] = [
       anchor: { kind: "offset", offsetDays: 1 },
       dates: { mode: "range", spanDays: 14 },
       shifts: [{ name: "Dinner drop-off", startTime: "17:00", endTime: "18:00", days: { kind: "all" }, tasks: [task("Dinner", 1)] }],
+    },
+  },
+
+  {
+    slug: "staff-welcome-back-lunch",
+    type: "SIGNUP_SHEET",
+    name: "Staff welcome back lunch",
+    tagline: "Kick off the year with a staff lunch",
+    category: "school",
+    icon: "sandwich",
+    seo: {
+      title: "Staff Welcome Back Lunch Sign-Up Sheet — Free Template",
+      description:
+        "Welcome teachers and staff back with a PTA-hosted lunch: setup, serving and cleanup shifts plus a list of dishes to bring. Free, no accounts.",
+      h1: "Staff welcome back lunch sign-up sheet",
+      intro: [
+        "The first week back is hectic for teachers, and a lunch they don't have to think about sets the tone for the year. This template covers the whole thing: a short setup shift, a serving crew during lunch, cleanup afterwards, and a list of mains, salads, desserts and drinks for families to bring.",
+        "Families who can't be there at lunchtime can still help by dropping off a dish in the morning.",
+      ],
+      tips: [
+        "Ask the office how many staff to expect, then set the number of dishes to match.",
+        "Label dishes with common allergens and keep a vegetarian main on the list.",
+        "Leave a thank-you card by the sign-in sheet so families can add a note.",
+      ],
+      faqs: [
+        {
+          question: "Can families help without coming at lunchtime?",
+          answer: "Yes. The food list has no time attached, so families can sign up to drop off a dish in the morning.",
+        },
+        {
+          question: "Do volunteers need an account?",
+          answer: "No. They open the link, pick a spot, and enter their name.",
+        },
+      ],
+    },
+    prefill: {
+      details: {
+        title: "Staff Welcome Back Lunch",
+        description:
+          "Let's welcome our teachers and staff back! Please drop food off in the staff lounge by 10:30 AM and label anything containing common allergens.",
+        location: "[Your school] staff lounge",
+        timezone: null,
+      },
+      anchor: nextWeekday(THU),
+      dates: { mode: "single" },
+      shifts: [
+        { name: "Setup", startTime: "10:30", endTime: "11:00", days: { kind: "all" }, tasks: [task("Set up tables and decorations", 3)] },
+        { name: "Lunch", startTime: "11:00", endTime: "13:00", days: { kind: "all" }, tasks: [task("Server", 3), task("Drinks station", 1)] },
+        { name: "Cleanup", startTime: "13:00", endTime: "13:30", days: { kind: "all" }, tasks: [task("Clean up and pack leftovers", 2)] },
+        { name: "Food to bring", startTime: "", endTime: "", days: { kind: "all" }, tasks: [task("Main dish", 4), task("Vegetarian main", 1), task("Salad", 3), task("Dessert", 4), task("Drinks", 2), task("Plates, cups and cutlery", 1)] },
+      ],
+    },
+  },
+  {
+    slug: "back-to-school-night",
+    type: "SIGNUP_SHEET",
+    name: "Back to school night",
+    tagline: "Greeters, guides and the PTA table",
+    category: "school",
+    icon: "backpack",
+    seo: {
+      title: "Back to School Night Volunteer Sign-Up — Free Template",
+      description:
+        "Staff back to school night: welcome table, hallway guides, PTA membership table and cleanup. Parents claim a spot with just a name. Free.",
+      h1: "Back to school night volunteer sign-up sheet",
+      intro: [
+        "Back to school night is many families' first visit to the building, and a few friendly volunteers make it feel welcoming. This template sets up a welcome table, hallway guides to point families to classrooms, a PTA membership table, and a short cleanup shift.",
+        "Volunteers can pick a shift before or after their own classroom visits, so nobody misses time with their child's teacher.",
+      ],
+      tips: [
+        "Print campus maps and room lists for the welcome table ahead of time.",
+        "Have a QR code for the PTA's membership or volunteer page at the PTA table.",
+        "Schedule guides for the first hour — that's when the hallways are busiest.",
+      ],
+      faqs: [
+        {
+          question: "Can parents volunteer and still visit their child's classroom?",
+          answer:
+            "Yes. Shifts are short and staggered, so parents can take a spot before or after their classroom sessions.",
+        },
+        {
+          question: "Can I print a QR code for the sign-up sheet?",
+          answer: "Yes. Every event has a QR code you can print for newsletters or flyers.",
+        },
+      ],
+    },
+    prefill: {
+      details: {
+        title: "Back to School Night Volunteers",
+        description:
+          "Help welcome families to a new school year! Please check in at the front office 10 minutes before your shift.",
+        location: "[Your school]",
+        timezone: null,
+      },
+      anchor: nextWeekday(WED),
+      dates: { mode: "single" },
+      shifts: [
+        { name: "Welcome table", startTime: "17:30", endTime: "18:30", days: { kind: "all" }, tasks: [task("Greeter", 2), task("Maps and name tags", 1)] },
+        { name: "Hallway guides", startTime: "18:00", endTime: "19:00", days: { kind: "all" }, tasks: [task("Hallway guide", 3)] },
+        { name: "PTA table", startTime: "17:30", endTime: "19:30", days: { kind: "all" }, tasks: [task("Membership and volunteer sign-ups", 2)] },
+        { name: "Cleanup", startTime: "19:30", endTime: "20:00", days: { kind: "all" }, tasks: [task("Pack up tables and signs", 2)] },
+      ],
+    },
+  },
+  {
+    slug: "movie-night",
+    type: "SIGNUP_SHEET",
+    name: "Movie night",
+    tagline: "Setup, concessions and floor helpers",
+    category: "school",
+    icon: "film",
+    seo: {
+      title: "School Movie Night Volunteer Sign-Up — Free Template",
+      description:
+        "Run a family movie night: setup, popcorn and concessions, floor helpers during the film, cleanup, and snacks to donate. Free, no accounts.",
+      h1: "Movie night volunteer sign-up sheet",
+      intro: [
+        "A family movie night is one of the easiest events to love and one of the easiest to under-staff. This template covers setup of the screen and seating, a concessions crew for popcorn and drinks, floor helpers while the film runs, and cleanup at the end.",
+        "There's also a list of snacks and water to donate, so families who can't stay can still pitch in.",
+      ],
+      tips: [
+        "Test the projector and sound during setup, not five minutes before showtime.",
+        "Ask families to bring blankets and pillows, and say so in the description.",
+        "Check the film's public performance license with your school or district.",
+      ],
+      faqs: [
+        {
+          question: "Can families donate snacks without volunteering?",
+          answer: "Yes. The donation list has no time, so anyone can sign up to drop off water or snacks.",
+        },
+        {
+          question: "Can I run concessions as a fundraiser?",
+          answer: "Yes. Rename the concessions tasks or add a cashier — every task and spot is editable.",
+        },
+      ],
+    },
+    prefill: {
+      details: {
+        title: "Family Movie Night",
+        description:
+          "Bring a blanket and join us for a movie under the stars (or the gym lights)! Volunteers, please check in at the concessions table.",
+        location: "[Your school] field or gym",
+        timezone: null,
+      },
+      anchor: nextWeekday(FRI),
+      dates: { mode: "single" },
+      shifts: [
+        { name: "Setup", startTime: "17:30", endTime: "18:30", days: { kind: "all" }, tasks: [task("Screen and sound", 2), task("Seating area", 2)] },
+        { name: "Concessions", startTime: "18:00", endTime: "20:30", days: { kind: "all" }, tasks: [task("Popcorn", 2), task("Snacks and drinks cashier", 2)] },
+        { name: "During the movie", startTime: "18:30", endTime: "20:30", days: { kind: "all" }, tasks: [task("Floor helper", 2)] },
+        { name: "Cleanup", startTime: "20:30", endTime: "21:00", days: { kind: "all" }, tasks: [task("Cleanup crew", 3)] },
+        { name: "Donations", startTime: "", endTime: "", days: { kind: "all" }, tasks: [task("Case of bottled water", 2), task("Candy or snacks", 2)] },
+      ],
+    },
+  },
+  {
+    slug: "bike-to-school-day",
+    type: "SIGNUP_SHEET",
+    name: "Bike to school day",
+    tagline: "Route marshals and a welcome station",
+    category: "school",
+    icon: "bike",
+    seo: {
+      title: "Bike to School Day Volunteer Sign-Up — Free Template",
+      description:
+        "Organize a fall or spring bike and walk to school day: route marshals, bike train leaders, a welcome station and snacks to bring. Free.",
+      h1: "Bike to school day volunteer sign-up sheet",
+      intro: [
+        "Bike and walk to school days work because enough adults are out along the route. This template sets up route marshals and bike train leaders for the ride in, a welcome station with snacks and stickers at school, and a bike parking helper.",
+        "Use it for the fall event, then make a copy of the finished sheet for spring — same shifts, new date.",
+      ],
+      tips: [
+        "Share the meeting points and departure times for each bike train in the description.",
+        "Ask marshals to wear a bright vest and stand at the busiest crossings.",
+        "Plan extra bike parking — racks fill up fast on the day.",
+      ],
+      faqs: [
+        {
+          question: "We hold one in fall and one in spring. Do I need two templates?",
+          answer:
+            "No. Create the fall sheet from this template, then use Make a copy on the event page in spring to get the same shifts on a new date.",
+        },
+        {
+          question: "What time should marshals arrive?",
+          answer: "The template starts marshals at 7:15 AM; change the times to match your school's start time.",
+        },
+      ],
+    },
+    prefill: {
+      details: {
+        title: "Bike to School Day",
+        description:
+          "Ride or walk to school with us! Bike trains leave from [meeting points] at [time]. Helmets required.",
+        location: "[Your school]",
+        timezone: null,
+      },
+      anchor: nextWeekday(WED),
+      dates: { mode: "single" },
+      shifts: [
+        { name: "On the route", startTime: "07:15", endTime: "08:00", days: { kind: "all" }, tasks: [task("Crossing marshal", 4), task("Bike train leader", 2)] },
+        { name: "Welcome station", startTime: "07:30", endTime: "08:15", days: { kind: "all" }, tasks: [task("Snacks and stickers", 2), task("Bike parking helper", 2)] },
+        { name: "Things to bring", startTime: "", endTime: "", days: { kind: "all" }, tasks: [task("Fruit or granola bars", 3), task("Water", 1)] },
+      ],
+    },
+  },
+  {
+    slug: "cultural-heritage-night",
+    type: "SIGNUP_SHEET",
+    name: "Cultural & heritage night",
+    tagline: "Family tables, performances and food to share",
+    category: "school",
+    icon: "globe",
+    seo: {
+      title: "Cultural & Heritage Night Sign-Up Sheet — Free Template",
+      description:
+        "Plan a multicultural night: families host a table about their culture, share a dish, or help with setup, performances and cleanup. Free.",
+      h1: "Cultural and heritage night sign-up sheet",
+      intro: [
+        "A cultural and heritage night lets families share where they come from — food, music, games and traditions. This template gives families a spot to host a table, bring a dish to share, or help with setup, the performance stage and cleanup.",
+        "Table hosts can note their country or tradition in the sign-up, so you can plan the room and avoid gaps.",
+      ],
+      tips: [
+        "Ask table hosts to add their country or tradition in the sign-up note.",
+        "Label dishes with their name and main ingredients for guests with allergies.",
+        "Give performers a running order and a time in the description.",
+      ],
+      faqs: [
+        {
+          question: "How do I know which cultures will be represented?",
+          answer:
+            "Table hosts can add a note when they sign up, and everyone with the link can see names and notes.",
+        },
+        {
+          question: "Can families bring food without hosting a table?",
+          answer: "Yes. The food list is separate from the tables and has no time attached.",
+        },
+      ],
+    },
+    prefill: {
+      details: {
+        title: "Cultural & Heritage Night",
+        description:
+          "Celebrate the cultures in our community! Host a table, share a dish, or help out. Table hosts: please add your country or tradition in the note.",
+        location: "[Your school] cafeteria",
+        timezone: null,
+      },
+      anchor: nextWeekday(THU),
+      dates: { mode: "single" },
+      shifts: [
+        { name: "Setup", startTime: "16:30", endTime: "17:30", days: { kind: "all" }, tasks: [task("Tables and decorations", 3)] },
+        { name: "Culture tables", startTime: "17:30", endTime: "19:30", days: { kind: "all" }, tasks: [task("Table host (share a culture or tradition)", 8)] },
+        { name: "Performances", startTime: "18:00", endTime: "19:00", days: { kind: "all" }, tasks: [task("Stage helper", 2)] },
+        { name: "Cleanup", startTime: "19:30", endTime: "20:15", days: { kind: "all" }, tasks: [task("Cleanup crew", 3)] },
+        { name: "Food to share", startTime: "", endTime: "", days: { kind: "all" }, tasks: [task("Dish from your culture", 8)] },
+      ],
+    },
+  },
+  {
+    slug: "thanksgiving-lunch",
+    type: "SIGNUP_SHEET",
+    name: "Thanksgiving lunch",
+    tagline: "Servers, setup and pies for a school feast",
+    category: "school",
+    icon: "drumstick",
+    seo: {
+      title: "Thanksgiving Lunch Volunteer Sign-Up — Free Template",
+      description:
+        "Staff a school Thanksgiving lunch or family feast: setup, servers, line helpers and cleanup, plus pies and rolls to bring. Free, no accounts.",
+      h1: "Thanksgiving lunch volunteer sign-up sheet",
+      intro: [
+        "A school Thanksgiving lunch means a lot of families in the cafeteria at once. This template sets up table setup before lunch, servers and line helpers during the lunch periods, a cleanup crew, and a list of pies, rolls and supplies to bring.",
+        "It works for a class feast or a whole-school family lunch — change the times to match your lunch schedule.",
+      ],
+      tips: [
+        "Match serving shifts to your lunch periods so each grade has helpers.",
+        "Ask for store-bought desserts if your school requires them.",
+        "Share where families should park and sign in, since many will visit at once.",
+      ],
+      faqs: [
+        {
+          question: "Can I use this for a different holiday lunch?",
+          answer: "Yes. Rename the title and change the food list for any holiday or end-of-year lunch.",
+        },
+        {
+          question: "Can volunteers see which pies are already coming?",
+          answer: "Yes. Everyone with the link can see who signed up for what, including their notes.",
+        },
+      ],
+    },
+    prefill: {
+      details: {
+        title: "Thanksgiving Lunch",
+        description:
+          "Help us serve our school Thanksgiving lunch! Volunteers, please sign in at the office. Desserts should be store-bought and labeled.",
+        location: "[Your school] cafeteria",
+        timezone: null,
+      },
+      anchor: nextWeekday(THU),
+      dates: { mode: "single" },
+      shifts: [
+        { name: "Setup", startTime: "10:00", endTime: "10:45", days: { kind: "all" }, tasks: [task("Set tables", 3)] },
+        { name: "Serving", startTime: "10:45", endTime: "12:45", days: { kind: "all" }, tasks: [task("Server", 4), task("Line helper", 2)] },
+        { name: "Cleanup", startTime: "12:45", endTime: "13:30", days: { kind: "all" }, tasks: [task("Cleanup crew", 3)] },
+        { name: "Things to bring", startTime: "", endTime: "", days: { kind: "all" }, tasks: [task("Pie or dessert", 6), task("Dinner rolls", 2), task("Plates and napkins", 1)] },
+      ],
+    },
+  },
+  {
+    slug: "skate-night",
+    type: "SIGNUP_SHEET",
+    name: "Skate night",
+    tagline: "Check-in, raffle table and rink-side helpers",
+    category: "fundraising",
+    icon: "star",
+    seo: {
+      title: "School Skate Night Volunteer Sign-Up — Free Template",
+      description:
+        "Staff a school skate night fundraiser at the rink: check-in and wristbands, raffle or bake table, rink-side helpers. Free, no accounts.",
+      h1: "Skate night volunteer sign-up sheet",
+      intro: [
+        "Skate night is a favorite school fundraiser: the rink handles the skating, and a few volunteers handle everything that makes it your school's night. This template covers check-in and wristbands, a raffle or bake table, and rink-side helpers keeping an eye on younger skaters.",
+        "Shifts split the evening in two, so volunteers still get time on the rink with their own kids.",
+      ],
+      tips: [
+        "Confirm with the rink how check-in and the fundraiser share will work.",
+        "Bring a cash box and a sign for mobile payments to the raffle table.",
+        "Remind families that skate rental may cost extra.",
+      ],
+      faqs: [
+        {
+          question: "Can volunteers skate too?",
+          answer: "Yes. Shifts are split into two halves, so every volunteer has time off to skate.",
+        },
+        {
+          question: "Can I add a bake sale table?",
+          answer: "Yes. Add a task for it, or rename the raffle table — everything is editable before you create the sheet.",
+        },
+      ],
+    },
+    prefill: {
+      details: {
+        title: "School Skate Night",
+        description:
+          "Roll with us to support [cause]! Volunteers, please check in at the front desk 10 minutes before your shift.",
+        location: "[Rink name and address]",
+        timezone: null,
+      },
+      anchor: nextWeekday(FRI),
+      dates: { mode: "single" },
+      shifts: [
+        { name: "First half", startTime: "18:00", endTime: "19:00", days: { kind: "all" }, tasks: [task("Check-in and wristbands", 2), task("Raffle table", 1), task("Rink-side helper", 2)] },
+        { name: "Second half", startTime: "19:00", endTime: "20:00", days: { kind: "all" }, tasks: [task("Check-in and wristbands", 1), task("Raffle table", 1), task("Rink-side helper", 2)] },
+      ],
+    },
+  },
+  {
+    slug: "steam-night",
+    type: "SIGNUP_SHEET",
+    name: "STEAM night",
+    tagline: "Science, engineering, art and math stations",
+    category: "school",
+    icon: "flask",
+    seo: {
+      title: "STEAM Night Volunteer Sign-Up Sheet — Free Template",
+      description:
+        "Run a family STEAM night: station leaders for science, engineering, art and math, plus setup, greeters and cleanup. Free, no accounts.",
+      h1: "STEAM night volunteer sign-up sheet",
+      intro: [
+        "STEAM night turns the school into a hands-on lab for families. This template sets up station leaders for science, engineering, art and math activities, a greeter, and setup and cleanup crews.",
+        "Station leaders don't need to be experts — clear instructions at each table and a friendly adult are what make it work.",
+      ],
+      tips: [
+        "Send station leaders their activity and supply list a week ahead.",
+        "Put a timer at each station so families rotate through the room.",
+        "Ask local science or engineering professionals to lead a station.",
+      ],
+      faqs: [
+        {
+          question: "Do station leaders need a science background?",
+          answer:
+            "No. Most activities come with simple instructions; leaders guide families through them. Add details in the description.",
+        },
+        {
+          question: "Can I add more stations?",
+          answer: "Yes. Add tasks to the stations shift before creating the sheet.",
+        },
+      ],
+    },
+    prefill: {
+      details: {
+        title: "Family STEAM Night",
+        description:
+          "Explore science, technology, engineering, art and math together! Station leaders will get their activity and supplies ahead of time.",
+        location: "[Your school] gym",
+        timezone: null,
+      },
+      anchor: nextWeekday(WED),
+      dates: { mode: "single" },
+      shifts: [
+        { name: "Setup", startTime: "16:45", endTime: "17:30", days: { kind: "all" }, tasks: [task("Set up stations", 4)] },
+        { name: "Stations", startTime: "17:30", endTime: "19:00", days: { kind: "all" }, tasks: [task("Science station leader", 2), task("Engineering station leader", 2), task("Art station leader", 2), task("Math and coding station leader", 2)] },
+        { name: "Welcome", startTime: "17:30", endTime: "18:30", days: { kind: "all" }, tasks: [task("Greeter", 1)] },
+        { name: "Cleanup", startTime: "19:00", endTime: "19:45", days: { kind: "all" }, tasks: [task("Cleanup crew", 4)] },
+      ],
+    },
+  },
+  {
+    slug: "cookie-bar",
+    type: "SIGNUP_SHEET",
+    name: "Cookie bar",
+    tagline: "Cookies to bring, servers and a cashier",
+    category: "school",
+    icon: "cookie",
+    seo: {
+      title: "Cookie Bar Sign-Up Sheet — Free Template for PTAs",
+      description:
+        "Host a cookie bar after school or at an event: families bring cookies, volunteers set up, serve and run the cash table. Free, no accounts.",
+      h1: "Cookie bar sign-up sheet",
+      intro: [
+        "A cookie bar is simple to run and always popular — as long as there are enough cookies and enough hands at the table. This template has a list of cookies for families to bring, plus setup, serving and cashier shifts and a short cleanup.",
+        "Bakers can drop off in the morning without staying for the event.",
+      ],
+      tips: [
+        "Ask for cookies by the dozen, individually wrapped if your school requires it.",
+        "Put an allergen label on each tray, and keep nut-free cookies separate.",
+        "Decide on prices ahead of time and post them on a sign at the table.",
+      ],
+      faqs: [
+        {
+          question: "Is this a fundraiser?",
+          answer: "It can be. Keep the cashier task to sell cookies, or remove it to run the cookie bar as a free treat.",
+        },
+        {
+          question: "Can bakers drop off without volunteering?",
+          answer: "Yes. The cookie list has no time attached.",
+        },
+      ],
+    },
+    prefill: {
+      details: {
+        title: "Cookie Bar",
+        description:
+          "Bring a dozen cookies to share! Please drop them off at the office by noon and label any common allergens.",
+        location: "[Your school]",
+        timezone: null,
+      },
+      anchor: nextWeekday(FRI),
+      dates: { mode: "single" },
+      shifts: [
+        { name: "Cookies to bring", startTime: "", endTime: "", days: { kind: "all" }, tasks: [task("A dozen cookies", 12), task("A dozen nut-free cookies", 3)] },
+        { name: "Setup", startTime: "14:30", endTime: "15:00", days: { kind: "all" }, tasks: [task("Set up the table", 2)] },
+        { name: "Cookie bar", startTime: "15:00", endTime: "16:00", days: { kind: "all" }, tasks: [task("Server", 3), task("Cashier", 1)] },
+        { name: "Cleanup", startTime: "16:00", endTime: "16:30", days: { kind: "all" }, tasks: [task("Cleanup", 2)] },
+      ],
+    },
+  },
+  {
+    slug: "bingo-night",
+    type: "SIGNUP_SHEET",
+    name: "Bingo night",
+    tagline: "Caller, card sales, prizes and snacks",
+    category: "fundraising",
+    icon: "bingo",
+    seo: {
+      title: "Bingo Night Volunteer Sign-Up Sheet — Free Template",
+      description:
+        "Run a family bingo night fundraiser: caller, card sales, prize runners, snack table, setup and cleanup, plus prize donations. Free.",
+      h1: "Bingo night volunteer sign-up sheet",
+      intro: [
+        "Family bingo night fills the cafeteria and needs a small, organized crew. This template covers setup, a caller, card sales, prize runners, a snack table, cleanup, and a list of prize donations families can contribute.",
+        "Everyone can see which roles are filled, so you're not scrambling for a caller the night before.",
+      ],
+      tips: [
+        "Pick a caller with a strong voice — or book a microphone.",
+        "Ask families or local businesses to donate prize baskets and list them in notes.",
+        "Pre-count bingo cards and daubers into bundles for faster sales.",
+      ],
+      faqs: [
+        {
+          question: "How many volunteers does bingo night need?",
+          answer: "About 10–12 for a school cafeteria: the template's numbers are a good start, and you can change any of them.",
+        },
+        {
+          question: "Can donors sign up without volunteering?",
+          answer: "Yes. Prize donations are a separate list with no time attached.",
+        },
+      ],
+    },
+    prefill: {
+      details: {
+        title: "Family Bingo Night",
+        description:
+          "B-I-N-G-O! Help us run a fun night for families. Prize donors: please add what you're donating in the note.",
+        location: "[Your school] cafeteria",
+        timezone: null,
+      },
+      anchor: nextWeekday(FRI),
+      dates: { mode: "single" },
+      shifts: [
+        { name: "Setup", startTime: "17:00", endTime: "18:00", days: { kind: "all" }, tasks: [task("Tables and chairs", 3), task("Prize table", 1)] },
+        { name: "Bingo", startTime: "18:00", endTime: "20:00", days: { kind: "all" }, tasks: [task("Caller", 1), task("Card sales", 2), task("Prize runner", 2), task("Snack table", 2)] },
+        { name: "Cleanup", startTime: "20:00", endTime: "20:30", days: { kind: "all" }, tasks: [task("Cleanup crew", 3)] },
+        { name: "Prize donations", startTime: "", endTime: "", days: { kind: "all" }, tasks: [task("Prize basket or gift card", 6)] },
+      ],
+    },
+  },
+  {
+    slug: "school-basketball-game",
+    type: "SIGNUP_SHEET",
+    name: "School basketball game",
+    tagline: "Admission, concessions and the scoreboard",
+    category: "sports",
+    icon: "medal",
+    seo: {
+      title: "School Basketball Game Volunteer Sign-Up — Free Template",
+      description:
+        "Staff a school basketball game: admission table, concessions, scoreboard and clock, and cleanup. Parents claim a spot with just a name. Free.",
+      h1: "School basketball game volunteer sign-up sheet",
+      intro: [
+        "A home basketball game needs more than players: someone at the door, someone running the clock, and a concessions crew. This template covers admission, concessions, scoreboard and clock, and a quick cleanup after the final buzzer.",
+        "Parents of players and fans alike can pick a job for the game and still catch most of it.",
+      ],
+      tips: [
+        "Have a quick walkthrough of the scoreboard controls before tip-off.",
+        "Bring change and a sign for mobile payments to the admission and concessions tables.",
+        "Replace [Opponent] in the title so families know which game it is.",
+      ],
+      faqs: [
+        {
+          question: "We have a game every week. Can the sheet repeat?",
+          answer:
+            "Yes. Switch the event to repeat (for example every Friday) before creating it, and every game gets the same jobs.",
+        },
+        {
+          question: "Can I use this for volleyball or other sports?",
+          answer: "Yes. Change the title and tasks — the structure works for any home game.",
+        },
+      ],
+    },
+    prefill: {
+      details: {
+        title: "Basketball Game vs. [Opponent]",
+        description:
+          "Help us host our home game! Scoreboard volunteers, please arrive 15 minutes early for a quick walkthrough.",
+        location: "[Your school] gym",
+        timezone: null,
+      },
+      anchor: nextWeekday(FRI),
+      dates: { mode: "single" },
+      shifts: [
+        { name: "Admission", startTime: "17:00", endTime: "18:00", days: { kind: "all" }, tasks: [task("Admission table", 2)] },
+        { name: "Concessions", startTime: "17:30", endTime: "19:00", days: { kind: "all" }, tasks: [task("Cashier", 1), task("Snack table", 2)] },
+        { name: "Scorer's table", startTime: "17:45", endTime: "19:00", days: { kind: "all" }, tasks: [task("Scoreboard", 1), task("Game clock", 1)] },
+        { name: "Cleanup", startTime: "19:00", endTime: "19:30", days: { kind: "all" }, tasks: [task("Cleanup crew", 2)] },
+      ],
+    },
+  },
+  {
+    slug: "spring-fundraiser",
+    type: "SIGNUP_SHEET",
+    name: "Spring fundraiser",
+    tagline: "Order sorting and pickup day",
+    category: "fundraising",
+    icon: "piggy-bank",
+    seo: {
+      title: "School Fundraiser Volunteer Sign-Up — Free Template",
+      description:
+        "Staff a school fundraiser pickup day: count order forms, sort orders, run the pickup table and help carry to cars. Free, no accounts.",
+      h1: "Spring fundraiser volunteer sign-up sheet",
+      intro: [
+        "Product fundraisers — flowers, cookie dough, wrapping paper — end with a big pickup day. This template covers counting order forms ahead of time, sorting orders, and a pickup table with car runners so families are in and out quickly.",
+        "Use it for a spring fundraiser, then make a copy for the fall sale.",
+      ],
+      tips: [
+        "Sort orders alphabetically by student or by class before pickup opens.",
+        "Have a list of unclaimed orders and a plan for them at the end of the day.",
+        "Share pickup times and location in the school newsletter too.",
+      ],
+      faqs: [
+        {
+          question: "Our fundraiser is a fun run, not a product sale. Does this work?",
+          answer:
+            "Change the shifts to match — for example course marshals, water table and check-in. Every task is editable before you create the sheet.",
+        },
+        {
+          question: "Can I reuse this for the fall fundraiser?",
+          answer: "Yes. Use Make a copy on the event page to get the same shifts with new dates.",
+        },
+      ],
+    },
+    prefill: {
+      details: {
+        title: "Spring Fundraiser",
+        description:
+          "Thank you for supporting our fundraiser! Order pickup is [date] from 3:30 to 6:00 PM. Volunteers, please check in at the pickup table.",
+        location: "[Your school] gym",
+        timezone: null,
+      },
+      anchor: nextWeekday(FRI),
+      dates: { mode: "single" },
+      shifts: [
+        { name: "Before pickup day", startTime: "", endTime: "", days: { kind: "all" }, tasks: [task("Count order forms", 2)] },
+        { name: "Sorting", startTime: "14:00", endTime: "15:30", days: { kind: "all" }, tasks: [task("Sort orders", 4)] },
+        { name: "Pickup", startTime: "15:30", endTime: "18:00", days: { kind: "all" }, tasks: [task("Pickup table", 3), task("Car runner", 2)] },
+      ],
+    },
+  },
+  {
+    slug: "restaurant-spirit-night",
+    type: "SIGNUP_SHEET",
+    name: "Restaurant spirit night",
+    tagline: "Dine-out fundraiser: greeters and promoters",
+    category: "fundraising",
+    icon: "restaurant",
+    seo: {
+      title: "Restaurant Spirit Night Sign-Up — Dining for Dollars",
+      description:
+        "Promote a restaurant spirit night (dining for dollars): greeters at the door, flyer and social media helpers. Free, no accounts.",
+      h1: "Restaurant spirit night sign-up sheet",
+      intro: [
+        "Restaurant spirit nights — also called dining for dollars or dine-out nights — raise money when a local restaurant donates part of the evening's sales. The more families who come, the more you raise, so this template focuses on promotion and a friendly welcome.",
+        "Volunteers can share the event online and hang flyers beforehand, and greeters welcome families at the door during the evening.",
+      ],
+      tips: [
+        "Check whether the restaurant needs customers to mention the school or show a flyer.",
+        "Post reminders the week before and the morning of.",
+        "Ask greeters to wear school shirts so families can spot them.",
+      ],
+      faqs: [
+        {
+          question: "What does a greeter do?",
+          answer:
+            "Greeters welcome families at the door, remind them to mention the school at checkout, and answer questions.",
+        },
+        {
+          question: "Can we hold spirit nights every month?",
+          answer: "Yes. Make a copy of the event for each one, or switch it to repeat monthly before creating it.",
+        },
+      ],
+    },
+    prefill: {
+      details: {
+        title: "Restaurant Spirit Night",
+        description:
+          "Eat out and support [cause]! [Restaurant] donates [percentage] of sales from 5 to 8 PM. Mention [your school] when you order.",
+        location: "[Restaurant name and address]",
+        timezone: null,
+      },
+      anchor: nextWeekday(FRI),
+      dates: { mode: "single" },
+      shifts: [
+        { name: "Spread the word", startTime: "", endTime: "", days: { kind: "all" }, tasks: [task("Share on social media", 5), task("Hang flyers", 3)] },
+        { name: "Early greeters", startTime: "17:00", endTime: "18:30", days: { kind: "all" }, tasks: [task("Greeter", 2)] },
+        { name: "Late greeters", startTime: "18:30", endTime: "20:00", days: { kind: "all" }, tasks: [task("Greeter", 2)] },
+      ],
     },
   },
 
@@ -1034,6 +1704,23 @@ export const POPULAR_TEMPLATE_LINKS: Array<{ label: string; path: string }> = [
   ["concession-stand", "Concession stand schedule"],
   ["team-meeting", "Team meeting poll"],
 ].map(([slug, label]) => ({ label, path: templatePath(getTemplate(slug)!) }));
+
+/**
+ * The short list the header menu shows; the hub (/templates) lists them all.
+ * Kept small on purpose so the header doesn't turn into a site map.
+ */
+export const HEADER_MENU_SLUGS = [
+  "back-to-school-night",
+  "staff-appreciation-week",
+  "book-fair",
+  "parent-teacher-conferences",
+  "potluck",
+  "bake-sale",
+  "team-meeting",
+  "pta-meeting",
+  "book-club",
+  "happy-hour",
+];
 
 export function getTemplate(slug: string | null | undefined): EventTemplate | null {
   if (!slug) return null;

@@ -2,7 +2,9 @@ import { useEffect, useRef } from "react";
 import { Link, useLocation } from "react-router";
 import { ArrowRight, ChevronDown, LayoutTemplate } from "lucide-react";
 import TemplateIcon from "~/components/TemplateIcon";
-import { TEMPLATES, templatePath } from "~/utils/templates";
+import { HEADER_MENU_SLUGS, TEMPLATES, getTemplate, templatePath, type EventTemplate } from "~/utils/templates";
+
+const MENU = HEADER_MENU_SLUGS.map(getTemplate).filter((t): t is EventTemplate => t !== null);
 
 const GROUPS = [
   { label: "Sign-up sheets", type: "SIGNUP_SHEET", accent: "text-blue-600" },
@@ -10,7 +12,7 @@ const GROUPS = [
 ] as const;
 
 /**
- * Header menu listing every template page. A native <details> so the links
+ * Header menu with a short list of template pages (the hub has them all). A native <details> so the links
  * are in the server-rendered HTML (crawlable, works before hydration); the
  * effects only add closing on navigation, outside click and Escape.
  */
@@ -54,7 +56,7 @@ export default function TemplatesMenu() {
             <div key={g.type}>
               <p className="px-2 pb-1.5 text-[10px] font-bold uppercase tracking-wide text-slate-400">{g.label}</p>
               <ul>
-                {TEMPLATES.filter((t) => t.type === g.type).map((t) => (
+                {MENU.filter((t) => t.type === g.type).map((t) => (
                   <li key={t.slug}>
                     <Link
                       to={templatePath(t)}
@@ -73,7 +75,7 @@ export default function TemplatesMenu() {
           to="/templates"
           className="mt-3 pt-3 border-t border-slate-100 flex items-center gap-1 px-2 text-xs font-bold text-slate-600 hover:text-slate-900"
         >
-          All templates <ArrowRight className="w-3.5 h-3.5" />
+          All {TEMPLATES.length} templates <ArrowRight className="w-3.5 h-3.5" />
         </Link>
       </div>
     </details>
