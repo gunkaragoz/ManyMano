@@ -821,19 +821,19 @@ export const TEMPLATES: EventTemplate[] = [
     },
   },
   {
-    slug: "cultural-heritage-night",
+    slug: "culture-and-heritage-night",
     type: "SIGNUP_SHEET",
-    name: "Cultural & heritage night",
+    name: "Culture and heritage night",
     tagline: "Family tables, performances and food to share",
     category: "school",
     icon: "globe",
     seo: {
-      title: "Cultural & Heritage Night Sign-Up Sheet — Free Template",
+      title: "Culture and Heritage Night Sign-Up Sheet — Free Template",
       description:
         "Plan a multicultural night: families host a table about their culture, share a dish, or help with setup, performances and cleanup. Free.",
-      h1: "Cultural and heritage night sign-up sheet",
+      h1: "Culture and heritage night sign-up sheet",
       intro: [
-        "A cultural and heritage night lets families share where they come from — food, music, games and traditions. This template gives families a spot to host a table, bring a dish to share, or help with setup, the performance stage and cleanup.",
+        "A culture and heritage night lets families share where they come from — food, music, games and traditions. This template gives families a spot to host a table, bring a dish to share, or help with setup, the performance stage and cleanup.",
         "Table hosts can note their country or tradition in the sign-up, so you can plan the room and avoid gaps.",
       ],
       tips: [
@@ -855,7 +855,7 @@ export const TEMPLATES: EventTemplate[] = [
     },
     prefill: {
       details: {
-        title: "Cultural & Heritage Night",
+        title: "Culture and Heritage Night",
         description:
           "Celebrate the cultures in our community! Host a table, share a dish, or help out. Table hosts: please add your country or tradition in the note.",
         location: "[Your school] cafeteria",
@@ -1711,7 +1711,7 @@ export const POPULAR_TEMPLATE_LINKS: Array<{ label: string; path: string }> = [
  */
 export const HEADER_MENU_SLUGS = [
   // Five of each type, picked by likely search demand (no usage data yet).
-  "potluck",
+  "book-fair",
   "meal-train",
   "parent-teacher-conferences",
   "staff-appreciation-week",
