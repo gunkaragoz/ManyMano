@@ -253,11 +253,35 @@ function isHidden(el: Element): boolean {
 // inList: inside a list item, where a "### heading" line would break the list.
 type Ctx = { base: string; inline: boolean; inList: boolean; pres: string[] };
 
+/**
+ * Page text is literal: escape Markdown syntax so user content (an event
+ * title, a participant named "[x](https://…)" or "# Hi") stays text and
+ * cannot become a link, heading, list item or raw HTML. Line-start markers
+ * are escaped at the start of every text node — harmless mid-line.
+ */
+function escapeText(s: string): string {
+  return s
+    .replace(/[\\`*_[\]<>|~]/g, "\\$&")
+    .replace(/^(\s*)([#+=-])/, "$1\\$2")
+    .replace(/^(\s*\d+)([.)])(?=\s|$)/, "$1\\$2");
+}
+
+function longestRun(s: string, ch: string): number {
+  let best = 0;
+  let run = 0;
+  for (const c of s) {
+    run = c === ch ? run + 1 : 0;
+    best = Math.max(best, run);
+  }
+  return best;
+}
+
 function resolveUrl(href: string, base: string): string | null {
   const h = href.trim();
   if (!h || h.startsWith("#") || /^(javascript|data):/i.test(h)) return null;
   try {
-    return new URL(h, base).toString();
+    // Parens and pipes would end the (url) early or split a table cell.
+    return new URL(h, base).toString().replace(/[()|]/g, (c) => `%${c.charCodeAt(0).toString(16).toUpperCase()}`);
   } catch {
     return null;
   }
@@ -324,11 +348,6 @@ function renderList(el: Element, ctx: Ctx): string {
   return items.length ? block(items.join("\n"), ctx) : "";
 }
 
-/** Escape backslashes first, then pipes, so neither can break the row. */
-function escapeCell(text: string): string {
-  return text.replace(/\\/g, "\\\\").replace(/\|/g, "\\|");
-}
-
 /** Rows of a table in document order, flagged when they belong to <thead>. */
 function tableRows(el: Element, inHead = false, out: { tr: Element; head: boolean }[] = []) {
   for (const child of el.children) {
@@ -361,7 +380,8 @@ function renderTable(el: Element, ctx: Ctx): string {
     for (const c of tr.children) {
       if (typeof c === "string" || (c.tag !== "td" && c.tag !== "th") || isHidden(c)) continue;
       while (grid[r][col]) col++;
-      const text = escapeCell(inlineText(renderChildren(c, { ...ctx, inline: true })));
+      // Text nodes are already escaped (including "|"), so cells are safe as-is.
+      const text = inlineText(renderChildren(c, { ...ctx, inline: true }));
       const cellId = id++;
       const rs = span(c.attrs.rowspan);
       const cs = span(c.attrs.colspan);
@@ -409,7 +429,7 @@ function renderTable(el: Element, ctx: Ctx): string {
 }
 
 function renderNode(node: Node, ctx: Ctx): string {
-  if (typeof node === "string") return node.replace(/\s+/g, " ");
+  if (typeof node === "string") return escapeText(node.replace(/\s+/g, " "));
   const el = node;
   if (SKIP.has(el.tag) || isHidden(el)) return "";
 
@@ -421,7 +441,7 @@ function renderNode(node: Node, ctx: Ctx): string {
     case "img": {
       const alt = (el.attrs.alt ?? "").trim();
       const src = resolveUrl(el.attrs.src ?? "", ctx.base);
-      return alt && src ? `![${alt}](${src})` : "";
+      return alt && src ? `![${escapeText(alt.replace(/\s+/g, " "))}](${src})` : "";
     }
     case "a": {
       const text = inlineText(renderChildren(el, { ...ctx, inline: true }));
@@ -437,13 +457,17 @@ function renderNode(node: Node, ctx: Ctx): string {
       return wrapInline(renderChildren(el, ctx), "*");
     case "code": {
       const code = textOf(el).replace(/\s+/g, " ").trim();
-      return code ? `\`${code}\`` : "";
+      if (!code) return "";
+      const fence = "`".repeat(longestRun(code, "`") + 1);
+      const pad = code.startsWith("`") || code.endsWith("`") ? " " : "";
+      return `${fence}${pad}${code}${pad}${fence}`;
     }
     case "pre": {
       const code = textOf(el).replace(/^\n/, "").replace(/\s+$/, "");
       if (!code) return "";
-      if (ctx.inline) return code.replace(/\s+/g, " ");
-      ctx.pres.push("```\n" + code + "\n```");
+      if (ctx.inline) return escapeText(code.replace(/\s+/g, " "));
+      const fence = "`".repeat(Math.max(3, longestRun(code, "`") + 1));
+      ctx.pres.push(`${fence}\n${code}\n${fence}`);
       return `\n\n${PRE}${ctx.pres.length - 1}${PRE}\n\n`;
     }
     case "h1":

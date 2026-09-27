@@ -150,6 +150,43 @@ describe("htmlToMarkdown", () => {
     );
   });
 
+  it("keeps user text literal: a Markdown link in a name stays text", () => {
+    const md = htmlToMarkdown(
+      page(
+        "<table><tr><th>Participants</th><th>Mon</th></tr>" +
+          '<tr><td>[support](https://attacker.example)</td><td><span class="sr-only">Yes</span></td></tr></table>'
+      ),
+      PAGE
+    );
+    expect(md).toContain("| \\[support\\](https://attacker.example) | Yes |");
+    expect(md).not.toMatch(/(^|[^\\])\[support\]\(/);
+  });
+
+  it("escapes line-start markers, emphasis and raw HTML in text, not the converter's own syntax", () => {
+    const md = htmlToMarkdown(
+      page(
+        "<p># Not a heading</p><p>- not a list</p><p>1. not ordered</p><p>&gt; not a quote</p>" +
+          "<p>*stars* _under_ ~strike~ &lt;script&gt;x&lt;/script&gt; and <b>real bold</b></p>" +
+          '<a href="/wiki/A_(b)">wiki link</a>' +
+          '<img src="/i.png" alt="x](https://evil.example)"/>'
+      ),
+      PAGE
+    );
+    expect(md).toContain("\\# Not a heading");
+    expect(md).toContain("\\- not a list");
+    expect(md).toContain("1\\. not ordered");
+    expect(md).toContain("\\> not a quote");
+    expect(md).toContain("\\*stars\\* \\_under\\_ \\~strike\\~ \\<script\\>x\\</script\\> and **real bold**");
+    expect(md).toContain("[wiki link](https://example.com/wiki/A_%28b%29)");
+    expect(md).toContain("![x\\](https://evil.example)](https://example.com/i.png)");
+  });
+
+  it("widens code fences when the code contains backticks", () => {
+    const md = htmlToMarkdown(page("<p><code>a`b</code></p><pre>```\nx\n```</pre>"), PAGE);
+    expect(md).toContain("``a`b``");
+    expect(md).toContain("````\n```\nx\n```\n````");
+  });
+
   it("escapes backslashes in table cells so a trailing \\ cannot eat the pipe", () => {
     const md = htmlToMarkdown(page("<table><tr><th>Path</th><th>Note</th></tr><tr><td>C:\\dir\\</td><td>a\\|b</td></tr></table>"), PAGE);
     expect(md).toContain("| C:\\\\dir\\\\ | a\\\\\\|b |");
