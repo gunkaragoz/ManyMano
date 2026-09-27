@@ -1,4 +1,5 @@
 import {
+  Beer,
   Book,
   BookOpen,
   Briefcase,
@@ -6,11 +7,15 @@ import {
   Dices,
   Droplets,
   Heart,
+  House,
+  Music,
   Package,
   PartyPopper,
   Popcorn,
+  Presentation,
   School,
   Soup,
+  Tent,
   Trophy,
   Utensils,
   Wine,
@@ -34,6 +39,11 @@ const ICONS: Record<TemplateIconKey, LucideIcon> = {
   trophy: Trophy,
   dice: Dices,
   wine: Wine,
+  beer: Beer,
+  presentation: Presentation,
+  house: House,
+  tent: Tent,
+  music: Music,
 };
 
 export default function TemplateIcon({ icon, className }: { icon: TemplateIconKey; className?: string }) {

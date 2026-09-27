@@ -41,7 +41,12 @@ export type TemplateIcon =
   | "book-open"
   | "trophy"
   | "dice"
-  | "wine";
+  | "wine"
+  | "beer"
+  | "presentation"
+  | "house"
+  | "tent"
+  | "music";
 
 type TemplateBase = {
   slug: string;
@@ -805,6 +810,212 @@ export const TEMPLATES: EventTemplate[] = [
       dayOffsets: [0, 1, 7, 8, 14, 15],
       startTimes: ["12:00"],
       durationMinutes: 180,
+    },
+  },
+  {
+    slug: "happy-hour",
+    type: "TIME_POLL",
+    name: "Happy hour",
+    tagline: "Thursday or Friday after work, two weeks",
+    category: "work",
+    icon: "beer",
+    seo: {
+      title: "Happy Hour Poll — Pick an After-Work Date, Free",
+      description:
+        "Plan an after-work happy hour: vote on Thursday and Friday evenings over the next two weeks. Free, no accounts, no group-chat back-and-forth.",
+      h1: "Happy hour scheduling poll",
+      intro: [
+        "An after-work happy hour falls apart when the thread fills up with \"Thursday works for me\" and \"not this week\". This poll offers Thursday and Friday evenings over the next two weeks, starting at 5:30 PM for two hours, so coworkers or friends can mark what works in one place.",
+        "The evening with the most support is easy to spot. Lock it in and everyone gets the time and place on their calendar.",
+      ],
+      tips: [
+        "Pick the place before sharing, or say you'll choose it once you know the headcount.",
+        "Share the poll a week ahead — Friday evenings fill up fast.",
+        "If some people work remotely, set the location to somewhere central or add a video link for a virtual round.",
+      ],
+      faqs: [
+        {
+          question: "Can people vote without an account?",
+          answer: "Yes. They open the link, enter their name, and mark Yes, Maybe or No for each evening.",
+        },
+        {
+          question: "Can I add a Wednesday option?",
+          answer: "Yes. Add, remove or change any option before creating the poll.",
+        },
+      ],
+    },
+    poll: {
+      title: "Happy Hour",
+      description: "Drinks after work! Vote for every evening that works for you. Place: [bar or restaurant].",
+      anchor: nextWeekday(THU),
+      dayOffsets: [0, 1, 7, 8],
+      startTimes: ["17:30"],
+      durationMinutes: 120,
+    },
+  },
+  {
+    slug: "pta-meeting",
+    type: "TIME_POLL",
+    name: "PTA meeting",
+    tagline: "Weeknight evenings over two weeks",
+    category: "school",
+    icon: "presentation",
+    seo: {
+      title: "PTA Meeting Poll — Find a Night That Works, Free",
+      description:
+        "Schedule a PTA, PTO or school board meeting: members vote on six weeknight evenings over the next two weeks. Free, no accounts needed.",
+      h1: "PTA meeting scheduling poll",
+      intro: [
+        "Parent volunteers juggle work, practices and bedtimes, so a meeting night that suits everyone is hard to guess. This poll offers Tuesday, Wednesday and Thursday evenings at 7:00 PM over the next two weeks, one hour each.",
+        "Board members and parents vote on every option, and the best night shows up at a glance. It works just as well for PTO, booster club or school committee meetings.",
+      ],
+      tips: [
+        "Put the agenda in the description so people know whether it's a quick check-in or a planning session.",
+        "Add a video link as the location if some members join remotely.",
+        "Check the school calendar for concerts and games before sharing — then remove those nights.",
+      ],
+      faqs: [
+        {
+          question: "Can I use this for a PTO or booster club?",
+          answer: "Yes. Change the title and description — the poll works for any school group.",
+        },
+        {
+          question: "What happens after everyone votes?",
+          answer:
+            "You lock the winning time, and members can add it to Google Calendar or download an .ics file for Apple Calendar or Outlook.",
+        },
+      ],
+    },
+    poll: {
+      title: "PTA Meeting",
+      description: "Which evening works for our next meeting? Agenda: [topics]. Location: [school library or video link].",
+      anchor: nextWeekday(TUE),
+      dayOffsets: [0, 1, 2, 7, 8, 9],
+      startTimes: ["19:00"],
+      durationMinutes: 60,
+    },
+  },
+  {
+    slug: "family-reunion",
+    type: "TIME_POLL",
+    name: "Family reunion",
+    tagline: "Weekend afternoons a few weeks out",
+    category: "social",
+    icon: "house",
+    seo: {
+      title: "Family Reunion Poll — Pick the Date Together, Free",
+      description:
+        "Find a family reunion date that works for everyone: vote on weekend afternoons three to five weeks out. Free, no accounts, easy for all ages.",
+      h1: "Family reunion scheduling poll",
+      intro: [
+        "Family reunions need a date that works for relatives in different towns, schedules and generations. This poll offers Saturday and Sunday afternoons three, four and five weekends from now, so people have time to plan travel.",
+        "Relatives vote with just their name — nothing to install — and you can see which weekend brings the most of the family together.",
+      ],
+      tips: [
+        "Ask one person per household to vote so the counts reflect families, not individuals — or ask everyone, and note it in the description.",
+        "Move the options further out if people need to book flights.",
+        "Once the date is locked, plan the food with a potluck sign-up sheet.",
+      ],
+      faqs: [
+        {
+          question: "Relatives live in different time zones. Is that a problem?",
+          answer: "No. Each option is shown in every voter's own time zone.",
+        },
+        {
+          question: "Can older relatives vote without an account?",
+          answer: "Yes. They open the link, type their name, and tap Yes, Maybe or No. No app or password.",
+        },
+      ],
+    },
+    poll: {
+      title: "Family Reunion",
+      description: "Let's pick a weekend to get the whole family together! Vote for every date that could work.",
+      anchor: nextWeekday(SAT),
+      dayOffsets: [14, 15, 21, 22, 28, 29],
+      startTimes: ["13:00"],
+      durationMinutes: 240,
+    },
+  },
+  {
+    slug: "neighborhood-get-together",
+    type: "TIME_POLL",
+    name: "Neighborhood get-together",
+    tagline: "Saturday late morning or afternoon",
+    category: "community",
+    icon: "tent",
+    seo: {
+      title: "Neighborhood Get-Together Poll — Block Party Date",
+      description:
+        "Plan a block party, street picnic or neighborhood social: neighbors vote on Saturday late mornings and afternoons over three weekends. Free.",
+      h1: "Neighborhood get-together scheduling poll",
+      intro: [
+        "A block party or street picnic works best when most of the street can come. This poll offers a late-morning and an afternoon option on each of the next three Saturdays, so neighbors can say what fits around sports, errands and naps.",
+        "Share the link in your neighborhood group or on a flyer with a QR code, and see which Saturday gets the most yeses.",
+      ],
+      tips: [
+        "Print the event's QR code on a flyer for neighbors who aren't in the group chat.",
+        "Check whether your area needs a permit to close the street, and allow time for it.",
+        "After the date is set, use a sign-up sheet for grills, tables and dishes.",
+      ],
+      faqs: [
+        {
+          question: "Can neighbors vote without giving their email?",
+          answer: "Yes. A name is enough. An email is optional and only used to send them a link to change their vote.",
+        },
+        {
+          question: "Can I share the poll on paper?",
+          answer: "Yes. Every event has a QR code you can print, which opens the poll on a phone.",
+        },
+      ],
+    },
+    poll: {
+      title: "Neighborhood Get-Together",
+      description: "Let's get the street together! Vote for every Saturday time that works. Kids and dogs welcome.",
+      anchor: nextWeekday(SAT),
+      dayOffsets: [0, 7, 14],
+      startTimes: ["11:00", "16:00"],
+      durationMinutes: 180,
+    },
+  },
+  {
+    slug: "band-rehearsal",
+    type: "TIME_POLL",
+    name: "Band rehearsal",
+    tagline: "Evenings this week, Saturday included",
+    category: "social",
+    icon: "music",
+    seo: {
+      title: "Band Rehearsal Poll — Find a Practice Time, Free",
+      description:
+        "Get the whole band in one room: vote on two-hour evening rehearsal slots this week, Saturday included. Works for bands, choirs and ensembles. Free.",
+      h1: "Band rehearsal scheduling poll",
+      intro: [
+        "A rehearsal is only useful when everyone shows up. This poll offers two-hour evening slots Monday through Thursday and on Saturday this week, and each member marks what they can make.",
+        "It works for a garage band, a choir section or a community orchestra — anywhere one missing player means rescheduling.",
+      ],
+      tips: [
+        "Put the set list or pieces to practice in the description so people come prepared.",
+        "If you rent a room, check which slots are free before you share the poll.",
+        "Make a copy of the poll each week to keep a regular rehearsal going.",
+      ],
+      faqs: [
+        {
+          question: "Can I see who can't make a slot?",
+          answer: "Yes. Every vote is listed by name, so you can see exactly who marked No or Maybe.",
+        },
+        {
+          question: "Can I reuse the same poll every week?",
+          answer: "Use Make a copy on the poll's page: you get the same times moved to the coming days, with no votes.",
+        },
+      ],
+    },
+    poll: {
+      title: "Band Rehearsal",
+      description: "When can everyone rehearse this week? We'll work on: [songs or pieces]. Room: [location].",
+      anchor: nextWeekday(MON),
+      dayOffsets: [0, 1, 2, 3, 5],
+      startTimes: ["19:00"],
+      durationMinutes: 120,
     },
   },
 ];

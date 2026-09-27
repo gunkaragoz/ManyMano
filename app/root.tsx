@@ -235,7 +235,7 @@ export default function App() {
 
         {/* Global Minimal Navigation */}
         <header className="sticky top-0 z-40 bg-[#fafafc]/80 backdrop-blur-md border-b border-slate-200/80 transition-all">
-          <div className="max-w-5xl mx-auto px-6 sm:px-8 h-18 py-4 flex items-center justify-between gap-3">
+          <div className="max-w-5xl mx-auto px-4 sm:px-8 h-18 py-4 flex items-center justify-between gap-3">
             <Link to="/" className="flex items-center gap-3 group shrink-0">
               <div className="w-8 h-8 rounded-lg bg-white border-2 border-blue-600 flex items-center justify-center text-green-600 shadow-sm group-hover:bg-blue-50 transition-colors">
                 <HeartHandshake className="w-5 h-5" aria-hidden="true" />
@@ -289,7 +289,8 @@ export default function App() {
                 className="inline-flex items-center gap-1.5 px-4 py-2 text-xs font-semibold rounded-full bg-slate-900 text-white hover:bg-slate-800 shadow-sm transition-all hover:scale-[1.02] active:scale-[0.98]"
               >
                 <span>+</span>
-                <span>Create Event</span>
+                <span className="sm:hidden">Create</span>
+                <span className="hidden sm:inline">Create Event</span>
               </Link>
             </nav>
           </div>
