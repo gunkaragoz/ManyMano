@@ -181,6 +181,26 @@ describe("htmlToMarkdown", () => {
     expect(md).toContain("![x\\](https://evil.example)](https://example.com/i.png)");
   });
 
+  it("keeps chart data from role=img elements: label plus per-point <title>s", () => {
+    const md = htmlToMarkdown(
+      page(
+        '<svg role="img" aria-label="Daily activity over 2 days, peak 5 actions in a day">' +
+          "<g><title>Sep 1: events 1 · signups 3 · votes 1</title><rect/></g>" +
+          "<g><title>Sep 2: events 0 · signups 0 · votes 0</title><line/></g>" +
+          '<text x="1">5</text></svg>' +
+          '<div role="img" aria-label="42%"><div style="width:42%"></div></div>' +
+          '<p>Icon <svg aria-hidden="true"><title>decor</title></svg>only</p>'
+      ),
+      PAGE
+    );
+    expect(md).toContain(
+      "Daily activity over 2 days, peak 5 actions in a day\n\n" +
+        "- Sep 1: events 1 · signups 3 · votes 1\n- Sep 2: events 0 · signups 0 · votes 0"
+    );
+    expect(md).toContain("42%");
+    expect(md).not.toContain("decor");
+  });
+
   it("widens code fences when the code contains backticks", () => {
     const md = htmlToMarkdown(page("<p><code>a`b</code></p><pre>```\nx\n```</pre>"), PAGE);
     expect(md).toContain("``a`b``");

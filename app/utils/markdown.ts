@@ -428,10 +428,32 @@ function renderTable(el: Element, ctx: Ctx): string {
   return block(out.join("\n"), ctx);
 }
 
+/**
+ * role="img" elements (charts, meters) carry their meaning in aria-label and,
+ * for SVG charts, per-point <title> tooltips (e.g. the Pulse daily bars).
+ * Emit those as text; the drawing itself is dropped. Decorative icons are
+ * aria-hidden and never get here.
+ */
+function renderImageRole(el: Element, ctx: Ctx): string {
+  const label = escapeText((el.attrs["aria-label"] ?? "").replace(/\s+/g, " ").trim());
+  if (ctx.inline) return label;
+  const points = [
+    ...new Set(
+      findAll(el, (e) => e.tag === "title")
+        .map((t) => textOf(t).replace(/\s+/g, " ").trim())
+        .filter((t) => t && t !== el.attrs["aria-label"])
+    ),
+  ];
+  const list = points.map((t) => `- ${escapeText(t)}`).join("\n");
+  return block([label, list].filter(Boolean).join("\n\n"), ctx);
+}
+
 function renderNode(node: Node, ctx: Ctx): string {
   if (typeof node === "string") return escapeText(node.replace(/\s+/g, " "));
   const el = node;
-  if (SKIP.has(el.tag) || isHidden(el)) return "";
+  if (isHidden(el)) return "";
+  if (el.attrs.role === "img") return renderImageRole(el, ctx);
+  if (SKIP.has(el.tag)) return "";
 
   switch (el.tag) {
     case "br":
