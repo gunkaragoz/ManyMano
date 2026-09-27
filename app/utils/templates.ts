@@ -563,9 +563,10 @@ export const TEMPLATES: EventTemplate[] = [
         location: "[Your school] workroom",
         timezone: null,
       },
-      // From the next Thursday — or the first Thursday of September when the
-      // template is opened over the summer — until the next June 15.
-      anchor: { kind: "weekday", weekday: THU, minOffsetDays: 1, outside: { from: "06-16", to: "08-31" } },
+      // From the next Thursday until the next June 15 — or from the first
+      // Thursday of September when opened in June or over the summer, so a
+      // sheet made in early June isn't just the year's last week or two.
+      anchor: { kind: "weekday", weekday: THU, minOffsetDays: 1, outside: { from: "06-01", to: "08-31" } },
       dates: { mode: "repeat", rule: { type: "weekly", interval: 1, weekdays: [THU] }, ends: { untilMonthDay: "06-15" } },
       shifts: [{ name: "Thursday folders", startTime: "14:00", endTime: "14:30", days: { kind: "all" }, tasks: [task("Folder helper", 1)] }],
     },

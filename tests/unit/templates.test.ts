@@ -178,6 +178,9 @@ describe("template catalog", () => {
     // Summer: waits for September.
     expect(at("2027-07-10").start).toBe("2027-09-02");
     expect(at("2027-06-14").start).toBe("2027-09-02");
+    // Early June: next school year, not a one-week sheet.
+    expect(at("2027-06-07").start).toBe("2027-09-02");
+    expect(at("2027-06-07").dates.length).toBeGreaterThan(30);
   });
 
   it("header menu lists a short set of real templates", () => {
