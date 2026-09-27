@@ -111,6 +111,17 @@ describe("gating", () => {
     expect((await send(rpc("tools/list"), { Origin: "null" })).res.status).toBe(403);
   });
 
+  it("accepts the serving host's own origin on previews, where SITE_URL names another host", async () => {
+    const preview = "https://feat-x-manymano.example.workers.dev";
+    const req = (origin: string) => {
+      const r = post(rpc("tools/list"), { Origin: origin });
+      return new Request(`${preview}/mcp`, { method: "POST", headers: r.headers, body: JSON.stringify(rpc("tools/list")) });
+    };
+    expect((await handleMcp(req(preview), env, ctx)).status).toBe(200);
+    expect((await handleMcp(req(SITE_URL), env, ctx)).status).toBe(200);
+    expect((await handleMcp(req("https://other-manymano.example.workers.dev"), env, ctx)).status).toBe(403);
+  });
+
   it("marks every response no-store", async () => {
     for (const body of [rpc("tools/list"), "not json", call("get_event", { eventId: "nope" })]) {
       const { res } = await send(body);

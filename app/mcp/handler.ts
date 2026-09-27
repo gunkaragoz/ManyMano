@@ -79,8 +79,12 @@ export async function handleMcp(request: Request, env: CloudflareEnv, ctx: Ctx):
   if (request.method !== "POST") return plain(405, "Method not allowed. MCP here is POST-only.", { Allow: "POST" });
 
   const site = getSiteConfig(env);
+  // Browser calls must be same-origin: the host serving this request (branch
+  // previews run on changing hosts that SITE_URL doesn't name) or SITE_URL.
   const origin = request.headers.get("origin");
-  if (origin !== null && origin !== new URL(site.siteUrl).origin) return plain(403, "Origin not allowed.");
+  if (origin !== null && origin !== new URL(request.url).origin && origin !== new URL(site.siteUrl).origin) {
+    return plain(403, "Origin not allowed.");
+  }
 
   // Cloudflare sets cf-connecting-ip; forwarded-for headers are never trusted.
   const clientIp = request.headers.get("cf-connecting-ip") || "unknown";

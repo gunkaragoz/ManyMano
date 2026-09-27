@@ -157,7 +157,8 @@ and previews `"true"`). Turning it off again is the kill switch.
   `ALERT_WEBHOOK_URL` gets 80/90/100% alerts; `GET /api/usage` shows counts.
 - **Protocol:** MCP `2025-11-25` (SDK also accepts `2025-06-18`,
   `2025-03-26`, `2024-11-05`). One message per POST; no batches.
-  Requests with an `Origin` header must come from `SITE_URL`.
+  Requests with an `Origin` header must be same-origin (the serving host,
+  e.g. a branch preview, or `SITE_URL`).
 - **Edge rules (dashboard, free plan):** extend the existing WAF rate-limit
   rule's expression to include `/mcp`. Check Bot Fight Mode with a real
   Claude / ChatGPT connector before announcing it.
