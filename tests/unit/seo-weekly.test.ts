@@ -27,6 +27,21 @@ describe("parsePage", () => {
   });
 });
 
+describe("parsePage edge cases", () => {
+  it("drops scripts even with odd closing tags and decodes entities once", () => {
+    const html = `<html><head><title>A &amp;lt; B</title></head><body>
+      <script>var x = "<h1>fake</h1>";</script >
+      <SCRIPT type="application/ld+json">{"@type":"FAQPage"}</SCRIPT\n>
+      <h1>Real &amp; true</h1><scripted>kept</scripted><p>tail <b>text</p>
+      <script>never closed <h1>nope</h1>`;
+    const p = seo.parsePage(html, URL_);
+    expect(p.title).toBe("A &lt; B");
+    expect(p.h1s).toEqual(["Real & true"]);
+    expect(p.jsonLd).toEqual(["FAQPage"]);
+    expect(p.wordCount).toBe(6); // Real expect(p.wordCount).toBe(5); // Real & true kept tail text true kept tail text
+  });
+});
+
 describe("checkPage", () => {
   const page = seo.parsePage(goodHtml, URL_);
 

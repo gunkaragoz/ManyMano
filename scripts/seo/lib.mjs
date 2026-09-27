@@ -7,15 +7,67 @@
 // a handful of well-known tags, and this keeps the script dependency-free.
 // ---------------------------------------------------------------------------
 
+const ENTITIES = { amp: "&", lt: "<", gt: ">", quot: '"', "#x27": "'", "#39": "'", nbsp: " " };
+
+/** Single pass, so "&amp;lt;" decodes to "&lt;" (not "<"). */
 function decodeEntities(s) {
-  return s
-    .replace(/&amp;/g, "&")
-    .replace(/&lt;/g, "<")
-    .replace(/&gt;/g, ">")
-    .replace(/&quot;/g, '"')
-    .replace(/&#x27;|&#39;/g, "'")
-    .replace(/&nbsp;/g, " ");
+  return s.replace(/&(amp|lt|gt|quot|#x27|#39|nbsp);/g, (_, e) => ENTITIES[e]);
 }
+
+/**
+ * Every <name …>…</name …> element, found by index scanning rather than a
+ * regex (closing tags may carry whitespace/attributes: "</script >").
+ * Yields { start, end, open, inner }; an unclosed element runs to the end.
+ */
+function* elements(html, name) {
+  const lower = html.toLowerCase();
+  const isNameEnd = (c) => c === undefined || !/[a-z0-9-]/.test(c);
+  let from = 0;
+  while (true) {
+    const start = lower.indexOf(`<${name}`, from);
+    if (start < 0) return;
+    if (!isNameEnd(lower[start + name.length + 1])) {
+      from = start + 1;
+      continue;
+    }
+    const openEnd = lower.indexOf(">", start);
+    if (openEnd < 0) return;
+    let close = lower.indexOf(`</${name}`, openEnd);
+    while (close >= 0 && !isNameEnd(lower[close + name.length + 2])) close = lower.indexOf(`</${name}`, close + 1);
+    const closeEnd = close < 0 ? html.length : lower.indexOf(">", close);
+    const end = closeEnd < 0 ? html.length : closeEnd + 1;
+    yield { start, end, open: html.slice(start, openEnd + 1), inner: html.slice(openEnd + 1, close < 0 ? html.length : close) };
+    from = end;
+  }
+}
+
+/** Drop whole elements (script/style) — contents included. */
+function removeElements(html, name) {
+  let out = "";
+  let last = 0;
+  for (const el of elements(html, name)) {
+    out += html.slice(last, el.start) + " ";
+    last = el.end;
+  }
+  return out + html.slice(last);
+}
+
+/** Remove every tag, keeping text; an unterminated "<" drops the rest. */
+function stripTags(html, sep = "") {
+  let out = "";
+  let i = 0;
+  while (i < html.length) {
+    const lt = html.indexOf("<", i);
+    if (lt < 0) return out + html.slice(i);
+    out += html.slice(i, lt) + sep;
+    const gt = html.indexOf(">", lt);
+    if (gt < 0) return out;
+    i = gt + 1;
+  }
+  return out;
+}
+
+const cleanText = (html, sep = "") => decodeEntities(stripTags(html, sep)).replace(/\s+/g, " ").trim();
 
 function attr(tag, name) {
   const m = tag.match(new RegExp(`\\s${name}\\s*=\\s*("([^"]*)"|'([^']*)')`, "i"));
@@ -30,8 +82,8 @@ function metaContent(html, key, value) {
 }
 
 export function parsePage(html, pageUrl) {
-  const head = html.match(/<head[^>]*>([\s\S]*?)<\/head>/i)?.[1] ?? html;
-  const title = head.match(/<title[^>]*>([\s\S]*?)<\/title>/i)?.[1];
+  const head = elements(html, "head").next().value?.inner ?? html;
+  const title = elements(head, "title").next().value?.inner;
   let canonical = null;
   for (const tag of head.match(/<link\b[^>]*>/gi) ?? []) {
     if ((attr(tag, "rel") ?? "").toLowerCase() === "canonical") canonical = attr(tag, "href");
@@ -39,25 +91,21 @@ export function parsePage(html, pageUrl) {
 
   const jsonLd = [];
   let jsonLdErrors = 0;
-  for (const m of html.matchAll(/<script[^>]*type=["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/gi)) {
+  for (const el of elements(html, "script")) {
+    if (!/type\s*=\s*["']application\/ld\+json["']/i.test(el.open)) continue;
     try {
-      const parsed = JSON.parse(m[1]);
+      const parsed = JSON.parse(el.inner);
       for (const node of Array.isArray(parsed) ? parsed : [parsed]) jsonLd.push(node?.["@type"] ?? "?");
     } catch {
       jsonLdErrors += 1;
     }
   }
 
-  const body = (html.match(/<body[^>]*>([\s\S]*)<\/body>/i)?.[1] ?? html)
-    .replace(/<script[\s\S]*?<\/script>/gi, " ")
-    .replace(/<style[\s\S]*?<\/style>/gi, " ");
-  const h1s = [...body.matchAll(/<h1\b[^>]*>([\s\S]*?)<\/h1>/gi)].map((m) =>
-    decodeEntities(m[1].replace(/<[^>]+>/g, "")).replace(/\s+/g, " ").trim()
-  );
-  const h2s = [...body.matchAll(/<h2\b[^>]*>([\s\S]*?)<\/h2>/gi)].map((m) =>
-    decodeEntities(m[1].replace(/<[^>]+>/g, "")).replace(/\s+/g, " ").trim()
-  );
-  const text = decodeEntities(body.replace(/<[^>]+>/g, " ")).replace(/\s+/g, " ").trim();
+  const bodyEl = elements(html, "body").next().value;
+  const body = removeElements(removeElements(bodyEl ? bodyEl.inner : html, "script"), "style");
+  const h1s = [...elements(body, "h1")].map((el) => cleanText(el.inner));
+  const h2s = [...elements(body, "h2")].map((el) => cleanText(el.inner));
+  const text = cleanText(body, " ");
 
   const origin = new URL(pageUrl).origin;
   const internalLinks = new Set();
@@ -73,7 +121,7 @@ export function parsePage(html, pageUrl) {
   }
 
   return {
-    title: title ? decodeEntities(title).replace(/\s+/g, " ").trim() : null,
+    title: title ? cleanText(title) || null : null,
     description: metaContent(head, "name", "description"),
     robots: metaContent(head, "name", "robots"),
     canonical,
