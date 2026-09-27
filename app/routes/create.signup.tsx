@@ -1,10 +1,21 @@
 import { getCloudflareEnv } from "~/utils/cloudflare-context";
-import type { ActionFunctionArgs, LoaderFunctionArgs, MetaFunction } from "react-router";
+import type { ActionFunctionArgs, HeadersFunction, LoaderFunctionArgs, MetaFunction } from "react-router";
 import { data, redirect } from "react-router";
 import { Form, useActionData, useLoaderData, useNavigation, Link } from "react-router";
 import { useEffect, useRef, useState } from "react";
 import { ArrowLeft, ArrowRight, ClipboardList, Info, TriangleAlert, X } from "lucide-react";
 import { usePersistentState } from "~/utils/usePersistentState";
+import { usePrefill } from "~/utils/usePrefill";
+import PrefillBanner from "~/components/PrefillBanner";
+import { loadCreatePrefill } from "~/utils/prefill.server";
+import {
+  isUnsupported,
+  prefillTimezone,
+  resolveSignupPrefill,
+  type SignupDetails,
+  type SignupPrefill,
+  type SignupShift as Shift,
+} from "~/utils/prefill";
 import DatePicker from "~/components/DatePicker";
 import TimePicker from "~/components/TimePicker";
 import TimezoneSelect from "~/components/TimezoneSelect";
@@ -63,6 +74,7 @@ import {
   dateLimitError,
   dateFieldLabel,
   dayChoicesFor,
+  daysForShift as sharedDaysForShift,
   defaultSelection,
   selectionToSpec,
   type DateSelection,
@@ -78,11 +90,17 @@ import {
   rootSiteFromMatches,
 } from "~/utils/seo";
 
-export const meta: MetaFunction = ({ matches }) => {
+export const meta: MetaFunction<typeof loader> = ({ matches, loaderData }) => {
   const site = rootSiteFromMatches(matches);
   const page = getPageMeta(site.siteName).createSignup;
   return mergeParentMeta(matches, [
-    ...pageMetaOverrides({ ...page, siteUrl: site.siteUrl }),
+    // The canonical is always the bare path. A copy (?from=) carries another
+    // event's content, so it is also kept out of search indexes.
+    ...pageMetaOverrides({
+      ...page,
+      siteUrl: site.siteUrl,
+      robots: loaderData?.isCopy ? "noindex, nofollow" : undefined,
+    }),
     {
       "script:ld+json": breadcrumbJsonLd([
         { name: "Home", path: "/" },
@@ -93,12 +111,32 @@ export const meta: MetaFunction = ({ matches }) => {
   ]);
 };
 
-export async function loader({ context }: LoaderFunctionArgs) {
+export async function loader({ context, url }: LoaderFunctionArgs) {
   const env = getCloudflareEnv(context) as {
+    DB: D1Database;
     TURNSTILE_SITE_KEY?: string;
+    RETENTION_DAYS?: string;
   };
-  return data({ turnstileSiteKey: env.TURNSTILE_SITE_KEY ?? null });
+  // `url`, not `request.url`: the latter carries single-fetch `.data`
+  // suffixes, which would leak into the redirect targets below.
+  const prefill = await loadCreatePrefill("signup", url, {
+    db: () => getDb(env.DB),
+    retentionDays: resolveRetentionDays(env),
+  });
+  if ("redirect" in prefill) throw redirect(prefill.redirect);
+  const isCopy = url.searchParams.has("from");
+  const headers = new Headers();
+  // A copy is built from another event's current content — never cache it.
+  if (isCopy) headers.set("Cache-Control", "private, no-store");
+  return data({ turnstileSiteKey: env.TURNSTILE_SITE_KEY ?? null, prefill, isCopy }, { headers });
 }
+
+export const headers: HeadersFunction = ({ loaderHeaders }) => {
+  const headers = new Headers();
+  const cacheControl = loaderHeaders.get("Cache-Control");
+  if (cacheControl) headers.set("Cache-Control", cacheControl);
+  return headers;
+};
 
 export async function action({ request, context }: ActionFunctionArgs) {
   const env = getCloudflareEnv(context) as {
@@ -431,26 +469,6 @@ export async function action({ request, context }: ActionFunctionArgs) {
   return redirect(`/events/${eventId}?admin=${adminToken}&created=1`, { headers });
 }
 
-type SignupDetails = {
-  title: string;
-  eventDate: string;
-  description: string;
-  location: string;
-  organizerName: string;
-  organizerEmail: string;
-  timezone: string;
-};
-
-type Shift = {
-  id: number;
-  name: string;
-  startTime: string;
-  endTime: string;
-  /** Days this shift runs on (date or weekday keys). Missing = every date. */
-  days?: string[] | null;
-  tasks: Array<{ id: number; title: string; capacity: number }>;
-};
-
 const SIGNUP_DETAILS_KEY = "manymano:create-signup:details:v2";
 const SIGNUP_SHIFTS_KEY = "manymano:create-signup:shifts:v1";
 const SIGNUP_DATES_KEY = "manymano:create-signup:dates:v1";
@@ -474,7 +492,7 @@ const defaultSignupShifts: Shift[] = [
 
 export default function CreateSignupSheet() {
   const actionData = useActionData<{ error?: string }>();
-  const { turnstileSiteKey } = useLoaderData<typeof loader>();
+  const { turnstileSiteKey, prefill } = useLoaderData<typeof loader>();
   const navigation = useNavigation();
   const isSubmitting = navigation.state === "submitting";
   // Floating toast for validation errors. The inline banner below sits at the
@@ -505,7 +523,7 @@ export default function CreateSignupSheet() {
 
   // Draft persists across refresh (same tab) via sessionStorage.
   // Cleared on successful create so the next "Create Event" starts clean.
-  const [details, setDetails, clearDetails] = usePersistentState<SignupDetails>(
+  const [details, setDetails, clearDetails, detailsRestored] = usePersistentState<SignupDetails>(
     SIGNUP_DETAILS_KEY,
     () => ({
       title: "",
@@ -517,11 +535,11 @@ export default function CreateSignupSheet() {
       timezone: "UTC",
     })
   );
-  const [shifts, setShifts, clearShifts] = usePersistentState<Shift[]>(
+  const [shifts, setShifts, clearShifts, shiftsRestored] = usePersistentState<Shift[]>(
     SIGNUP_SHIFTS_KEY,
     defaultSignupShifts
   );
-  const [dateSel, setDateSel, clearDateSel] = usePersistentState<DateSelection>(
+  const [dateSel, setDateSel, clearDateSel, dateSelRestored] = usePersistentState<DateSelection>(
     SIGNUP_DATES_KEY,
     () => defaultSelection(new Date().toISOString().split("T")[0])
   );
@@ -539,11 +557,7 @@ export default function CreateSignupSheet() {
   const dayChoices = dayChoicesFor(dateSel, sheetDates);
   const dayChoiceKeys = dayChoices.map((c) => c.key);
   /** Drops day keys left over from an earlier date selection. */
-  const daysForShift = (shift: Shift): string[] | null => {
-    if (!shift.days || dayChoiceKeys.length === 0) return null;
-    const kept = shift.days.filter((d) => dayChoiceKeys.includes(d));
-    return kept.length === 0 || kept.length === dayChoiceKeys.length ? null : kept;
-  };
+  const daysForShift = (shift: Shift): string[] | null => sharedDaysForShift(shift.days, dayChoiceKeys);
   /** Sign-up slots this sheet would create: one per task on each date it runs. */
   const taskSlotCount = sheetDates.reduce(
     (total, date) =>
@@ -621,10 +635,35 @@ export default function CreateSignupSheet() {
     clearDetails();
     clearShifts();
     clearDateSel();
-    setDetails((prev) => ({ ...prev, eventDate: orgToday }));
+    // A fresh draft, like a first visit: today and the browser's timezone.
+    const timezone = detectLocalTimezone() || "UTC";
+    const today = todayInZone(timezone);
+    setDetails((prev) => ({ ...prev, eventDate: today, timezone }));
     setShifts(defaultSignupShifts);
-    setDateSel(defaultSelection(orgToday));
+    setDateSel(defaultSelection(today));
+    dismissPrefill();
   };
+
+  // Template / copy: replaces the whole draft once it has been restored.
+  // The timezone auto-detect above only runs on mount, before this can, so a
+  // copied timezone (even UTC) is what the form ends up with.
+  const {
+    pending: prefillPending,
+    notice: prefillNotice,
+    dismiss: dismissPrefill,
+  } = usePrefill<SignupPrefill>({
+    load: prefill,
+    restored: detailsRestored && shiftsRestored && dateSelRestored,
+    apply: (p) => {
+      const timezone = prefillTimezone(p.details, detectLocalTimezone());
+      const resolved = resolveSignupPrefill(p, { today: todayInZone(timezone), timezone });
+      if (isUnsupported(resolved)) return resolved;
+      setDetails(resolved.details);
+      setShifts(resolved.shifts);
+      setDateSel(resolved.dateSel);
+      return { notes: [] };
+    },
+  });
 
   const addShift = () => {
     setShifts((prev) => [
@@ -723,6 +762,10 @@ export default function CreateSignupSheet() {
           </div>
         </div>
       </div>
+
+      {prefillNotice && (
+        <PrefillBanner notice={prefillNotice} flow="signup" onDismiss={dismissPrefill} onStartBlank={startOver} />
+      )}
 
       {actionData?.error && (
         <div className="p-4 rounded-2xl bg-rose-50 border border-rose-200/80 text-rose-800 text-sm font-medium flex items-center gap-2">
@@ -1102,7 +1145,7 @@ export default function CreateSignupSheet() {
           </button>
           <button
             type="submit"
-            disabled={isSubmitting}
+            disabled={isSubmitting || prefillPending}
             className="w-full sm:w-auto px-8 py-4 rounded-2xl bg-blue-600 hover:bg-blue-700 text-white font-bold text-sm shadow-sm transition-all hover:scale-[1.01] active:scale-[0.99] disabled:opacity-50 flex items-center justify-center gap-2"
           >
             {isSubmitting ? (

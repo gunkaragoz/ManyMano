@@ -8,7 +8,9 @@ import { useEffect, useRef, useState } from "react";
  *   hydration match (no hydration mismatch).
  * - After mount, restores any saved draft from sessionStorage.
  * - Writes back on every change (after restore).
- * - Returns a `clear` that removes the key and resets to initial.
+ * - Returns a `clear` that removes the key and resets to initial, and
+ *   `restored`: false until the saved draft (if any) has been applied, so a
+ *   caller can wait before overwriting the draft on purpose (a prefill).
  */
 export function usePersistentState<T>(key: string, initial: T | (() => T)) {
   const getInitial = (): T =>
@@ -59,5 +61,5 @@ export function usePersistentState<T>(key: string, initial: T | (() => T)) {
     }
   };
 
-  return [value, setValue, clear] as const;
+  return [value, setValue, clear, didRestore] as const;
 }

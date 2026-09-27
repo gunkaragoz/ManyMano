@@ -2,6 +2,7 @@ import { getCloudflareEnv } from "~/utils/cloudflare-context";
 import type { LoaderFunctionArgs } from "react-router";
 import { absoluteUrl } from "~/utils/seo";
 import { getSiteConfig } from "~/utils/site";
+import { TEMPLATES, templatePath } from "~/utils/templates";
 
 type SitemapEntry = {
   path: string;
@@ -14,6 +15,8 @@ const ENTRIES: SitemapEntry[] = [
   { path: "/create", changefreq: "monthly", priority: "0.8" },
   { path: "/create/signup", changefreq: "monthly", priority: "0.9" },
   { path: "/create/poll", changefreq: "monthly", priority: "0.9" },
+  { path: "/templates", changefreq: "monthly", priority: "0.8" },
+  ...TEMPLATES.map((t) => ({ path: templatePath(t), changefreq: "monthly", priority: "0.7" })),
 ];
 
 export async function loader({ request, context }: LoaderFunctionArgs) {

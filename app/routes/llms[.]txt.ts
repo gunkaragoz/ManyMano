@@ -2,6 +2,7 @@ import { getCloudflareEnv } from "~/utils/cloudflare-context";
 import type { LoaderFunctionArgs } from "react-router";
 import { absoluteUrl } from "~/utils/seo";
 import { getSiteConfig } from "~/utils/site";
+import { TEMPLATES, templatePath } from "~/utils/templates";
 
 export async function loader({ request, context }: LoaderFunctionArgs) {
   void request;
@@ -19,6 +20,7 @@ export async function loader({ request, context }: LoaderFunctionArgs) {
     link("Create a sign-up sheet", "/create/signup"),
     link("Create a meeting poll", "/create/poll"),
     link("How it works", "/create"),
+    link("Templates", "/templates"),
     ...(githubRepoUrl ? [`- [GitHub](${githubRepoUrl})`] : []),
     "",
   ];
@@ -38,6 +40,11 @@ export async function loader({ request, context }: LoaderFunctionArgs) {
     "- No accounts or passwords; events are created and shared in seconds.",
     "- Organizer admin mode via a secret link; participants get cancel links when they leave an email.",
     "- Lost your organizer link? Open the event's public link and use “Lost your organizer link?” to get a new link by email (the old link stops working).",
+    "- Templates prefill the create form for common events; any event can be reused with “Make a copy” (same structure, new dates, no sign-ups or votes).",
+    "",
+    "## Templates",
+    "",
+    ...TEMPLATES.map((t) => `${link(t.name, templatePath(t))}: ${t.tagline}`),
     "",
     "## Key pages",
     "",
