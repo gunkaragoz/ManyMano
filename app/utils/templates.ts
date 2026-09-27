@@ -35,7 +35,6 @@ export type TemplateIcon =
   | "cake"
   | "popcorn"
   | "droplets"
-  | "package"
   | "soup"
   | "briefcase"
   | "book-open"
@@ -509,52 +508,51 @@ export const TEMPLATES: EventTemplate[] = [
     },
   },
   {
-    slug: "food-pantry-volunteers",
+    slug: "recorder-helper",
     type: "SIGNUP_SHEET",
-    name: "Food pantry volunteers",
-    tagline: "Tuesday sorting, Tuesday and Saturday distribution",
-    category: "community",
-    icon: "package",
+    name: "Thursday recorder helper",
+    tagline: "Every Thursday, September to June",
+    category: "school",
+    icon: "music",
     seo: {
-      title: "Food Pantry Volunteer Schedule — Free Sign-Up Template",
+      title: "Recorder Class Helper Sign-Up — Weekly School Volunteer",
       description:
-        "Schedule food pantry volunteers twice a week: sorting on Tuesdays and distribution on Tuesdays and Saturdays. Repeats for six weeks. Free.",
-      h1: "Food pantry volunteer schedule",
+        "Parent volunteers for recorder class every Thursday at 2:00 PM, September to June. One 30-minute spot a week, claimed with just a name. Free.",
+      h1: "Thursday recorder helper sign-up sheet",
       intro: [
-        "Recurring volunteer schedules are where paper sign-up sheets fall apart. This template repeats every Tuesday and Saturday for six weeks, with a sorting shift that only runs on Tuesdays and a distribution shift on both days.",
-        "Volunteers see the whole schedule and pick the days they can make; you see where the gaps are before the week starts.",
+        "A room full of beginner recorder players goes better with an extra grown-up to hand out music, help with fingerings and keep the line moving to the practice corner. This sheet repeats every Thursday from 2:00 to 2:30 PM for the whole school year, September to June, with a helper spot each week.",
+        "Parents see every Thursday in one list and claim the weeks that fit their schedule — once a month or every week. You see at a glance which weeks still need someone.",
       ],
       tips: [
-        "Ask first-time volunteers to note it in their sign-up so a regular can show them around.",
-        "Put parking and entrance details in the location so nobody waits at the wrong door.",
-        "Extend the repeat when the six weeks are up, or create a copy for the next season.",
+        "There's no class during winter and spring break — say so in the description so nobody signs up for those weeks.",
+        "Add the classroom and sign-in steps to the location, since helpers come during the school day.",
+        "Ask helpers to add an email so they get a reminder before their Thursday.",
       ],
       faqs: [
         {
-          question: "Can the sorting shift run on Saturdays too?",
-          answer: "Yes. Every shift can run on all of the sheet's weekdays or only some — change it under the shift before creating the sheet.",
+          question: "Can I skip holiday and break weeks?",
+          answer:
+            "The sheet repeats every Thursday until mid-June. Put your school's break dates in the description so parents don't sign up for those weeks.",
         },
         {
-          question: "What happens after six weeks?",
-          answer:
-            "The sheet ends after its last date. Use Make a copy on the event page to start the next run with the same shifts.",
+          question: "Can a parent sign up for more than one Thursday?",
+          answer: "Yes. Each Thursday is listed separately, and a parent can claim as many weeks as they like.",
         },
       ],
     },
     prefill: {
       details: {
-        title: "Food Pantry Volunteers",
+        title: "Thursday Recorder Helper",
         description:
-          "Thank you for helping neighbors in need. Closed-toe shoes please. First time? Add a note and someone will show you around.",
-        location: "[Pantry address]",
+          "Help our young musicians during recorder class! Please check in at the front office first. No class during winter break ([dates]) or spring break ([dates]) — please don't sign up for those weeks.",
+        location: "[Your school] music room",
         timezone: null,
       },
-      anchor: nextWeekday(TUE),
-      dates: { mode: "repeat", rule: { type: "weekly", interval: 1, weekdays: [TUE, SAT] }, ends: { after: 12 } },
-      shifts: [
-        { name: "Sorting", startTime: "09:00", endTime: "11:00", days: { kind: "weekdays", values: [TUE] }, tasks: [task("Sort donations", 4), task("Check dates and stock shelves", 2)] },
-        { name: "Distribution", startTime: "11:00", endTime: "13:00", days: { kind: "all" }, tasks: [task("Greeter and check-in", 1), task("Pack bags", 3), task("Carry-out helper", 2)] },
-      ],
+      // From the next Thursday — or the first Thursday of September when the
+      // template is opened over the summer — until the next June 15.
+      anchor: { kind: "weekday", weekday: THU, minOffsetDays: 1, outside: { from: "06-16", to: "08-31" } },
+      dates: { mode: "repeat", rule: { type: "weekly", interval: 1, weekdays: [THU] }, ends: { untilMonthDay: "06-15" } },
+      shifts: [{ name: "Recorder class", startTime: "14:00", endTime: "14:30", days: { kind: "all" }, tasks: [task("Recorder helper", 1)] }],
     },
   },
   {
@@ -1084,6 +1082,7 @@ export function relatedTemplates(t: EventTemplate, count = 3): EventTemplate[] {
 // ---------------------------------------------------------------------------
 
 const WEEKDAY_NAMES = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+const MONTH_NAMES = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
 
 function listWords(items: string[]): string {
   if (items.length <= 1) return items.join("");
@@ -1119,13 +1118,25 @@ export function describeTemplateSchedule(t: EventTemplate): string {
         : rule.type === "weekly"
           ? `${rule.interval > 1 ? `Every ${rule.interval} weeks on` : "Every"} ${listWords(rule.weekdays.map((w) => WEEKDAY_NAMES[w]))}`
           : `Monthly`;
-  const ends = "after" in dates.ends ? `${dates.ends.after} times` : `for ${dates.ends.offsetDays + 1} days`;
+  const ends =
+    "after" in dates.ends
+      ? `${dates.ends.after} times`
+      : "untilMonthDay" in dates.ends
+        ? `until ${MONTH_NAMES[Number(dates.ends.untilMonthDay.slice(0, 2)) - 1]} ${Number(dates.ends.untilMonthDay.slice(3))}`
+        : `for ${dates.ends.offsetDays + 1} days`;
   return `${every}, ${ends}, from ${anchorPhrase(anchor)}`;
 }
 
 /** Which days a template shift runs on, in words ("" = the sheet's only day). */
 export function describeShiftDays(t: SignupTemplate, days: RelativeDayFilter): string {
-  if (days.kind === "all") return t.prefill.dates.mode === "single" ? "" : "Every day";
+  if (days.kind === "all") {
+    const dates = t.prefill.dates;
+    if (dates.mode === "single") return "";
+    if (dates.mode === "range" || dates.rule.type === "daily") return "Every day";
+    if (dates.rule.type === "weekdays") return "Monday to Friday";
+    if (dates.rule.type === "weekly") return listWords(dates.rule.weekdays.map((w) => WEEKDAY_NAMES[w]));
+    return "Every date";
+  }
   if (days.kind === "weekdays") return listWords(days.values.map((w) => WEEKDAY_NAMES[w]));
   return listWords(days.values.map((o) => dayName(t.prefill.anchor, o)));
 }

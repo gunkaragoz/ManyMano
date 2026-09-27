@@ -110,14 +110,28 @@ export type PrefillSource =
 export type RelativeAnchor =
   | { kind: "undated" }
   | { kind: "offset"; offsetDays: number }
-  | { kind: "weekday"; weekday: number; minOffsetDays: number }
+  | {
+      kind: "weekday";
+      weekday: number;
+      minOffsetDays: number;
+      /**
+       * A yearly window ("MM-DD" to "MM-DD", inclusive) the first date must
+       * not fall in — a school-year sheet opened in July starts in September.
+       */
+      outside?: { from: string; to: string };
+    }
   | { kind: "monthlyNth"; weekday: number; ordinal: number; minOffsetDays: number };
 
 export type RelativeDateSpec =
   | { mode: "single" }
   /** Inclusive: 5 = Monday–Friday. */
   | { mode: "range"; spanDays: number }
-  | { mode: "repeat"; rule: RepeatRule; ends: { after: number } | { offsetDays: number } };
+  | {
+      mode: "repeat";
+      rule: RepeatRule;
+      /** `untilMonthDay`: the next such day ("MM-DD") after the first date, e.g. end of a school year. */
+      ends: { after: number } | { offsetDays: number } | { untilMonthDay: string };
+    };
 
 export type RelativeDayFilter =
   | { kind: "all" }
@@ -209,8 +223,14 @@ export function resolveAnchor(anchor: RelativeAnchor, today: string): string | n
       return "";
     case "offset":
       return addDays(today, anchor.offsetDays);
-    case "weekday":
-      return firstDateFrom(addDays(today, anchor.minOffsetDays), (d) => weekdayOf(d) === anchor.weekday);
+    case "weekday": {
+      const window = anchor.outside;
+      const inWindow = (d: string) => !!window && d.slice(5) >= window.from && d.slice(5) <= window.to;
+      return firstDateFrom(
+        addDays(today, anchor.minOffsetDays),
+        (d) => weekdayOf(d) === anchor.weekday && !inWindow(d)
+      );
+    }
     case "monthlyNth":
       return firstDateFrom(
         addDays(today, anchor.minOffsetDays),
@@ -386,8 +406,17 @@ export type ResolvedSignup = {
 function concreteSpec(dates: RelativeDateSpec, start: string): DateSpec {
   if (dates.mode === "single") return { mode: "single" };
   if (dates.mode === "range") return { mode: "range", end: addDays(start, Math.max(1, dates.spanDays) - 1) };
-  const ends = "after" in dates.ends ? { after: dates.ends.after } : { on: addDays(start, dates.ends.offsetDays) };
+  const e = dates.ends;
+  const ends =
+    "after" in e ? { after: e.after } : "untilMonthDay" in e ? { on: nextMonthDay(start, e.untilMonthDay) } : { on: addDays(start, e.offsetDays) };
   return { mode: "repeat", rule: dates.rule, ends };
+}
+
+/** The first date strictly after `start` falling on "MM-DD". */
+function nextMonthDay(start: string, monthDay: string): string {
+  const year = Number(start.slice(0, 4));
+  const thisYear = `${year}-${monthDay}`;
+  return thisYear > start ? thisYear : `${year + 1}-${monthDay}`;
 }
 
 function concreteDays(filter: RelativeDayFilter, start: string): string[] | null {

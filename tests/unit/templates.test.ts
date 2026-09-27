@@ -155,4 +155,27 @@ describe("template catalog", () => {
       expect(templatePath(t!)).toBe(l.path);
     }
   });
+
+  it("Thursday recorder helper runs Thursdays 2:00–2:30 PM through the school year", () => {
+    const t = getTemplate("recorder-helper");
+    if (!t || t.type !== "SIGNUP_SHEET") throw new Error("missing");
+    const at = (today: string) => {
+      const r = resolveSignupPrefill(signupPrefillFromTemplate(t), { today, timezone: "UTC" });
+      if (isUnsupported(r)) throw new Error(r.reason);
+      return { start: r.details.eventDate, dates: expandDates(selectionToSpec(r.dateSel, r.details.eventDate), r.details.eventDate), shift: r.shifts[0] };
+    };
+    // Mid-autumn: next Thursday until June 15.
+    const fall = at("2026-09-25");
+    expect(fall.start).toBe("2026-10-01");
+    expect(fall.dates[fall.dates.length - 1]).toBe("2027-06-10");
+    expect(fall.dates.every((d) => new Date(`${d}T00:00:00Z`).getUTCDay() === 4)).toBe(true);
+    expect(fall.shift).toMatchObject({ startTime: "14:00", endTime: "14:30" });
+    // Spring: still stops in June, not a year later.
+    const spring = at("2027-03-01");
+    expect(spring.start).toBe("2027-03-04");
+    expect(spring.dates[spring.dates.length - 1]).toBe("2027-06-10");
+    // Summer: waits for September.
+    expect(at("2027-07-10").start).toBe("2027-09-02");
+    expect(at("2027-06-14").start).toBe("2027-09-02");
+  });
 });
