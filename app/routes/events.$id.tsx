@@ -4293,10 +4293,9 @@ export default function EventView() {
         a.signedUpAt.localeCompare(b.signedUpAt)
       );
   }, [initialSignups, slots, event.eventDate]);
-  const rosterExportHref =
-    adminToken
-      ? `/events/${event.id}/export?admin=${encodeURIComponent(adminToken)}`
-      : `/events/${event.id}/export`;
+  // No ?admin= here: the HttpOnly admin cookie (Path=/events) authenticates
+  // the download, and a token in the URL would land in download history.
+  const rosterExportHref = `/events/${event.id}/export`;
   // Winning option for the finalized badge (day + time stay visible after
   // close — the result is the most useful fact on the page).
   const winningSlotForBadge = useMemo(
@@ -4332,10 +4331,9 @@ export default function EventView() {
     () => pickCalendarSlot(slots, event.winningSlotId),
     [slots, event.winningSlotId]
   );
-  const icsHref =
-    isAdmin && adminToken
-      ? `/events/${event.id}/ics?admin=${encodeURIComponent(adminToken)}`
-      : `/events/${event.id}/ics`;
+  // No ?admin= either: the admin cookie also reaches /ics, which is what adds
+  // the organizer email for organizers.
+  const icsHref = `/events/${event.id}/ics`;
   const googleCalendarHref = useMemo(() => {
     return buildGoogleCalendarUrl({
       title: event.title,
