@@ -15,8 +15,11 @@ export async function loader({ request, context }: LoaderFunctionArgs) {
   const { siteUrl } = getSiteConfig(getCloudflareEnv(context));
   const sitemapUrl = absoluteUrl("/sitemap.xml", siteUrl);
   void origin;
+  // Content Signals (https://contentsignals.org/): allow search indexing and
+  // AI answers that cite us, opt out of model training.
   const body = [
     "User-agent: *",
+    "Content-Signal: search=yes, ai-input=yes, ai-train=no",
     "Allow: /",
     "Disallow: /events/",
     "Disallow: /api/",
