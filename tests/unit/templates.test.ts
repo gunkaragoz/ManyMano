@@ -181,7 +181,9 @@ describe("template catalog", () => {
   });
 
   it("header menu lists a short set of real templates", () => {
-    expect(HEADER_MENU_SLUGS.length).toBeLessThanOrEqual(10);
+    const types = HEADER_MENU_SLUGS.map((slug) => getTemplate(slug)?.type);
+    expect(types.filter((t) => t === "SIGNUP_SHEET")).toHaveLength(5);
+    expect(types.filter((t) => t === "TIME_POLL")).toHaveLength(5);
     for (const slug of HEADER_MENU_SLUGS) expect(getTemplate(slug), slug).not.toBeNull();
   });
 });

@@ -1710,16 +1710,17 @@ export const POPULAR_TEMPLATE_LINKS: Array<{ label: string; path: string }> = [
  * Kept small on purpose so the header doesn't turn into a site map.
  */
 export const HEADER_MENU_SLUGS = [
-  "back-to-school-night",
-  "staff-appreciation-week",
-  "book-fair",
-  "parent-teacher-conferences",
+  // Five of each type, picked by likely search demand (no usage data yet).
   "potluck",
+  "meal-train",
+  "parent-teacher-conferences",
+  "staff-appreciation-week",
   "bake-sale",
   "team-meeting",
-  "pta-meeting",
+  "family-reunion",
   "book-club",
   "happy-hour",
+  "pta-meeting",
 ];
 
 export function getTemplate(slug: string | null | undefined): EventTemplate | null {
