@@ -164,6 +164,9 @@ export async function saveOrganizerEmail(
 
   // The address is saved from here on; the backup email is best-effort.
   if (!deps.mailConfigured) return ok(EMAIL_SAVED_NOT_SENT);
+  // A pre-check, not a reservation: saves racing at the limit can each send
+  // once (bounded by the per-event and per-IP limits above). The provider's
+  // own quota stays authoritative.
   if (!(await deps.budgetAvailable())) return ok(EMAIL_SAVED_NOT_SENT);
 
   let result: SendEmailResult;
