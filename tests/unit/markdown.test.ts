@@ -110,6 +110,11 @@ describe("htmlToMarkdown", () => {
     expect(md).toContain("| Shift | Spots |\n| --- | --- |\n| Mains | 4 \\| 2 |");
   });
 
+  it("escapes backslashes in table cells so a trailing \\ cannot eat the pipe", () => {
+    const md = htmlToMarkdown(page("<table><tr><th>Path</th><th>Note</th></tr><tr><td>C:\\dir\\</td><td>a\\|b</td></tr></table>"), PAGE);
+    expect(md).toContain("| C:\\\\dir\\\\ | a\\\\\\|b |");
+  });
+
   it("uses the desktop layout: skips hidden and mobile-only elements, drops form controls", () => {
     const md = htmlToMarkdown(
       page(

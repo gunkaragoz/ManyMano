@@ -324,13 +324,18 @@ function renderList(el: Element, ctx: Ctx): string {
   return items.length ? block(items.join("\n"), ctx) : "";
 }
 
+/** Escape backslashes first, then pipes, so neither can break the row. */
+function escapeCell(text: string): string {
+  return text.replace(/\\/g, "\\\\").replace(/\|/g, "\\|");
+}
+
 function renderTable(el: Element, ctx: Ctx): string {
   const rows = findAll(el, (e) => e.tag === "tr" && !isHidden(e));
   const cells = rows
     .map((tr) =>
       tr.children
         .filter((c): c is Element => typeof c !== "string" && (c.tag === "td" || c.tag === "th") && !isHidden(c))
-        .map((c) => inlineText(renderChildren(c, { ...ctx, inline: true })).replace(/\|/g, "\\|"))
+        .map((c) => escapeCell(inlineText(renderChildren(c, { ...ctx, inline: true }))))
     )
     .filter((r) => r.length);
   if (!cells.length) return "";
