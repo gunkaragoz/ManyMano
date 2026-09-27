@@ -329,19 +329,82 @@ function escapeCell(text: string): string {
   return text.replace(/\\/g, "\\\\").replace(/\|/g, "\\|");
 }
 
+/** Rows of a table in document order, flagged when they belong to <thead>. */
+function tableRows(el: Element, inHead = false, out: { tr: Element; head: boolean }[] = []) {
+  for (const child of el.children) {
+    if (typeof child === "string" || isHidden(child) || child.tag === "table") continue;
+    if (child.tag === "tr") out.push({ tr: child, head: inHead });
+    else tableRows(child, inHead || child.tag === "thead", out);
+  }
+  return out;
+}
+
+function span(value: string | undefined): number {
+  const n = Number(value);
+  return Number.isInteger(n) && n > 1 ? Math.min(n, 100) : 1;
+}
+
+/**
+ * GFM tables have one header row and no spans, so lay the HTML table out on
+ * a grid first: a rowspan/colspan cell fills every slot it covers. Header
+ * rows (<thead>, or leading rows of only <th>) collapse into one row per
+ * column ("Mon, Oct 5 — 9:00 AM"); in the body a rowspan repeats its text
+ * so each row stands alone, and a colspan fills only its first column.
+ */
 function renderTable(el: Element, ctx: Ctx): string {
-  const rows = findAll(el, (e) => e.tag === "tr" && !isHidden(e));
-  const cells = rows
-    .map((tr) =>
-      tr.children
-        .filter((c): c is Element => typeof c !== "string" && (c.tag === "td" || c.tag === "th") && !isHidden(c))
-        .map((c) => escapeCell(inlineText(renderChildren(c, { ...ctx, inline: true }))))
-    )
-    .filter((r) => r.length);
-  if (!cells.length) return "";
-  const width = Math.max(...cells.map((r) => r.length));
-  const line = (r: string[]) => `| ${Array.from({ length: width }, (_, k) => r[k] ?? "").join(" | ")} |`;
-  const out = [line(cells[0]), line(Array(width).fill("---")), ...cells.slice(1).map(line)];
+  const rows = tableRows(el);
+  const grid: { text: string; id: number; first: boolean }[][] = [];
+  let id = 0;
+  rows.forEach(({ tr }, r) => {
+    grid[r] ??= [];
+    let col = 0;
+    for (const c of tr.children) {
+      if (typeof c === "string" || (c.tag !== "td" && c.tag !== "th") || isHidden(c)) continue;
+      while (grid[r][col]) col++;
+      const text = escapeCell(inlineText(renderChildren(c, { ...ctx, inline: true })));
+      const cellId = id++;
+      const rs = span(c.attrs.rowspan);
+      const cs = span(c.attrs.colspan);
+      for (let dr = 0; dr < rs && r + dr < rows.length; dr++) {
+        grid[r + dr] ??= [];
+        for (let dc = 0; dc < cs; dc++) {
+          grid[r + dr][col + dc] = { text, id: cellId, first: dc === 0 };
+        }
+      }
+      col += cs;
+    }
+  });
+
+  let headCount = rows.findIndex(({ head }) => !head);
+  if (headCount === -1) headCount = rows.length;
+  if (headCount === 0) {
+    const onlyTh = (tr: Element) =>
+      tr.children.every((c) => typeof c === "string" || c.tag === "th" || isHidden(c));
+    while (headCount < rows.length && onlyTh(rows[headCount].tr)) headCount++;
+    headCount = Math.max(headCount, 1);
+  }
+
+  const width = Math.max(0, ...grid.map((r) => r.length));
+  if (!width) return "";
+  const header = Array.from({ length: width }, (_, k) => {
+    const seen = new Set<number>();
+    const parts: string[] = [];
+    for (let r = 0; r < headCount; r++) {
+      const cell = grid[r]?.[k];
+      if (cell && cell.text && !seen.has(cell.id)) {
+        seen.add(cell.id);
+        parts.push(cell.text);
+      }
+    }
+    return parts.join(" — ");
+  });
+  const body = grid
+    .slice(headCount)
+    .map((r) => Array.from({ length: width }, (_, k) => (r[k]?.first ? r[k].text : "")))
+    .filter((r) => r.some(Boolean));
+
+  const line = (r: string[]) => `| ${r.join(" | ")} |`;
+  const out = [line(header), line(Array(width).fill("---")), ...body.map(line)];
   return block(out.join("\n"), ctx);
 }
 
@@ -424,6 +487,11 @@ function yamlString(s: string): string {
  * the <main> element (or <body>) as Markdown, then any JSON-LD blocks.
  */
 export function htmlToMarkdown(html: string, pageUrl: string): string {
+  return convertPage(html, pageUrl).markdown;
+}
+
+/** Markdown plus the page's <meta name="robots"> directive, which Markdown cannot carry. */
+function convertPage(html: string, pageUrl: string): { markdown: string; robots?: string } {
   const doc = parseHtml(html);
   const head = find(doc, (e) => e.tag === "head") ?? doc;
   const meta = (key: string, value: string) =>
@@ -468,7 +536,7 @@ export function htmlToMarkdown(html: string, pageUrl: string): string {
     .replace(new RegExp(INDENT, "g"), " ")
     .replace(new RegExp(SEP, "g"), "");
 
-  return `${front.join("\n")}\n\n${content}\n`;
+  return { markdown: `${front.join("\n")}\n\n${content}\n`, robots: meta("name", "robots") };
 }
 
 // ---------------------------------------------------------------------------
@@ -497,8 +565,10 @@ export async function negotiateMarkdown(request: Request, response: Response): P
     return new Response(response.body, { status: response.status, statusText: response.statusText, headers });
   }
 
-  const markdown = htmlToMarkdown(await response.text(), request.url);
+  const { markdown, robots } = convertPage(await response.text(), request.url);
   headers.set("Content-Type", "text/markdown; charset=utf-8");
+  // Event pages say noindex only in a <meta> tag; keep that on the Markdown copy.
+  if (robots && !headers.has("X-Robots-Tag")) headers.set("X-Robots-Tag", robots);
   headers.set("x-markdown-tokens", String(estimateTokens(markdown)));
   for (const h of ["Content-Length", "Content-Encoding", "ETag", "Last-Modified"]) headers.delete(h);
   return new Response(markdown, { status: response.status, statusText: response.statusText, headers });

@@ -110,6 +110,46 @@ describe("htmlToMarkdown", () => {
     expect(md).toContain("| Shift | Spots |\n| --- | --- |\n| Mains | 4 \\| 2 |");
   });
 
+  it("lays out rowspan/colspan headers like the poll matrix, keeping sr-only vote labels", () => {
+    const vote = (cls: string, label: string) =>
+      `<td><span class="${cls}"><svg aria-hidden="true"><path d="M0"/></svg><span class="sr-only">${label}</span></span></td>`;
+    const md = htmlToMarkdown(
+      page(
+        '<div class="md:hidden">Mobile cards</div><div class="hidden md:block"><table>' +
+          '<thead><tr><th rowspan="2">Participants (2)</th><th colspan="2">Mon, Oct 5</th><th colspan="1">Tue, Oct 6</th></tr>' +
+          "<tr><th>9:00 AM</th><th>2:00 PM</th><th>9:00 AM</th></tr></thead>" +
+          `<tbody><tr><td>Ana</td>${vote("bg-green-500", "Yes")}${vote("bg-amber-400", "Maybe")}${vote("bg-slate-100", "No")}</tr>` +
+          `<tr><td>Bo</td>${vote("bg-slate-100", "No")}${vote("bg-green-500", "Yes")}${vote("bg-green-500", "Yes")}</tr></tbody>` +
+          "<tfoot><tr><td>Total Yes / (Maybe)</td><td>1</td><td>1 <span>(+1)</span></td><td>1</td></tr></tfoot>" +
+          "</table></div>"
+      ),
+      PAGE
+    );
+    expect(md).not.toContain("Mobile cards");
+    expect(md).toContain(
+      "| Participants (2) | Mon, Oct 5 — 9:00 AM | Mon, Oct 5 — 2:00 PM | Tue, Oct 6 — 9:00 AM |\n" +
+        "| --- | --- | --- | --- |\n" +
+        "| Ana | Yes | Maybe | No |\n" +
+        "| Bo | No | Yes | Yes |\n" +
+        "| Total Yes / (Maybe) | 1 | 1 (+1) | 1 |"
+    );
+  });
+
+  it("repeats body rowspans per row and fills a body colspan once", () => {
+    const md = htmlToMarkdown(
+      page(
+        "<table><tr><th>Day</th><th>Shift</th><th>Name</th></tr>" +
+          '<tr><td rowspan="2">Sat</td><td>Morning</td><td>Ana</td></tr>' +
+          "<tr><td>Evening</td><td>Bo</td></tr>" +
+          '<tr><td colspan="3">No more shifts</td></tr></table>'
+      ),
+      PAGE
+    );
+    expect(md).toContain(
+      "| Day | Shift | Name |\n| --- | --- | --- |\n| Sat | Morning | Ana |\n| Sat | Evening | Bo |\n| No more shifts | | |"
+    );
+  });
+
   it("escapes backslashes in table cells so a trailing \\ cannot eat the pipe", () => {
     const md = htmlToMarkdown(page("<table><tr><th>Path</th><th>Note</th></tr><tr><td>C:\\dir\\</td><td>a\\|b</td></tr></table>"), PAGE);
     expect(md).toContain("| C:\\\\dir\\\\ | a\\\\\\|b |");
@@ -172,6 +212,17 @@ describe("negotiateMarkdown", () => {
     const body = await res.text();
     expect(body).toContain("# Hello");
     expect(Number(res.headers.get("x-markdown-tokens"))).toBe(Math.ceil(body.length / 4));
+  });
+
+  it("carries a <meta name=robots> directive into X-Robots-Tag", async () => {
+    const r = new Response(page("<h1>Event</h1>", '<meta name="robots" content="noindex, nofollow"/>'), {
+      headers: { "Content-Type": "text/html" },
+    });
+    const res = await negotiateMarkdown(req("text/markdown"), r);
+    expect(res.headers.get("X-Robots-Tag")).toBe("noindex, nofollow");
+
+    const plain = await negotiateMarkdown(req("text/markdown"), new Response(page("<p>x</p>"), { headers: { "Content-Type": "text/html" } }));
+    expect(plain.headers.get("X-Robots-Tag")).toBeNull();
   });
 
   it("keeps HTML for browsers but adds Vary: Accept", async () => {
