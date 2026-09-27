@@ -106,6 +106,13 @@ export function getEmailSenderConfig(env: EmailSenderEnv): {
   };
 }
 
+/** True when a send would actually go out (credentials present for the active provider). */
+export function isEmailDeliveryConfigured(env: EmailSenderEnv): boolean {
+  const provider = resolveEmailProvider(env);
+  if (provider === "smtp") return resolveSmtpConfig(env) !== null;
+  return (env.RESEND_API_KEY ?? "").trim().length > 0;
+}
+
 /** Split `"Display Name <addr@example.com>"` into name + bare address. */
 function parseMailbox(from: string): { name?: string; email: string } {
   const angled = from.match(/^\s*(.*?)\s*<\s*([^<>\s]+@[^<>\s]+)\s*>\s*$/);
