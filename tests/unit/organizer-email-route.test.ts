@@ -37,6 +37,11 @@ async function runLoader(env: CloudflareEnv, path: string, id: string, reqHeader
   );
 }
 
+const TURNSTILE_HOST = "challenges.cloudflare.com";
+const RESEND_HOST = "api.resend.com";
+// Compare parsed hostnames, never substrings of the whole URL.
+const hostOf = (input: unknown) => new URL(String(input instanceof Request ? input.url : input)).hostname;
+
 const MAIL_ON = {
   RESEND_API_KEY: "re_test",
   TURNSTILE_SECRET_KEY: "ts_secret",
@@ -58,16 +63,16 @@ beforeEach(() => {
   db = createSqliteD1();
   siteverifyOk = true;
   fetchMock = vi.fn(async (input: RequestInfo | URL) => {
-    const url = String(input instanceof Request ? input.url : input);
-    if (url.includes("challenges.cloudflare.com")) {
+    const host = hostOf(input);
+    if (host === TURNSTILE_HOST) {
       return Response.json(
         siteverifyOk
           ? { success: true, action: "set-organizer-email", hostname: "example.com" }
           : { success: false }
       );
     }
-    if (url.includes("api.resend.com")) return Response.json({ id: "email_1" });
-    throw new Error(`unexpected fetch ${url}`);
+    if (host === RESEND_HOST) return Response.json({ id: "email_1" });
+    throw new Error(`unexpected fetch to ${host}`);
   });
   vi.stubGlobal("fetch", fetchMock);
 });
@@ -76,7 +81,7 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-const calledUrls = () => fetchMock.mock.calls.map((c) => String(c[0] instanceof Request ? c[0].url : c[0]));
+const calledHosts = () => fetchMock.mock.calls.map((c) => hostOf(c[0]));
 
 describe("set_organizer_email action", () => {
   it("saves the address without touching the admin token (mail off)", async () => {
@@ -129,7 +134,7 @@ describe("set_organizer_email action", () => {
     );
     expect(r.status).toBe(403);
     expect(eventRow(db, id).organizer_email).toBe("");
-    expect(calledUrls().some((u) => u.includes("resend"))).toBe(false);
+    expect(calledHosts()).not.toContain(RESEND_HOST);
   });
 
   it("with mail on and Turnstile passing, saves, sends the link once and counts it", async () => {
@@ -142,7 +147,7 @@ describe("set_organizer_email action", () => {
     );
     expect(r).toEqual({ status: 200, body: { success: true, message: EMAIL_SAVED_AND_SENT } });
     expect(eventRow(db, id).organizer_email).toBe("sam@example.com");
-    const sends = fetchMock.mock.calls.filter((c) => String(c[0]).includes("api.resend.com"));
+    const sends = fetchMock.mock.calls.filter((c) => hostOf(c[0]) === RESEND_HOST);
     expect(sends).toHaveLength(1);
     const payload = JSON.parse(String((sends[0][1] as RequestInit).body));
     expect(payload.to).toEqual(["sam@example.com"]);
@@ -191,7 +196,7 @@ describe("events with no organizer email", () => {
     );
     expect(r.body.success).toBe(true);
     expect(eventRow(db, id).admin_token).toBe(before);
-    expect(calledUrls().some((u) => u.includes("resend"))).toBe(false);
+    expect(calledHosts()).not.toContain(RESEND_HOST);
   });
 
   it("once an email is saved, recovery rotates the token and mails the new link", async () => {
@@ -204,7 +209,7 @@ describe("events with no organizer email", () => {
     );
     expect(r.body.success).toBe(true);
     expect(eventRow(db, id).admin_token).not.toBe(await sha256Hex(adminToken));
-    expect(calledUrls().filter((u) => u.includes("api.resend.com"))).toHaveLength(1);
+    expect(calledHosts().filter((h) => h === RESEND_HOST)).toHaveLength(1);
   });
 
   it("reminders skip the organizer without trying to send", async () => {
