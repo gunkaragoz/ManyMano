@@ -1,7 +1,7 @@
 import type { MetaFunction } from "react-router";
 import { Link, data, useLoaderData } from "react-router";
 import { useState } from "react";
-import { ArrowRight, CalendarDays, ClipboardList } from "lucide-react";
+import { ArrowRight, CalendarDays, ClipboardList, Search, X } from "lucide-react";
 import TemplateIcon from "~/components/TemplateIcon";
 import {
   TEMPLATES,
@@ -51,6 +51,18 @@ export async function loader() {
       icon: t.icon,
       schedule: describeTemplateSchedule(t),
       path: templatePath(t),
+      // What the search box matches: the card text plus the page's own
+      // description, so "dining for dollars" finds the restaurant night.
+      searchText: [
+        t.name,
+        t.tagline,
+        TEMPLATE_CATEGORIES.find((c) => c.key === t.category)?.label ?? "",
+        t.type === "TIME_POLL" ? "poll meeting" : "sign-up signup sheet volunteer",
+        t.seo.h1,
+        t.seo.description,
+      ]
+        .join(" ")
+        .toLowerCase(),
     })),
     faq: HUB_FAQ,
   });
@@ -99,8 +111,14 @@ export default function TemplatesHub() {
   const { templates, faq } = useLoaderData<typeof loader>();
   const [type, setType] = useState<TypeFilter>("all");
   const [category, setCategory] = useState<TemplateCategory | "all">("all");
+  const [query, setQuery] = useState("");
+  // Every word has to appear somewhere; filters and search combine.
+  const words = query.toLowerCase().split(/\s+/).filter(Boolean);
   const shown = templates.filter(
-    (t) => (type === "all" || t.type === type) && (category === "all" || t.category === category)
+    (t) =>
+      (type === "all" || t.type === type) &&
+      (category === "all" || t.category === category) &&
+      words.every((w) => t.searchText.includes(w))
   );
   const categories = TEMPLATE_CATEGORIES.filter((c) =>
     templates.some((t) => t.category === c.key && (type === "all" || t.type === type))
@@ -132,6 +150,27 @@ export default function TemplatesHub() {
       </div>
 
       <div className="space-y-3">
+        <div className="relative max-w-md mx-auto">
+          <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" aria-hidden="true" />
+          <input
+            type="search"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder="Search templates — potluck, bake sale, meeting…"
+            aria-label="Search templates"
+            className="w-full pl-10 pr-10 py-2.5 rounded-full border border-slate-200 bg-white text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 placeholder:text-slate-400 [&::-webkit-search-cancel-button]:hidden"
+          />
+          {query && (
+            <button
+              type="button"
+              onClick={() => setQuery("")}
+              aria-label="Clear search"
+              className="absolute right-2 top-1/2 -translate-y-1/2 p-1.5 rounded-full text-slate-400 hover:text-slate-700 hover:bg-slate-100"
+            >
+              <X className="w-3.5 h-3.5" />
+            </button>
+          )}
+        </div>
         <div role="group" aria-label="Template type" className="flex flex-wrap justify-center gap-2">
           {TYPE_FILTERS.map((f) => (
             <button
@@ -166,6 +205,25 @@ export default function TemplatesHub() {
         </div>
       </div>
 
+      <p className="sr-only" aria-live="polite">
+        {shown.length} {shown.length === 1 ? "template" : "templates"} shown
+      </p>
+      {shown.length === 0 && (
+        <p className="text-center text-sm text-slate-500">
+          No templates match {query ? <>“{query}”</> : "these filters"}.{" "}
+          <button
+            type="button"
+            onClick={() => {
+              setQuery("");
+              setType("all");
+              setCategory("all");
+            }}
+            className="font-semibold text-blue-600 hover:text-blue-700"
+          >
+            Show all templates
+          </button>
+        </p>
+      )}
       <ul className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
         {shown.map((t) => {
           const isPoll = t.type === "TIME_POLL";
