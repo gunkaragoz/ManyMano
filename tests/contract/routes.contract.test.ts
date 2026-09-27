@@ -30,9 +30,9 @@ function routeSource(file: string): string {
 }
 
 describe("route files present", () => {
-  it("ships all 22 expected route modules", () => {
+  it("ships all 23 expected route modules", () => {
     const files = readdirSync(ROUTES_DIR).sort();
-    expect(files).toHaveLength(22);
+    expect(files).toHaveLength(23);
     for (const f of CRITICAL_ROUTES) {
       expect(files, `missing critical route ${f}`).toContain(f);
     }
@@ -40,10 +40,10 @@ describe("route files present", () => {
 
   it("every route resolves brand through getSiteConfig or the root loader (no hardcoded brand)", () => {
     // Shell (create._index, $.tsx) is exempt. Pure-data endpoints
-    // (api.pulse, events.$id.export) use only the DB binding — they are
+    // (api.pulse, api.conversions, events.$id.export) use only the DB binding — they are
     // exempt as long as they hardcode no brand string.
     // pulse.tsx reads brand via rootSiteFromMatches (root loader owns getSiteConfig).
-    const exempt = new Set(["create._index.tsx", "$.tsx", "api.pulse.ts", "events.$id.export.ts"]);
+    const exempt = new Set(["create._index.tsx", "$.tsx", "api.pulse.ts", "api.conversions.ts", "events.$id.export.ts"]);
     const files = readdirSync(ROUTES_DIR).filter((f) => !exempt.has(f));
     const offenders = files.filter((f) => !/getSiteConfig|rootSiteFromMatches|site\.ts/.test(routeSource(f)));
     expect(offenders).toEqual([]);

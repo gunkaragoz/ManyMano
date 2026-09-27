@@ -1,0 +1,92 @@
+name: SEO weekly check
+
+# Weekly SEO habit — see seo/README.md.
+# Read-only against the site: crawls public pages, reads Search Console and
+# /api/conversions, writes a snapshot to the `seo-data` branch and opens an
+# issue with the report. It never changes the site or main.
+
+on:
+  schedule:
+    - cron: "17 6 * * 1" # Mondays 06:17 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: write # push snapshots to the seo-data branch only
+  issues: write # open the weekly issue, close last week's
+
+concurrency:
+  group: seo-weekly
+  cancel-in-progress: false
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      SITE: ${{ vars.SEO_SITE_URL || 'https://manymano.com' }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Open the seo-data branch at seo/data
+        run: |
+          if git fetch origin seo-data:seo-data 2>/dev/null; then
+            git worktree add seo/data seo-data
+          else
+            git worktree add --orphan -b seo-data seo/data
+          fi
+
+      - name: Run the weekly check
+        id: run
+        env:
+          GSC_SERVICE_ACCOUNT_JSON: ${{ secrets.GSC_SERVICE_ACCOUNT_JSON }}
+          GSC_PROPERTY: ${{ secrets.GSC_PROPERTY }}
+          PSI_API_KEY: ${{ secrets.PSI_API_KEY }}
+        run: |
+          set +e
+          rm -f seo/data/latest.md # never re-post last week's report
+          node scripts/seo/weekly.mjs --site "$SITE" --out seo/data > /dev/null
+          echo "code=$?" >> "$GITHUB_OUTPUT"
+          test -f seo/data/latest.md
+
+      - name: Save snapshot to seo-data
+        working-directory: seo/data
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "SEO snapshot $(date -u +%F)" || exit 0
+          git push origin seo-data
+
+      - name: Open this week's issue
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require("fs");
+            const date = new Date().toISOString().slice(0, 10);
+            const prefix = "SEO weekly check — ";
+            let body = fs.readFileSync("seo/data/latest.md", "utf8");
+            if (body.length > 60000) body = body.slice(0, 60000) + "\n\n…truncated — full report on the seo-data branch.";
+            const run = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
+            body += `\n\n---\nSnapshot: \`seo-data:snapshots/${date}.json\` · [workflow run](${run})`;
+            const { data: issue } = await github.rest.issues.create({
+              ...context.repo,
+              title: prefix + date,
+              body,
+            });
+            // Keep one open weekly issue: close earlier ones, pointing to the new one.
+            const open = await github.paginate(github.rest.issues.listForRepo, { ...context.repo, state: "open", per_page: 100 });
+            for (const old of open) {
+              if (old.pull_request || old.number === issue.number || !old.title.startsWith(prefix)) continue;
+              await github.rest.issues.createComment({ ...context.repo, issue_number: old.number, body: `Superseded by #${issue.number}.` });
+              await github.rest.issues.update({ ...context.repo, issue_number: old.number, state: "closed", state_reason: "completed" });
+            }
+
+      - name: Fail on blocking SEO errors
+        if: steps.run.outputs.code != '0'
+        run: |
+          echo "::error::Blocking SEO errors (non-200, noindex, broken canonical or JSON-LD) — see this week's issue."
+          exit 1

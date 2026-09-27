@@ -8,6 +8,8 @@ import { usePersistentState } from "~/utils/usePersistentState";
 import { usePrefill } from "~/utils/usePrefill";
 import PrefillBanner from "~/components/PrefillBanner";
 import { loadCreatePrefill } from "~/utils/prefill.server";
+import { recordConversion } from "~/utils/conversions";
+import { AttributionFields } from "~/components/AttributionFields";
 import {
   isUnsupported,
   prefillTimezone,
@@ -372,6 +374,8 @@ export async function action({ request, context }: ActionFunctionArgs) {
     result: emailResult,
     limits: getEmailLimits(emailResult.provider, env),
   });
+  // SEO loop: count the conversion against the visit's landing page.
+  await recordConversion(env.DB, "TIME_POLL", formData);
 
   const headers = new Headers();
   headers.append("Set-Cookie", buildAdminCookie(eventId, adminToken));
@@ -678,6 +682,7 @@ export default function CreateMeetingPoll() {
       )}
 
       <Form method="post" className="bg-white border border-slate-200/80 rounded-3xl p-8 sm:p-10 shadow-[0_2px_12px_rgba(0,0,0,0.03)] space-y-10">
+        <AttributionFields />
         <input type="hidden" name="durationMinutes" value={durationMinutes === null ? "allday" : String(durationMinutes)} />
         <div className="relative pl-9 space-y-8">
           <div aria-hidden="true" className="absolute left-3 top-3 bottom-3 w-px bg-green-100" />
