@@ -1,5 +1,6 @@
-import type { LoaderFunctionArgs, MetaFunction } from "react-router";
-import { Link, data, isRouteErrorResponse, useLoaderData, useRouteError } from "react-router";
+// The page for one template, shared by /signup-sheet/:slug and
+// /meeting-poll/:slug. The route files only pick the type and wire these up.
+import { Link, isRouteErrorResponse, redirect, useLoaderData, useRouteError } from "react-router";
 import { ArrowRight, CalendarDays, Check, ClipboardList } from "lucide-react";
 import NotFound from "~/components/NotFound";
 import TemplateIcon from "~/components/TemplateIcon";
@@ -13,6 +14,7 @@ import {
   relatedTemplates,
   templateCreatePath,
   templatePath,
+  type EventTemplate,
 } from "~/utils/templates";
 import { formatDurationLabel } from "~/utils/calendar";
 import { formatTimeDisplay } from "~/utils/pollTitles";
@@ -21,13 +23,16 @@ import {
   faqPageJsonLd,
   mergeParentMeta,
   pageMetaOverrides,
-  rootSiteFromMatches,
   truncate,
+  type GenericMetaDescriptor,
 } from "~/utils/seo";
+import type { PublicSiteConfig } from "~/utils/site";
 
-export async function loader({ params }: LoaderFunctionArgs) {
-  const t = getTemplate(params.slug);
+export function loadTemplatePage(slug: string | undefined, type: EventTemplate["type"]) {
+  const t = getTemplate(slug);
   if (!t) throw new Response("Template not found", { status: 404 });
+  // A slug under the other type's path moves to its real address.
+  if (t.type !== type) throw redirect(templatePath(t), 301);
 
   const preview =
     t.type === "SIGNUP_SHEET"
@@ -46,7 +51,7 @@ export async function loader({ params }: LoaderFunctionArgs) {
           options: describePollOptions(t),
         };
 
-  return data({
+  return {
     template: {
       slug: t.slug,
       type: t.type,
@@ -67,11 +72,16 @@ export async function loader({ params }: LoaderFunctionArgs) {
       icon: r.icon,
       path: templatePath(r),
     })),
-  });
+  };
 }
 
-export const meta: MetaFunction<typeof loader> = ({ matches, loaderData }) => {
-  const site = rootSiteFromMatches(matches);
+export type TemplatePageData = ReturnType<typeof loadTemplatePage>;
+
+export function templatePageMeta(
+  site: PublicSiteConfig,
+  matches: Array<{ meta?: GenericMetaDescriptor[] }>,
+  loaderData: TemplatePageData | undefined
+): GenericMetaDescriptor[] {
   if (!loaderData) {
     return mergeParentMeta(matches, [
       ...pageMetaOverrides({
@@ -103,9 +113,9 @@ export const meta: MetaFunction<typeof loader> = ({ matches, loaderData }) => {
     },
     { "script:ld+json": faqPageJsonLd(t.seo.faqs) },
   ]);
-};
+}
 
-export function ErrorBoundary() {
+export function TemplatePageErrorBoundary() {
   const error = useRouteError();
   if (isRouteErrorResponse(error) && error.status === 404) {
     return (
@@ -119,7 +129,7 @@ export function ErrorBoundary() {
 }
 
 export default function TemplatePage() {
-  const { template: t, preview, related } = useLoaderData<typeof loader>();
+  const { template: t, preview, related } = useLoaderData() as TemplatePageData;
   const isPoll = t.type === "TIME_POLL";
   const accentButton = isPoll ? "bg-green-600 hover:bg-green-700" : "bg-blue-600 hover:bg-blue-700";
 

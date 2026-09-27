@@ -8,6 +8,7 @@ import {
   relatedTemplates,
   signupPrefillFromTemplate,
   templateCreatePath,
+  templatePath,
 } from "~/utils/templates";
 import { isUnsupported, resolvePollPrefill, resolveSignupPrefill, simulateSignupSubmission } from "~/utils/prefill";
 import {
@@ -137,6 +138,8 @@ describe("template catalog", () => {
     expect(templateCreatePath(getTemplate("potluck")!)).toBe("/create/signup?template=potluck");
     expect(templateCreatePath(getTemplate("book-club")!)).toBe("/create/poll?template=book-club");
     expect(getTemplate("nope")).toBeNull();
+    expect(templatePath(getTemplate("potluck")!)).toBe("/signup-sheet/potluck");
+    expect(templatePath(getTemplate("book-club")!)).toBe("/meeting-poll/book-club");
     for (const t of TEMPLATES) {
       const related = relatedTemplates(t);
       expect(related).toHaveLength(3);
@@ -147,7 +150,9 @@ describe("template catalog", () => {
   it("footer links all point at real templates", () => {
     expect(POPULAR_TEMPLATE_LINKS.length).toBeGreaterThanOrEqual(4);
     for (const l of POPULAR_TEMPLATE_LINKS) {
-      expect(getTemplate(l.path.replace("/templates/", "")), l.path).not.toBeNull();
+      const t = getTemplate(l.path.split("/").pop());
+      expect(t, l.path).not.toBeNull();
+      expect(templatePath(t!)).toBe(l.path);
     }
   });
 });

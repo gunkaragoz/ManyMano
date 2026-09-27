@@ -824,7 +824,7 @@ export const POPULAR_TEMPLATE_LINKS: Array<{ label: string; path: string }> = [
   ["meal-train", "Meal train"],
   ["concession-stand", "Concession stand schedule"],
   ["team-meeting", "Team meeting poll"],
-].map(([slug, label]) => ({ label, path: `/templates/${slug}` }));
+].map(([slug, label]) => ({ label, path: templatePath(getTemplate(slug)!) }));
 
 export function getTemplate(slug: string | null | undefined): EventTemplate | null {
   if (!slug) return null;
@@ -832,7 +832,7 @@ export function getTemplate(slug: string | null | undefined): EventTemplate | nu
 }
 
 export function templatePath(t: EventTemplate): string {
-  return `/templates/${t.slug}`;
+  return `/${t.type === "TIME_POLL" ? "meeting-poll" : "signup-sheet"}/${t.slug}`;
 }
 
 export function templateCreatePath(t: EventTemplate): string {
