@@ -1,6 +1,7 @@
 import { getCloudflareEnv } from "~/utils/cloudflare-context";
 import type { LoaderFunctionArgs } from "react-router";
 import { getSiteConfig } from "~/utils/site";
+import { isMcpEnabled, mcpCatalogEntry } from "~/utils/mcp-discovery";
 
 // Serves /.well-known/ai-catalog.json (ARD spec 1.0) so agent-discoverability
 // scanners (e.g. PageSpeed) get valid JSON instead of the HTML 404 page.
@@ -8,18 +9,18 @@ import { getSiteConfig } from "~/utils/site";
 // NOTE: flat-routes escaping — `[.]` renders a literal dot, so this file
 // maps to the `/.well-known/ai-catalog.json` path.
 //
-// ManyMano currently exposes no MCP / A2A capabilities, so `entries` is an
-// empty array (schema-valid). When an MCP is added, append one entry per
-// server card (identifier urn:air:..., displayName, type, url/data).
+// Lists the MCP server (inline server card) only while MCP_ENABLED is
+// "true"; otherwise `entries` is an empty array (schema-valid).
 export async function loader({ context }: LoaderFunctionArgs) {
-  const site = getSiteConfig(getCloudflareEnv(context));
+  const env = getCloudflareEnv(context);
+  const site = getSiteConfig(env);
   const body = {
     specVersion: "1.0",
     host: {
       displayName: site.siteName,
       documentationUrl: site.siteUrl,
     },
-    entries: [],
+    entries: isMcpEnabled(env) ? [mcpCatalogEntry(site)] : [],
   };
   return new Response(JSON.stringify(body), {
     status: 200,

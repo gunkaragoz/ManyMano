@@ -8,6 +8,7 @@ import {
   getEmailLimits,
   getEmailUsage,
 } from "~/utils/quota";
+import { getMcpLimits, getMcpUsage } from "~/utils/mcp-quota";
 
 // GET /api/usage — email quota status (aggregate counts only, no PII).
 //
@@ -18,6 +19,8 @@ import {
 //   the app without a Cloudflare API token, so this echoes the static free
 //   limits + where to watch them. Cloudflare itself emails the account owner
 //   at ~90% of daily usage and when D1 limits are hit.
+// - `mcp`: whether POST /mcp is on, today's admitted tool calls / creates
+//   against their budgets (null when a counter can't be read).
 // - `alerts`: whether ALERT_WEBHOOK_URL is set (Discord/Slack webhook fired
 //   at 80/90/100% and on exhaustion — see app/utils/quota.ts).
 //
@@ -38,6 +41,9 @@ export async function loader({ context }: LoaderFunctionArgs) {
     EMAIL_DAILY_LIMIT?: string;
     EMAIL_MONTHLY_LIMIT?: string;
     ALERT_WEBHOOK_URL?: string;
+    MCP_ENABLED?: string;
+    MCP_DAILY_LIMIT?: string;
+    MCP_WRITE_DAILY_LIMIT?: string;
     SITE_URL: string;
     SITE_NAME: string;
     SITE_TAGLINE: string;
@@ -56,8 +62,28 @@ export async function loader({ context }: LoaderFunctionArgs) {
     email = { daily: 0, monthly: 0, dailyPct: 0, monthlyPct: 0 };
   }
 
+  const mcpEnabled = env.MCP_ENABLED === "true";
+  let mcpLimits: { calls: number; writes: number } | null = null;
+  try {
+    mcpLimits = getMcpLimits(env);
+  } catch {
+    // Misconfigured limits keep MCP closed; report that instead of failing.
+  }
+  const mcpUsage = await getMcpUsage(env.DB);
+
   return data(
     {
+      mcp: {
+        enabled: mcpEnabled,
+        configValid: mcpLimits !== null,
+        day: mcpUsage.day,
+        calls: mcpUsage.calls,
+        callsLimit: mcpLimits?.calls ?? null,
+        creates: mcpUsage.writes,
+        createsLimit: mcpLimits?.writes ?? null,
+        resetsInSeconds: mcpUsage.resetsInSeconds,
+        note: "Admitted tool calls and create attempts (UTC day). Not a measure of Cloudflare usage.",
+      },
       email: {
         ...email,
         provider,

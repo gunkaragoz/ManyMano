@@ -212,7 +212,17 @@ export async function reserveCounterBelowLimit(
   limit: number,
   nowIso: string
 ): Promise<boolean> {
-  if (limit <= 0) return false;
+  return (await reserveCounterBelowLimitCount(d1, key, limit, nowIso)) !== null;
+}
+
+/** Same as reserveCounterBelowLimit, returning the admitted count (or null when full). */
+export async function reserveCounterBelowLimitCount(
+  d1: D1Database,
+  key: string,
+  limit: number,
+  nowIso: string
+): Promise<number | null> {
+  if (limit <= 0) return null;
   const row = await d1
     .prepare(
       `INSERT INTO usage_counters (key, count, updated_at) VALUES (?1, 1, ?2)
@@ -222,7 +232,7 @@ export async function reserveCounterBelowLimit(
     )
     .bind(key, nowIso, limit)
     .first<{ count: number }>();
-  return row != null;
+  return row?.count ?? null;
 }
 
 /**
@@ -252,7 +262,7 @@ export async function emailBudgetAvailable(
   }
 }
 
-async function claimAlert(d1: D1Database, alertKey: string, nowIso: string): Promise<boolean> {
+export async function claimAlert(d1: D1Database, alertKey: string, nowIso: string): Promise<boolean> {
   try {
     const res = await d1
       .prepare(
@@ -267,7 +277,7 @@ async function claimAlert(d1: D1Database, alertKey: string, nowIso: string): Pro
   }
 }
 
-async function postWebhook(webhookUrl: string, message: string): Promise<boolean> {
+export async function postWebhook(webhookUrl: string, message: string): Promise<boolean> {
   try {
     const res = await fetch(webhookUrl, {
       method: "POST",

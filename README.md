@@ -130,6 +130,46 @@ Keep the rest short and readable: `feat/multi-day-repeating-sheets`, `fix/timezo
 
 ---
 
+## 🤖 MCP for AI agents
+
+`POST /mcp` is a stateless [MCP](https://modelcontextprotocol.io/) server
+(Streamable HTTP, JSON responses, no sessions, no auth) on the same Worker.
+It's **off unless `MCP_ENABLED="true"`** (production ships `"false"`; staging
+and previews `"true"`). Turning it off again is the kill switch.
+
+| Tool | What it does |
+|---|---|
+| `create_signup_sheet` | Title, optional date, timezone, organizer name, 1–31 tasks with capacities (optional same-day times). |
+| `create_poll` | 1–31 day or day+time options; `allDay: true` or `durationMinutes` (15–1440). |
+| `get_event` | Public summary: filled counts per task, or yes/maybe/no per option. No names or emails. |
+
+- **No email.** MCP creation takes no organizer email and never sends mail.
+  The result carries `publicUrl`, a secret `adminUrl` and `qrUrl`; the agent
+  hands the admin link to the organizer, who can add an email later from
+  admin mode for a backup. Without one, a lost admin link can't be recovered.
+- **Not idempotent.** Each create call makes a new event; clients shouldn't
+  retry a failed or timed-out call automatically.
+- **Budgets** (per UTC day, per D1 database): `MCP_DAILY_LIMIT` tool calls
+  (default 2000) and `MCP_WRITE_DAILY_LIMIT` creates (default 200). Discovery
+  (`initialize`, `tools/list`) never touches D1. Over budget: `429` with
+  `Retry-After`; creates fail as tool errors while reads keep working.
+  Per-IP limits (per isolate): 60 requests and 10 creates per 10 minutes.
+  `ALERT_WEBHOOK_URL` gets 80/90/100% alerts; `GET /api/usage` shows counts.
+- **Protocol:** MCP `2025-11-25` (SDK also accepts `2025-06-18`,
+  `2025-03-26`, `2024-11-05`). One message per POST; no batches.
+  Requests with an `Origin` header must come from `SITE_URL`.
+- **Edge rules (dashboard, free plan):** extend the existing WAF rate-limit
+  rule's expression to include `/mcp`. Check Bot Fight Mode with a real
+  Claude / ChatGPT connector before announcing it.
+- **WebMCP:** Cloudflare's WebMCP "Site MCP Server" pack can expose this
+  endpoint to in-browser agents. It isn't enabled; do that as a separate step
+  after measuring its request pattern.
+
+When enabled, the endpoint is listed in `/.well-known/ai-catalog.json` and
+`/llms.txt`.
+
+---
+
 ## 🔎 SEO
 
 A weekly, free-tools-only SEO habit lives in [`seo/`](seo/README.md): event
@@ -151,6 +191,7 @@ change at a time.
 - **Calendar**: Edge-native RFC 5545 `.ics` generator
 - **Email**: [Resend](https://resend.com/) (default) or generic SMTP incl. Amazon SES via `worker-mailer`, with graceful offline fallback
 - **Bot Protection**: [Cloudflare Turnstile](https://developers.cloudflare.com/turnstile/)
+- **Agents**: [MCP TypeScript SDK](https://github.com/modelcontextprotocol/typescript-sdk) (stateless Streamable HTTP on the same Worker)
 - **QR Codes**: Server-rendered event share codes via `qrcode`
 
 ---

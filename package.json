@@ -20,6 +20,7 @@
   },
   "dependencies": {
     "@cloudflare/vite-plugin": "^1.55.0",
+    "@modelcontextprotocol/sdk": "1.30.0",
     "@react-router/dev": "8.4.0",
     "@react-router/fs-routes": "8.4.0",
     "clsx": "^2.1.1",
@@ -31,7 +32,8 @@
     "react-dom": "^19.3.0",
     "react-router": "8.4.0",
     "tailwind-merge": "^3.0.2",
-    "worker-mailer": "^1.2.1"
+    "worker-mailer": "^1.2.1",
+    "zod": "^4.6.5"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^4.20250224.0",

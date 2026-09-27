@@ -37,6 +37,10 @@ export interface CloudflareEnv {
   TURNSTILE_SECRET_KEY?: string;
   TURNSTILE_HOSTNAMES?: string;
   RETENTION_DAYS?: string;
+  /** "true" turns on POST /mcp. Anything else keeps it off (404). */
+  MCP_ENABLED?: string;
+  MCP_DAILY_LIMIT?: string;
+  MCP_WRITE_DAILY_LIMIT?: string;
 }
 
 export interface CloudflareContextValue {

@@ -2,11 +2,13 @@ import { getCloudflareEnv } from "~/utils/cloudflare-context";
 import type { LoaderFunctionArgs } from "react-router";
 import { absoluteUrl } from "~/utils/seo";
 import { getSiteConfig } from "~/utils/site";
+import { isMcpEnabled, mcpLlmsSection } from "~/utils/mcp-discovery";
 import { TEMPLATES, templatePath } from "~/utils/templates";
 
 export async function loader({ request, context }: LoaderFunctionArgs) {
   void request;
-  const site = getSiteConfig(getCloudflareEnv(context));
+  const env = getCloudflareEnv(context);
+  const site = getSiteConfig(env);
   const siteUrl = site.siteUrl;
   const siteName = site.siteName;
   const siteTagline = site.siteTagline;
@@ -49,6 +51,7 @@ export async function loader({ request, context }: LoaderFunctionArgs) {
     "## Key pages",
     "",
     ...links,
+    ...(isMcpEnabled(env) ? mcpLlmsSection(siteUrl) : []),
   ].join("\n");
 
   return new Response(body, {
