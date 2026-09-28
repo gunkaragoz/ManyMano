@@ -3015,7 +3015,7 @@ function EditShiftCard({
                 <input type="text" name="taskTitle" required defaultValue={task.title} className={EDIT_INPUT} />
               </div>
               <div className="sm:col-span-3">
-                <label className={EDIT_SUBLABEL}>Spots Needed</label>
+                <label className={EDIT_SUBLABEL}>Spots</label>
                 <input
                   type="number"
                   name="taskCapacity"
@@ -3066,7 +3066,7 @@ function EditShiftCard({
                 <input type="text" name="taskTitle" required placeholder="e.g., Setup Crew" className={EDIT_INPUT} />
               </div>
               <div className="sm:col-span-3">
-                <label className={EDIT_SUBLABEL}>Spots Needed</label>
+                <label className={EDIT_SUBLABEL}>Spots</label>
                 <input type="number" name="taskCapacity" min={1} max={999} defaultValue={1} className={EDIT_INPUT} />
               </div>
               <div className="sm:col-span-1 flex sm:justify-end">
@@ -3203,7 +3203,7 @@ function NewShiftCard({
           <input type="text" name="slotTitle" required placeholder="e.g., Clean-up Crew" className={EDIT_INPUT} />
         </div>
         <div className="sm:col-span-3">
-          <label className={EDIT_SUBLABEL}>Spots Needed</label>
+          <label className={EDIT_SUBLABEL}>Spots</label>
           <input type="number" name="slotCapacity" min={1} max={999} defaultValue={1} className={EDIT_INPUT} />
         </div>
       </div>
