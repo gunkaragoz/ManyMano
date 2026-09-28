@@ -7,7 +7,13 @@ export interface TurnstileEnv {
   TURNSTILE_HOSTNAMES?: string;
 }
 
-export type TurnstileAction = "create-signup" | "create-poll" | "event-signup" | "poll-vote" | "resend-admin";
+export type TurnstileAction =
+  | "create-signup"
+  | "create-poll"
+  | "event-signup"
+  | "poll-vote"
+  | "resend-admin"
+  | "set-organizer-email";
 
 const SITEVERIFY_URL = "https://challenges.cloudflare.com/turnstile/v0/siteverify";
 

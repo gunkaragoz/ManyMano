@@ -17,6 +17,7 @@ import {
   KeyRound,
   Link2,
   Lock,
+  Mail,
   MapPin,
   Minus,
   PartyPopper,
@@ -30,14 +31,28 @@ import {
 } from "lucide-react";
 import { getDb, events, eventSlots, signups, pollVotes, pollVoteEntries } from "~/db";
 import { generateInternalId, generateSecretToken } from "~/utils/ids";
-import { sendEmail, emailFooter, getEmailSenderConfig, resolveEmailProvider } from "~/utils/email";
-import { trackEmailUsage, getEmailLimits, guestEmailAllowed } from "~/utils/quota";
+import { sendEmail, emailFooter, getEmailSenderConfig, isEmailDeliveryConfigured, resolveEmailProvider } from "~/utils/email";
+import {
+  trackEmailUsage,
+  getEmailLimits,
+  guestEmailAllowed,
+  emailBudgetAvailable,
+  reserveCounterBelowLimit,
+} from "~/utils/quota";
+import {
+  ORGANIZER_EMAIL_CHANGES_PER_HOUR,
+  buildOrganizerLinkEmail,
+  organizerEmailLimitKey,
+  organizerLinks,
+  saveOrganizerEmail,
+} from "~/utils/organizer-email";
 import { asExternalUrl, escapeHtml, locationHtml } from "~/utils/sanitize";
 import {
   buildAdminCookie,
   buildExpiredAdminCookie,
   getPresentedAdminToken,
   hashSecretForStorage,
+  isSameOriginRequest,
   secretMatches,
   verifyAdminToken,
 } from "~/utils/auth";
@@ -586,6 +601,11 @@ function checkResendRateLimit(key: string): boolean {
       for (const [k, v] of resendAttempts) {
         if (now > v.resetAt) resendAttempts.delete(k);
         if (resendAttempts.size < 800) break;
+      }
+      // Still full (active flood): evict oldest inserted key (Map order).
+      if (resendAttempts.size >= 1000) {
+        const oldest = resendAttempts.keys().next();
+        if (!oldest.done) resendAttempts.delete(oldest.value);
       }
     }
     resendAttempts.set(key, { count: 1, resetAt: now + RESEND_WINDOW_MS });
@@ -2649,6 +2669,74 @@ export async function action({ request, params, context }: ActionFunctionArgs) {
       }
     }
     return redirect(`/events/${eventId}?cancel_error=1`);
+  }
+
+  // 10b. Organizer adds or changes their email from admin mode (events
+  // created over MCP start with none). Rules live in ~/utils/organizer-email.
+  if (intent === "set_organizer_email") {
+    const clientIp = request.headers.get("cf-connecting-ip") || "unknown";
+    const mailConfigured = isEmailDeliveryConfigured(env);
+    const emailLimits = getEmailLimits(resolveEmailProvider(env), env);
+    const outcome = await saveOrganizerEmail(
+      {
+        isSameOrigin: () => isSameOriginRequest(request),
+        requireAdmin,
+        assessBot: () => assessGuestRequest(formData, { ip: clientIp, eventId }),
+        mailConfigured,
+        turnstileConfigured: Boolean(env.TURNSTILE_SECRET_KEY?.trim()),
+        ipRateLimitOk: () => checkResendRateLimit(`setemail:${clientIp}:${eventId}`),
+        reserveEventChange: () =>
+          reserveCounterBelowLimit(
+            env.DB,
+            organizerEmailLimitKey(eventId, new Date()),
+            ORGANIZER_EMAIL_CHANGES_PER_HOUR,
+            now
+          ),
+        verifyTurnstile: async () =>
+          (
+            await verifyTurnstile({
+              token: formData.get("cf-turnstile-response") as string | null,
+              expectedAction: "set-organizer-email",
+              env,
+              remoteIp: request.headers.get("cf-connecting-ip"),
+            })
+          ).ok,
+        saveEmail: async (email) => {
+          await db
+            .update(events)
+            .set({ organizerEmail: email, updatedAt: now })
+            .where(eq(events.id, eventId));
+        },
+        budgetAvailable: () => emailBudgetAvailable(env.DB, emailLimits),
+        sendLinkEmail: (email) => {
+          const links = organizerLinks(site.siteUrl, eventId, presentedAdmin as string);
+          const message = buildOrganizerLinkEmail({
+            site,
+            title: event.title,
+            organizerName: event.organizerName,
+            isPoll,
+            ...links,
+          });
+          return sendEmail({
+            ...getEmailSenderConfig(env),
+            from: site.fromEmail,
+            to: email,
+            subject: message.subject,
+            html: message.html,
+          });
+        },
+        trackUsage: async (result) => {
+          await trackEmailUsage(env.DB, {
+            webhookUrl: env.ALERT_WEBHOOK_URL,
+            appName: site.siteName,
+            result,
+            limits: getEmailLimits(result.provider, env),
+          });
+        },
+      },
+      { raw: formData.get("organizerEmail"), currentEmail: event.organizerEmail }
+    );
+    return data(outcome.body, { status: outcome.status });
   }
 
   // 11. Organizer-link recovery ("Lost your organizer link?").
@@ -4835,6 +4923,79 @@ export default function EventView() {
             </p>
           </div>
         )}
+
+        {/* Organizer email — events created by an agent start without one.
+            Saving mails the organizer link as a backup and enables recovery. */}
+        {isAdmin &&
+          (() => {
+            const currentEmail = ((event as { organizerEmail?: string | null }).organizerEmail || "").trim();
+            return (
+              <details
+                open={!currentEmail}
+                className="group rounded-xl border border-slate-200 bg-slate-50/70 px-4 py-3 open:bg-white transition-colors"
+              >
+                <summary className="flex items-center gap-2.5 cursor-pointer list-none text-xs font-bold text-slate-800">
+                  <span className="w-7 h-7 rounded-full bg-slate-900 text-white flex items-center justify-center shrink-0">
+                    <Mail className="w-3.5 h-3.5" />
+                  </span>
+                  <span className="flex-1 min-w-0">
+                    {currentEmail ? "Organizer email" : "No email on file. Add one to get a backup of this link."}
+                    {currentEmail && (
+                      <span className="block text-[11px] font-medium text-slate-500 mt-0.5 truncate">{currentEmail}</span>
+                    )}
+                  </span>
+                  <span className="text-slate-400 group-open:rotate-45 transition-transform text-lg leading-none font-normal">
+                    +
+                  </span>
+                </summary>
+                <Form method="post" className="mt-3 space-y-2">
+                  <input type="hidden" name="intent" value="set_organizer_email" />
+                  <input type="hidden" name="adminToken" value={adminToken || ""} />
+                  <input type="hidden" name="formStartedAt" value={pageLoadedAt} />
+                  {/* Honeypot: humans never see it, bots autofill it. */}
+                  <div className="absolute -left-[9999px] top-auto w-px h-px overflow-hidden" aria-hidden="true">
+                    <label>
+                      Company website (leave blank)
+                      <input type="text" name="company_website" autoComplete="off" tabIndex={-1} />
+                    </label>
+                  </div>
+                  <p className="text-xs text-slate-600 leading-relaxed">
+                    Saving sends your private organizer link to this address.
+                  </p>
+                  <div className="flex flex-col sm:flex-row gap-2">
+                    <label htmlFor="organizer-email" className="sr-only">
+                      Organizer email
+                    </label>
+                    <input
+                      key={currentEmail}
+                      id="organizer-email"
+                      type="email"
+                      name="organizerEmail"
+                      required
+                      maxLength={254}
+                      defaultValue={currentEmail}
+                      placeholder="you@example.com"
+                      autoComplete="email"
+                      className="flex-1 px-4 py-2.5 rounded-xl border border-slate-200 bg-white text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 placeholder:text-slate-400"
+                    />
+                    <button
+                      type="submit"
+                      disabled={isSubmitting}
+                      className="px-5 py-2.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-white text-xs font-bold shadow-sm transition-all disabled:opacity-50 inline-flex items-center justify-center gap-1.5 shrink-0"
+                    >
+                      <Mail className="w-3.5 h-3.5" />
+                      {isSubmitting ? "Saving…" : "Save email"}
+                    </button>
+                  </div>
+                  {turnstileSiteKey && (
+                    <div className="flex justify-start [&:empty]:hidden [&:has(.cf-turnstile:empty)]:hidden">
+                      <Turnstile siteKey={turnstileSiteKey} action="set-organizer-email" resetKey={navigation.state} />
+                    </div>
+                  )}
+                </Form>
+              </details>
+            );
+          })()}
 
         {/* Organizer-link recovery — visible to non-admins so a lost private
             link is never a dead end. Tokens are stored hashed, so the old link

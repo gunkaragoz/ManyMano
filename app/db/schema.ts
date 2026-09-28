@@ -94,7 +94,8 @@ export const reminderSends = sqliteTable(
 // Free-tier quota tracking (Resend email counts + alert dedupe).
 // Keys are period-scoped so rows never grow unboundedly in practice:
 //   email:daily:YYYY-MM-DD, email:monthly:YYYY-MM,
-//   email:alert:daily:80:YYYY-MM-DD, ... (one row per threshold hit)
+//   email:alert:daily:80:YYYY-MM-DD, ... (one row per threshold hit),
+//   setemail:<eventId>:YYYY-MM-DDTHH (organizer email changes per hour)
 // Old periods are harmless (tiny rows); retention pruning leaves them alone.
 export const usageCounters = sqliteTable("usage_counters", {
   key: text("key").primaryKey(),

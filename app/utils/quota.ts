@@ -200,6 +200,58 @@ export async function recordEmailSent(
   };
 }
 
+/**
+ * Admit one unit against `limit` in a single statement: +1 and true while
+ * the counter is below the limit, false once it is full. Concurrent callers
+ * can't both take the last unit. Storage errors throw so callers fail
+ * closed instead of reading an outage as "no usage".
+ */
+export async function reserveCounterBelowLimit(
+  d1: D1Database,
+  key: string,
+  limit: number,
+  nowIso: string
+): Promise<boolean> {
+  if (limit <= 0) return false;
+  const row = await d1
+    .prepare(
+      `INSERT INTO usage_counters (key, count, updated_at) VALUES (?1, 1, ?2)
+       ON CONFLICT(key) DO UPDATE SET count = count + 1, updated_at = ?2
+       WHERE usage_counters.count < ?3
+       RETURNING count`
+    )
+    .bind(key, nowIso, limit)
+    .first<{ count: number }>();
+  return row != null;
+}
+
+/**
+ * True only when both email counters could be read and neither is spent.
+ * For optional sends that must not go out when usage is unknown.
+ */
+export async function emailBudgetAvailable(
+  d1: D1Database,
+  limits: EmailLimits,
+  now = new Date()
+): Promise<boolean> {
+  try {
+    const read = async (key: string) => {
+      const row = await d1
+        .prepare("SELECT count FROM usage_counters WHERE key = ?1")
+        .bind(key)
+        .first<{ count: number }>();
+      return row?.count ?? 0;
+    };
+    const [daily, monthly] = await Promise.all([
+      read(dailyKey(utcDayString(now))),
+      read(monthlyKey(utcMonthString(now))),
+    ]);
+    return daily < limits.dailyLimit && monthly < limits.monthlyLimit;
+  } catch {
+    return false;
+  }
+}
+
 async function claimAlert(d1: D1Database, alertKey: string, nowIso: string): Promise<boolean> {
   try {
     const res = await d1

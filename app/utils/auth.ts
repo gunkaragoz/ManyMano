@@ -44,6 +44,25 @@ export function safeEqual(a: string, b: string): boolean {
   return timingSafeEqualString(a, b);
 }
 
+/**
+ * CSRF guard for browser writes that ride the admin cookie. Browsers send
+ * Origin on POST (or at least Sec-Fetch-Site); a request with neither is
+ * not from a browser page, so the cookie can't be riding along.
+ */
+export function isSameOriginRequest(request: Request): boolean {
+  const origin = request.headers.get("origin");
+  if (origin) {
+    try {
+      return new URL(request.url).origin === origin;
+    } catch {
+      return false;
+    }
+  }
+  const site = request.headers.get("sec-fetch-site");
+  if (site) return site === "same-origin" || site === "none";
+  return true;
+}
+
 function cookieName(eventId: string): string {
   return `mm_admin_${eventId}`;
 }
