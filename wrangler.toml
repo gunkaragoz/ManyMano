@@ -21,6 +21,11 @@ migrations_dir = "./drizzle/migrations"
 # change it in production, staging and previews too, or the deployed site
 # keeps the old copy. `npm run test:predeploy` fails when they drift.
 [vars]
+# MCP endpoint (POST /mcp): off in production until explicitly enabled.
+# Budgets are per UTC day, per D1 database (see app/utils/mcp-quota.ts).
+MCP_ENABLED = "false"
+MCP_DAILY_LIMIT = "2000"
+MCP_WRITE_DAILY_LIMIT = "200"
 SITE_URL = "https://manymano.com"
 SITE_NAME = "ManyMano"
 SITE_TAGLINE = "Free sign-up sheets and meeting polls."
@@ -46,6 +51,9 @@ TURNSTILE_HOSTNAMES = "manymano.com,www.manymano.com"
 # per-branch preview host, which changes with every branch name; it only
 # feeds links and metadata, never request checks.
 [previews.vars]
+MCP_ENABLED = "true"
+MCP_DAILY_LIMIT = "2000"
+MCP_WRITE_DAILY_LIMIT = "200"
 SITE_URL = "https://manymano-staging.gunk.workers.dev"
 SITE_NAME = "ManyMano"
 SITE_TAGLINE = "Free sign-up sheets and meeting polls."
@@ -73,6 +81,9 @@ name = "manymano"
 # NOTE: env sections do NOT inherit top-level [vars] in the generated deploy
 # config — vars are repeated here explicitly (kept in sync with [vars] above).
 [env.production.vars]
+MCP_ENABLED = "false"
+MCP_DAILY_LIMIT = "2000"
+MCP_WRITE_DAILY_LIMIT = "200"
 SITE_URL = "https://manymano.com"
 SITE_NAME = "ManyMano"
 SITE_TAGLINE = "Free sign-up sheets and meeting polls."
@@ -130,6 +141,9 @@ name = "manymano-staging"
 # only REMINDER_SECRET is set (staging-only value via `wrangler secret
 # put REMINDER_SECRET --env staging`) and reminders are dry-run only.
 [env.staging.vars]
+MCP_ENABLED = "true"
+MCP_DAILY_LIMIT = "2000"
+MCP_WRITE_DAILY_LIMIT = "200"
 SITE_URL = "https://manymano-staging.gunk.workers.dev"
 SITE_NAME = "ManyMano"
 SITE_TAGLINE = "Free sign-up sheets and meeting polls."
@@ -154,6 +168,9 @@ migrations_dir = "./drizzle/migrations"
 # the staging database, no mail credentials, no bot-check keys, no reminder
 # secret (so /api/reminders answers 503 rather than sending from a preview).
 [env.staging.previews.vars]
+MCP_ENABLED = "true"
+MCP_DAILY_LIMIT = "2000"
+MCP_WRITE_DAILY_LIMIT = "200"
 # Preview URLs are <preview-name>-<worker>.<subdomain>.workers.dev, so this
 # matches `wrangler preview --env staging --name multiday`. Deploy a preview
 # under a different --name with `--var SITE_URL:https://<that-url>`.

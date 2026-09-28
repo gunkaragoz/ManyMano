@@ -13,6 +13,17 @@ const requestHandler = createRequestHandler(
 export default {
   async fetch(request: Request, env: CloudflareEnv, ctx: ExecutionContext) {
     const url = new URL(request.url);
+    // MCP stays out of the React Router bundle path and does no work at all
+    // while disabled. www gets a 308 so a POST stays a POST.
+    if (url.pathname === "/mcp") {
+      if (env.MCP_ENABLED !== "true") return new Response("Not found", { status: 404 });
+      if (url.hostname.startsWith("www.")) {
+        url.hostname = url.hostname.slice(4);
+        return Response.redirect(url.toString(), 308);
+      }
+      const { handleMcp } = await import("../app/mcp/handler");
+      return handleMcp(request, env, ctx);
+    }
     if (url.hostname.startsWith("www.")) {
       url.hostname = url.hostname.slice(4);
       return Response.redirect(url.toString(), 301);

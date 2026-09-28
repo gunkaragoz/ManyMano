@@ -57,6 +57,8 @@ In scope:
 - Auth model: tokenized admin / participant links, hashed secrets,
   HttpOnly admin cookie
 - Email paths: Resend / SMTP, reminder cron, `.ics` generation
+- `POST /mcp` (when enabled): quota / rate-limit bypass, private data
+  in `get_event`, email sending, admin-link leakage
 - Bot abuse bypasses (Turnstile), rate-limit / quota exhaustion,
   stored XSS via event / attendee fields, CSV export access control
 
@@ -105,6 +107,13 @@ You are responsible for your own instance. Minimum hardening:
 - Treat organizer admin links as passwords: anyone holding the link
   (or the HttpOnly admin cookie) has full control of that event,
   including roster CSV export and deletion.
+- **MCP (`MCP_ENABLED="true"`)** makes `POST /mcp` a public,
+  unauthenticated endpoint. An event created there returns its admin
+  link to the calling agent/client, so that client (and any logs or
+  transcripts it keeps) holds a bearer link with full control of the
+  event. MCP creation sends no email. The endpoint ignores cookies, so
+  a same-origin browser call gets no extra power. Keep the daily
+  budgets set and extend your WAF rate-limit rule to `/mcp`.
 
 ## Security Contacts & Feeds
 
