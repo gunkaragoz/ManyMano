@@ -1,0 +1,1033 @@
+{
+  "date": "2026-09-28",
+  "siteUrl": "https://manymano.com",
+  "audit": {
+    "pages": [
+      {
+        "path": "/",
+        "status": 200,
+        "findings": [],
+        "title": "ManyMano - Free sign-up sheets and meeting polls.",
+        "description": "Free sign-up sheets and meeting polls. No accounts, no ads — create and share in seconds. A free Doodle and SignUpGenius alternative.",
+        "h1": "Coordinate people without the chaos.",
+        "h2s": [
+          "Sign-Up Sheets",
+          "Meeting Time Finder",
+          "Start from a template",
+          "Frequently Asked Questions"
+        ],
+        "wordCount": 691,
+        "jsonLd": [
+          "FAQPage",
+          "Organization",
+          "WebSite",
+          "SoftwareApplication"
+        ],
+        "inbound": 37
+      },
+      {
+        "path": "/create",
+        "status": 200,
+        "findings": [],
+        "title": "Create Event — Sign-Up Sheet or Meeting Poll | ManyMano",
+        "description": "Create a free sign-up sheet or meeting poll in seconds. No accounts, no ads — just share the link.",
+        "h1": "What would you like to create?",
+        "h2s": [
+          "Sign-Up Sheet",
+          "Meeting Time Finder",
+          "Or start from a template"
+        ],
+        "wordCount": 181,
+        "jsonLd": [
+          "BreadcrumbList",
+          "Organization",
+          "WebSite",
+          "SoftwareApplication"
+        ],
+        "inbound": 37
+      },
+      {
+        "path": "/create/signup",
+        "status": 200,
+        "findings": [],
+        "title": "Create a Free Sign-Up Sheet — No Account Needed | ManyMano",
+        "description": "Free sign-up sheets with shifts, slot limits and CSV export. No accounts, no ads — create and share in seconds.",
+        "h1": "Create Sign-Up Sheet",
+        "h2s": [],
+        "wordCount": 269,
+        "jsonLd": [
+          "BreadcrumbList",
+          "Organization",
+          "WebSite",
+          "SoftwareApplication"
+        ],
+        "inbound": 37
+      },
+      {
+        "path": "/create/poll",
+        "status": 200,
+        "findings": [],
+        "title": "Create a Free Meeting Poll — Find a Time Fast | ManyMano",
+        "description": "Free meeting polls with Yes / Maybe / No voting and calendar sync. No accounts, no ads — create and share in seconds.",
+        "h1": "Create Meeting Time Poll",
+        "h2s": [],
+        "wordCount": 262,
+        "jsonLd": [
+          "BreadcrumbList",
+          "Organization",
+          "WebSite",
+          "SoftwareApplication"
+        ],
+        "inbound": 37
+      },
+      {
+        "path": "/templates",
+        "status": 200,
+        "findings": [],
+        "title": "Free Sign-Up Sheet & Meeting Poll Templates | ManyMano",
+        "description": "Ready-made sign-up sheets and meeting polls for schools, fundraisers, teams and friends. Pick one, edit anything, share the link. Free, no accounts.",
+        "h1": "Free sign-up sheet and meeting poll templates",
+        "h2s": [
+          "Staff appreciation week",
+          "Book fair",
+          "Parent–teacher conferences",
+          "Potluck",
+          "Classroom party",
+          "Bake sale",
+          "Concession stand",
+          "Car wash fundraiser",
+          "Thursday folders helper",
+          "Meal train",
+          "Staff welcome back lunch",
+          "Back to school night",
+          "Movie night",
+          "Bike to school day",
+          "Culture and heritage night",
+          "Thanksgiving lunch",
+          "Skate night",
+          "STEAM night",
+          "Cookie bar",
+          "Bingo night",
+          "School basketball game",
+          "Spring fundraiser",
+          "Restaurant spirit night",
+          "Team meeting",
+          "Book club",
+          "Pickup soccer",
+          "Board game night",
+          "Winery visit",
+          "Happy hour",
+          "PTA meeting",
+          "Family reunion",
+          "Neighborhood get-together",
+          "Band rehearsal",
+          "Questions about templates"
+        ],
+        "wordCount": 826,
+        "jsonLd": [
+          "BreadcrumbList",
+          "ItemList",
+          "FAQPage",
+          "Organization",
+          "WebSite",
+          "SoftwareApplication"
+        ],
+        "inbound": 37
+      },
+      {
+        "path": "/signup-sheet/staff-appreciation-week",
+        "status": 200,
+        "findings": [],
+        "title": "Staff Appreciation Week Sign-Up Sheet — Free Template | ManyMano",
+        "description": "Plan a Monday–Friday staff appreciation week: breakfast, coffee bar, lunch, snacks and desserts, each on its own day. Free, no accounts.",
+        "h1": "Staff appreciation week sign-up sheet",
+        "h2s": [
+          "What's in this template",
+          "How it works",
+          "Tips",
+          "Questions",
+          "More templates"
+        ],
+        "wordCount": 570,
+        "jsonLd": [
+          "BreadcrumbList",
+          "FAQPage",
+          "Organization",
+          "WebSite",
+          "SoftwareApplication"
+        ],
+        "inbound": 37
+      },
+      {
+        "path": "/signup-sheet/book-fair",
+        "status": 200,
+        "findings": [],
+        "title": "Book Fair Volunteer Sign-Up Sheet — Free Template | ManyMano",
+        "description": "Staff a week-long book fair: setup on day one, cashier and helper shifts every day, and teardown on the last day. Free, no accounts.",
+        "h1": "Book fair volunteer sign-up sheet",
+        "h2s": [
+          "What's in this template",
+          "How it works",
+          "Tips",
+          "Questions",
+          "More templates"
+        ],
+        "wordCount": 504,
+        "jsonLd": [
+          "BreadcrumbList",
+          "FAQPage",
+          "Organization",
+          "WebSite",
+          "SoftwareApplication"
+        ],
+        "inbound": 37
+      },
+      {
+        "path": "/signup-sheet/parent-teacher-conferences",
+        "status": 200,
+        "findings": [
+          {
+            "level": "warn",
+            "code": "title-long",
+            "message": "title is 66 chars (Google shows ~65)"
+          }
+        ],
+        "title": "Parent Teacher Conference Sign-Up Sheet — Free Template | ManyMano",
+        "description": "Let families book a 15-minute parent–teacher conference slot from 3:00 to 6:00 PM. One family per slot, no accounts, free.",
+        "h1": "Parent–teacher conference sign-up sheet",
+        "h2s": [
+          "What's in this template",
+          "How it works",
+          "Tips",
+          "Questions",
+          "More templates"
+        ],
+        "wordCount": 539,
+        "jsonLd": [
+          "BreadcrumbList",
+          "FAQPage",
+          "Organization",
+          "WebSite",
+          "SoftwareApplication"
+        ],
+        "inbound": 37
+      },
+      {
+        "path": "/signup-sheet/potluck",
+        "status": 200,
+        "findings": [],
+        "title": "Potluck Sign-Up Sheet — Free Template, No Account | ManyMano",
+        "description": "Organize a potluck without five bowls of pasta salad: guests claim a main, side, dessert, drinks or supplies. Free and ad-free.",
+        "h1": "Potluck sign-up sheet",
+        "h2s": [
+          "What's in this template",
+          "How it works",
+          "Tips",
+          "Questions",
+          "More templates"
+        ],
+        "wordCount": 471,
+        "jsonLd": [
+          "BreadcrumbList",
+          "FAQPage",
+          "Organization",
+          "WebSite",
+          "SoftwareApplication"
+        ],
+        "inbound": 37
+      },
+      {
+        "path": "/signup-sheet/classroom-party",
+        "status": 200,
+        "findings": [],
+        "title": "Classroom Party Sign-Up Sheet — Free Template | ManyMano",
+        "description": "Organize a classroom party: setup, game and craft helpers during the party, plus snacks, drinks and supplies to bring. Free, no accounts.",
+        "h1": "Classroom party sign-up sheet",
+        "h2s": [
+          "What's in this template",
+          "How it works",
+          "Tips",
+          "Questions",
+          "More templates"
+        ],
+        "wordCount": 462,
+        "jsonLd": [
+          "BreadcrumbList",
+          "FAQPage",
+          "Organization",
+          "WebSite",
+          "SoftwareApplication"
+        ],
+        "inbound": 4
+      },
+      {
+        "path": "/signup-sheet/bake-sale",
+        "status": 200,
+        "findings": [],
+        "title": "Bake Sale Sign-Up Sheet — Free Fundraiser Template | ManyMano",
+        "description": "Run a bake sale fundraiser: bakers sign up for what they'll bring, and volunteers take setup, selling and cleanup shifts. Free, no accounts.",
+        "h1": "Bake sale sign-up sheet",
+        "h2s": [
+          "What's in this template",
+          "How it works",
+          "Tips",
+          "Questions",
+          "More templates"
+        ],
+        "wordCount": 469,
+        "jsonLd": [
+          "BreadcrumbList",
+          "FAQPage",
+          "Organization",
+          "WebSite",
+          "SoftwareApplication"
+        ],
+        "inbound": 37
+      },
+      {
+        "path": "/signup-sheet/concession-stand",
+        "status": 200,
+        "findings": [],
+        "title": "Concession Stand Volunteer Sign-Up — Free Template | ManyMano",
+        "description": "Staff the concession stand for every home game of the season with first- and second-half shifts. Repeats weekly. Free, no accounts.",
+        "h1": "Concession stand volunteer sign-up sheet",
+        "h2s": [
+          "What's in this template",
+          "How it works",
+          "Tips",
+          "Questions",
+          "More templates"
+        ],
+        "wordCount": 453,
+        "jsonLd": [
+          "BreadcrumbList",
+          "FAQPage",
+          "Organization",
+          "WebSite",
+          "SoftwareApplication"
+        ],
+        "inbound": 37
+      },
+      {
+        "path": "/signup-sheet/car-wash-fundraiser",
+        "status": 200,
+        "findings": [],
+        "title": "Car Wash Fundraiser Sign-Up Sheet — Free Template | ManyMano",
+        "description": "Plan a car wash fundraiser with two-hour shifts of washers, sign holders and a cashier, plus a supplies list. Free, no accounts.",
+        "h1": "Car wash fundraiser sign-up sheet",
+        "h2s": [
+          "What's in this template",
+          "How it works",
+          "Tips",
+          "Questions",
+          "More templates"
+        ],
+        "wordCount": 464,
+        "jsonLd": [
+          "BreadcrumbList",
+          "FAQPage",
+          "Organization",
+          "WebSite",
+          "SoftwareApplication"
+        ],
+        "inbound": 6
+      },
+      {
+        "path": "/signup-sheet/thursday-folders",
+        "status": 200,
+        "findings": [
+          {
+            "level": "warn",
+            "code": "title-long",
+            "message": "title is 66 chars (Google shows ~65)"
+          }
+        ],
+        "title": "Thursday Folders Volunteer Sign-Up — Weekly Room Parent | ManyMano",
+        "description": "Room parents sign up to stuff Thursday folders (Thursday recorders) with flyers and school updates: 30 minutes every Thursday, September to June.",
+        "h1": "Thursday folders helper sign-up sheet",
+        "h2s": [
+          "What's in this template",
+          "How it works",
+          "Tips",
+          "Questions",
+          "More templates"
+        ],
+        "wordCount": 478,
+        "jsonLd": [
+          "BreadcrumbList",
+          "FAQPage",
+          "Organization",
+          "WebSite",
+          "SoftwareApplication"
+        ],
+        "inbound": 2
+      },
+      {
+        "path": "/signup-sheet/meal-train",
+        "status": 200,
+        "findings": [],
+        "title": "Meal Train Sign-Up Sheet — Free Template, No Account | ManyMano",
+        "description": "Organize meals for a family with a new baby, an illness or a loss: one dinner drop-off per day for two weeks. Free and ad-free.",
+        "h1": "Meal train sign-up sheet",
+        "h2s": [
+          "What's in this template",
+          "How it works",
+          "Tips",
+          "Questions",
+          "More templates"
+        ],
+        "wordCount": 439,
+        "jsonLd": [
+          "BreadcrumbList",
+          "FAQPage",
+          "Organization",
+          "WebSite",
+          "SoftwareApplication"
+        ],
+        "inbound": 37
+      },
+      {
+        "path": "/signup-sheet/staff-welcome-back-lunch",
+        "status": 200,
+        "findings": [],
+        "title": "Staff Welcome Back Lunch Sign-Up Sheet — Free Template | ManyMano",
+        "description": "Welcome teachers and staff back with a PTA-hosted lunch: setup, serving and cleanup shifts plus a list of dishes to bring. Free, no accounts.",
+        "h1": "Staff welcome back lunch sign-up sheet",
+        "h2s": [
+          "What's in this template",
+          "How it works",
+          "Tips",
+          "Questions",
+          "More templates"
+        ],
+        "wordCount": 489,
+        "jsonLd": [
+          "BreadcrumbList",
+          "FAQPage",
+          "Organization",
+          "WebSite",
+          "SoftwareApplication"
+        ],
+        "inbound": 1
+      },
+      {
+        "path": "/signup-sheet/back-to-school-night",
+        "status": 200,
+        "findings": [],
+        "title": "Back to School Night Volunteer Sign-Up — Free Template | ManyMano",
+        "description": "Staff back to school night: welcome table, hallway guides, PTA membership table and cleanup. Parents claim a spot with just a name. Free.",
+        "h1": "Back to school night volunteer sign-up sheet",
+        "h2s": [
+          "What's in this template",
+          "How it works",
+          "Tips",
+          "Questions",
+          "More templates"
+        ],
+        "wordCount": 479,
+        "jsonLd": [
+          "BreadcrumbList",
+          "FAQPage",
+          "Organization",
+          "WebSite",
+          "SoftwareApplication"
+        ],
+        "inbound": 1
+      },
+      {
+        "path": "/signup-sheet/movie-night",
+        "status": 200,
+        "findings": [],
+        "title": "School Movie Night Volunteer Sign-Up — Free Template | ManyMano",
+        "description": "Run a family movie night: setup, popcorn and concessions, floor helpers during the film, cleanup, and snacks to donate. Free, no accounts.",
+        "h1": "Movie night volunteer sign-up sheet",
+        "h2s": [
+          "What's in this template",
+          "How it works",
+          "Tips",
+          "Questions",
+          "More templates"
+        ],
+        "wordCount": 475,
+        "jsonLd": [
+          "BreadcrumbList",
+          "FAQPage",
+          "Organization",
+          "WebSite",
+          "SoftwareApplication"
+        ],
+        "inbound": 1
+      },
+      {
+        "path": "/signup-sheet/bike-to-school-day",
+        "status": 200,
+        "findings": [],
+        "title": "Bike to School Day Volunteer Sign-Up — Free Template | ManyMano",
+        "description": "Organize a fall or spring bike and walk to school day: route marshals, bike train leaders, a welcome station and snacks to bring. Free.",
+        "h1": "Bike to school day volunteer sign-up sheet",
+        "h2s": [
+          "What's in this template",
+          "How it works",
+          "Tips",
+          "Questions",
+          "More templates"
+        ],
+        "wordCount": 483,
+        "jsonLd": [
+          "BreadcrumbList",
+          "FAQPage",
+          "Organization",
+          "WebSite",
+          "SoftwareApplication"
+        ],
+        "inbound": 1
+      },
+      {
+        "path": "/signup-sheet/culture-and-heritage-night",
+        "status": 200,
+        "findings": [
+          {
+            "level": "warn",
+            "code": "title-long",
+            "message": "title is 67 chars (Google shows ~65)"
+          }
+        ],
+        "title": "Culture and Heritage Night Sign-Up Sheet — Free Template | ManyMano",
+        "description": "Plan a multicultural night: families host a table about their culture, share a dish, or help with setup, performances and cleanup. Free.",
+        "h1": "Culture and heritage night sign-up sheet",
+        "h2s": [
+          "What's in this template",
+          "How it works",
+          "Tips",
+          "Questions",
+          "More templates"
+        ],
+        "wordCount": 475,
+        "jsonLd": [
+          "BreadcrumbList",
+          "FAQPage",
+          "Organization",
+          "WebSite",
+          "SoftwareApplication"
+        ],
+        "inbound": 1
+      },
+      {
+        "path": "/signup-sheet/thanksgiving-lunch",
+        "status": 200,
+        "findings": [],
+        "title": "Thanksgiving Lunch Volunteer Sign-Up — Free Template | ManyMano",
+        "description": "Staff a school Thanksgiving lunch or family feast: setup, servers, line helpers and cleanup, plus pies and rolls to bring. Free, no accounts.",
+        "h1": "Thanksgiving lunch volunteer sign-up sheet",
+        "h2s": [
+          "What's in this template",
+          "How it works",
+          "Tips",
+          "Questions",
+          "More templates"
+        ],
+        "wordCount": 459,
+        "jsonLd": [
+          "BreadcrumbList",
+          "FAQPage",
+          "Organization",
+          "WebSite",
+          "SoftwareApplication"
+        ],
+        "inbound": 1
+      },
+      {
+        "path": "/signup-sheet/skate-night",
+        "status": 200,
+        "findings": [],
+        "title": "School Skate Night Volunteer Sign-Up — Free Template | ManyMano",
+        "description": "Staff a school skate night fundraiser at the rink: check-in and wristbands, raffle or bake table, rink-side helpers. Free, no accounts.",
+        "h1": "Skate night volunteer sign-up sheet",
+        "h2s": [
+          "What's in this template",
+          "How it works",
+          "Tips",
+          "Questions",
+          "More templates"
+        ],
+        "wordCount": 443,
+        "jsonLd": [
+          "BreadcrumbList",
+          "FAQPage",
+          "Organization",
+          "WebSite",
+          "SoftwareApplication"
+        ],
+        "inbound": 6
+      },
+      {
+        "path": "/signup-sheet/steam-night",
+        "status": 200,
+        "findings": [],
+        "title": "STEAM Night Volunteer Sign-Up Sheet — Free Template | ManyMano",
+        "description": "Run a family STEAM night: station leaders for science, engineering, art and math, plus setup, greeters and cleanup. Free, no accounts.",
+        "h1": "STEAM night volunteer sign-up sheet",
+        "h2s": [
+          "What's in this template",
+          "How it works",
+          "Tips",
+          "Questions",
+          "More templates"
+        ],
+        "wordCount": 446,
+        "jsonLd": [
+          "BreadcrumbList",
+          "FAQPage",
+          "Organization",
+          "WebSite",
+          "SoftwareApplication"
+        ],
+        "inbound": 1
+      },
+      {
+        "path": "/signup-sheet/cookie-bar",
+        "status": 200,
+        "findings": [],
+        "title": "Cookie Bar Sign-Up Sheet — Free Template for PTAs | ManyMano",
+        "description": "Host a cookie bar after school or at an event: families bring cookies, volunteers set up, serve and run the cash table. Free, no accounts.",
+        "h1": "Cookie bar sign-up sheet",
+        "h2s": [
+          "What's in this template",
+          "How it works",
+          "Tips",
+          "Questions",
+          "More templates"
+        ],
+        "wordCount": 448,
+        "jsonLd": [
+          "BreadcrumbList",
+          "FAQPage",
+          "Organization",
+          "WebSite",
+          "SoftwareApplication"
+        ],
+        "inbound": 1
+      },
+      {
+        "path": "/signup-sheet/bingo-night",
+        "status": 200,
+        "findings": [],
+        "title": "Bingo Night Volunteer Sign-Up Sheet — Free Template | ManyMano",
+        "description": "Run a family bingo night fundraiser: caller, card sales, prize runners, snack table, setup and cleanup, plus prize donations. Free.",
+        "h1": "Bingo night volunteer sign-up sheet",
+        "h2s": [
+          "What's in this template",
+          "How it works",
+          "Tips",
+          "Questions",
+          "More templates"
+        ],
+        "wordCount": 448,
+        "jsonLd": [
+          "BreadcrumbList",
+          "FAQPage",
+          "Organization",
+          "WebSite",
+          "SoftwareApplication"
+        ],
+        "inbound": 4
+      },
+      {
+        "path": "/signup-sheet/school-basketball-game",
+        "status": 200,
+        "findings": [
+          {
+            "level": "warn",
+            "code": "title-long",
+            "message": "title is 67 chars (Google shows ~65)"
+          }
+        ],
+        "title": "School Basketball Game Volunteer Sign-Up — Free Template | ManyMano",
+        "description": "Staff a school basketball game: admission table, concessions, scoreboard and clock, and cleanup. Parents claim a spot with just a name. Free.",
+        "h1": "School basketball game volunteer sign-up sheet",
+        "h2s": [
+          "What's in this template",
+          "How it works",
+          "Tips",
+          "Questions",
+          "More templates"
+        ],
+        "wordCount": 459,
+        "jsonLd": [
+          "BreadcrumbList",
+          "FAQPage",
+          "Organization",
+          "WebSite",
+          "SoftwareApplication"
+        ],
+        "inbound": 3
+      },
+      {
+        "path": "/signup-sheet/spring-fundraiser",
+        "status": 200,
+        "findings": [],
+        "title": "School Fundraiser Volunteer Sign-Up — Free Template | ManyMano",
+        "description": "Staff a school fundraiser pickup day: count order forms, sort orders, run the pickup table and help carry to cars. Free, no accounts.",
+        "h1": "Spring fundraiser volunteer sign-up sheet",
+        "h2s": [
+          "What's in this template",
+          "How it works",
+          "Tips",
+          "Questions",
+          "More templates"
+        ],
+        "wordCount": 450,
+        "jsonLd": [
+          "BreadcrumbList",
+          "FAQPage",
+          "Organization",
+          "WebSite",
+          "SoftwareApplication"
+        ],
+        "inbound": 1
+      },
+      {
+        "path": "/signup-sheet/restaurant-spirit-night",
+        "status": 200,
+        "findings": [],
+        "title": "Restaurant Spirit Night Sign-Up — Dining for Dollars | ManyMano",
+        "description": "Promote a restaurant spirit night (dining for dollars): greeters at the door, flyer and social media helpers. Free, no accounts.",
+        "h1": "Restaurant spirit night sign-up sheet",
+        "h2s": [
+          "What's in this template",
+          "How it works",
+          "Tips",
+          "Questions",
+          "More templates"
+        ],
+        "wordCount": 445,
+        "jsonLd": [
+          "BreadcrumbList",
+          "FAQPage",
+          "Organization",
+          "WebSite",
+          "SoftwareApplication"
+        ],
+        "inbound": 1
+      },
+      {
+        "path": "/meeting-poll/team-meeting",
+        "status": 200,
+        "findings": [],
+        "title": "Team Meeting Poll — Find a Time That Works, Free | ManyMano",
+        "description": "Find a meeting time for your team: ten one-hour options across next week, morning and afternoon. Everyone votes Yes, Maybe or No.",
+        "h1": "Team meeting scheduling poll",
+        "h2s": [
+          "What's in this template",
+          "How it works",
+          "Tips",
+          "Questions",
+          "More templates"
+        ],
+        "wordCount": 482,
+        "jsonLd": [
+          "BreadcrumbList",
+          "FAQPage",
+          "Organization",
+          "WebSite",
+          "SoftwareApplication"
+        ],
+        "inbound": 37
+      },
+      {
+        "path": "/meeting-poll/book-club",
+        "status": 200,
+        "findings": [],
+        "title": "Book Club Meeting Poll — Free Scheduling Template | ManyMano",
+        "description": "Pick the next book club night: six 90-minute weeknight options over the next two weeks. Members vote Yes, Maybe or No. Free.",
+        "h1": "Book club scheduling poll",
+        "h2s": [
+          "What's in this template",
+          "How it works",
+          "Tips",
+          "Questions",
+          "More templates"
+        ],
+        "wordCount": 448,
+        "jsonLd": [
+          "BreadcrumbList",
+          "FAQPage",
+          "Organization",
+          "WebSite",
+          "SoftwareApplication"
+        ],
+        "inbound": 37
+      },
+      {
+        "path": "/meeting-poll/pickup-soccer",
+        "status": 200,
+        "findings": [],
+        "title": "Pickup Soccer Game Poll — Find the Best Night, Free | ManyMano",
+        "description": "Get enough players for pickup soccer: vote on 90-minute evening games over the next seven days. Free, no accounts or apps.",
+        "h1": "Pickup soccer scheduling poll",
+        "h2s": [
+          "What's in this template",
+          "How it works",
+          "Tips",
+          "Questions",
+          "More templates"
+        ],
+        "wordCount": 468,
+        "jsonLd": [
+          "BreadcrumbList",
+          "FAQPage",
+          "Organization",
+          "WebSite",
+          "SoftwareApplication"
+        ],
+        "inbound": 5
+      },
+      {
+        "path": "/meeting-poll/board-game-night",
+        "status": 200,
+        "findings": [],
+        "title": "Game Night Poll — Pick a Date With Friends, Free | ManyMano",
+        "description": "Plan a board game night: vote on Friday and Saturday evenings over the next two weekends. Free, no accounts, no ads.",
+        "h1": "Board game night scheduling poll",
+        "h2s": [
+          "What's in this template",
+          "How it works",
+          "Tips",
+          "Questions",
+          "More templates"
+        ],
+        "wordCount": 435,
+        "jsonLd": [
+          "BreadcrumbList",
+          "FAQPage",
+          "Organization",
+          "WebSite",
+          "SoftwareApplication"
+        ],
+        "inbound": 6
+      },
+      {
+        "path": "/meeting-poll/winery-visit",
+        "status": 200,
+        "findings": [],
+        "title": "Group Outing Poll — Plan a Winery Visit, Free | ManyMano",
+        "description": "Plan a group winery visit or day trip: vote on Saturday and Sunday afternoons over the next three weekends. Free, no accounts.",
+        "h1": "Winery visit scheduling poll",
+        "h2s": [
+          "What's in this template",
+          "How it works",
+          "Tips",
+          "Questions",
+          "More templates"
+        ],
+        "wordCount": 460,
+        "jsonLd": [
+          "BreadcrumbList",
+          "FAQPage",
+          "Organization",
+          "WebSite",
+          "SoftwareApplication"
+        ],
+        "inbound": 4
+      },
+      {
+        "path": "/meeting-poll/happy-hour",
+        "status": 200,
+        "findings": [],
+        "title": "Happy Hour Poll — Pick an After-Work Date, Free | ManyMano",
+        "description": "Plan an after-work happy hour: vote on Thursday and Friday evenings over the next two weeks. Free, no accounts, no group-chat back-and-forth.",
+        "h1": "Happy hour scheduling poll",
+        "h2s": [
+          "What's in this template",
+          "How it works",
+          "Tips",
+          "Questions",
+          "More templates"
+        ],
+        "wordCount": 463,
+        "jsonLd": [
+          "BreadcrumbList",
+          "FAQPage",
+          "Organization",
+          "WebSite",
+          "SoftwareApplication"
+        ],
+        "inbound": 37
+      },
+      {
+        "path": "/meeting-poll/pta-meeting",
+        "status": 200,
+        "findings": [],
+        "title": "PTA Meeting Poll — Find a Night That Works, Free | ManyMano",
+        "description": "Schedule a PTA, PTO or school board meeting: members vote on six weeknight evenings over the next two weeks. Free, no accounts needed.",
+        "h1": "PTA meeting scheduling poll",
+        "h2s": [
+          "What's in this template",
+          "How it works",
+          "Tips",
+          "Questions",
+          "More templates"
+        ],
+        "wordCount": 481,
+        "jsonLd": [
+          "BreadcrumbList",
+          "FAQPage",
+          "Organization",
+          "WebSite",
+          "SoftwareApplication"
+        ],
+        "inbound": 37
+      },
+      {
+        "path": "/meeting-poll/family-reunion",
+        "status": 200,
+        "findings": [],
+        "title": "Family Reunion Poll — Pick the Date Together, Free | ManyMano",
+        "description": "Find a family reunion date that works for everyone: vote on weekend afternoons three to five weeks out. Free, no accounts, easy for all ages.",
+        "h1": "Family reunion scheduling poll",
+        "h2s": [
+          "What's in this template",
+          "How it works",
+          "Tips",
+          "Questions",
+          "More templates"
+        ],
+        "wordCount": 474,
+        "jsonLd": [
+          "BreadcrumbList",
+          "FAQPage",
+          "Organization",
+          "WebSite",
+          "SoftwareApplication"
+        ],
+        "inbound": 37
+      },
+      {
+        "path": "/meeting-poll/neighborhood-get-together",
+        "status": 200,
+        "findings": [],
+        "title": "Neighborhood Get-Together Poll — Block Party Date | ManyMano",
+        "description": "Plan a block party, street picnic or neighborhood social: neighbors vote on Saturday late mornings and afternoons over three weekends. Free.",
+        "h1": "Neighborhood get-together scheduling poll",
+        "h2s": [
+          "What's in this template",
+          "How it works",
+          "Tips",
+          "Questions",
+          "More templates"
+        ],
+        "wordCount": 479,
+        "jsonLd": [
+          "BreadcrumbList",
+          "FAQPage",
+          "Organization",
+          "WebSite",
+          "SoftwareApplication"
+        ],
+        "inbound": 2
+      },
+      {
+        "path": "/meeting-poll/band-rehearsal",
+        "status": 200,
+        "findings": [],
+        "title": "Band Rehearsal Poll — Find a Practice Time, Free | ManyMano",
+        "description": "Get the whole band in one room: vote on two-hour evening rehearsal slots this week, Saturday included. Works for bands, choirs and ensembles. Free.",
+        "h1": "Band rehearsal scheduling poll",
+        "h2s": [
+          "What's in this template",
+          "How it works",
+          "Tips",
+          "Questions",
+          "More templates"
+        ],
+        "wordCount": 453,
+        "jsonLd": [
+          "BreadcrumbList",
+          "FAQPage",
+          "Organization",
+          "WebSite",
+          "SoftwareApplication"
+        ],
+        "inbound": 1
+      }
+    ],
+    "site": []
+  },
+  "search": {
+    "window": "2026-08-29 → 2026-09-25",
+    "startDate": "2026-08-29",
+    "endDate": "2026-09-25",
+    "totals": {
+      "clicks": 0,
+      "impressions": 4
+    },
+    "pages": [
+      {
+        "path": "/",
+        "clicks": 0,
+        "impressions": 4,
+        "ctr": 0,
+        "position": 3.8
+      }
+    ],
+    "queries": [],
+    "daily": [
+      {
+        "date": "2026-09-22",
+        "path": "/",
+        "clicks": 0,
+        "impressions": 2,
+        "position": 1
+      },
+      {
+        "date": "2026-09-24",
+        "path": "/",
+        "clicks": 0,
+        "impressions": 2,
+        "position": 6.5
+      }
+    ]
+  },
+  "conversions": {
+    "days": 31,
+    "generatedAt": "2026-09-28T13:59:15.900Z",
+    "rows": []
+  },
+  "scored": {
+    "rows": [
+      {
+        "path": "/",
+        "clicks": 0,
+        "impressions": 4,
+        "ctr": 0,
+        "position": 3.8,
+        "conversions": 0,
+        "searchConversions": 0,
+        "upsideClicks": 0,
+        "upsideConversions": null,
+        "call": "watch",
+        "reason": "not enough impressions yet"
+      }
+    ],
+    "siteSearchConversionRate": null
+  },
+  "speed": [
+    {
+      "path": "/",
+      "score": 96,
+      "lcp": "2.3 s",
+      "cls": "0",
+      "inp": null
+    }
+  ],
+  "missing": {
+    "gsc": null,
+    "conversions": null
+  },
+  "diff": {
+    "first": false,
+    "newFindings": [],
+    "fixedFindings": [],
+    "moves": []
+  }
+}
