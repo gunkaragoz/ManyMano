@@ -1093,7 +1093,7 @@ export default function CreateSignupSheet() {
 
                       <div className="sm:col-span-3">
                         <label className="block text-[10px] uppercase font-bold text-slate-400 mb-1">
-                          Spots Needed
+                          Spots
                         </label>
                         <input
                           type="number"

@@ -88,6 +88,10 @@ export async function loader({ params, request, context }: LoaderFunctionArgs) {
       "Content-Type": "text/calendar; charset=utf-8",
       "Content-Disposition": `attachment; filename="${event.title.replace(/[^a-zA-Z0-9_-]/g, "_")}.ics"`,
       "Cache-Control": isAdmin ? "private, no-store" : "public, max-age=60",
+      // Organizers and the public share one URL (the admin cookie decides
+      // which file you get), so a cached public copy must not answer a
+      // request that carries the cookie.
+      Vary: "Cookie",
       "Referrer-Policy": "no-referrer",
     },
   });

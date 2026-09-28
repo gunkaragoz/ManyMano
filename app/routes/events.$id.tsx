@@ -3103,7 +3103,7 @@ function EditShiftCard({
                 <input type="text" name="taskTitle" required defaultValue={task.title} className={EDIT_INPUT} />
               </div>
               <div className="sm:col-span-3">
-                <label className={EDIT_SUBLABEL}>Spots Needed</label>
+                <label className={EDIT_SUBLABEL}>Spots</label>
                 <input
                   type="number"
                   name="taskCapacity"
@@ -3154,7 +3154,7 @@ function EditShiftCard({
                 <input type="text" name="taskTitle" required placeholder="e.g., Setup Crew" className={EDIT_INPUT} />
               </div>
               <div className="sm:col-span-3">
-                <label className={EDIT_SUBLABEL}>Spots Needed</label>
+                <label className={EDIT_SUBLABEL}>Spots</label>
                 <input type="number" name="taskCapacity" min={1} max={999} defaultValue={1} className={EDIT_INPUT} />
               </div>
               <div className="sm:col-span-1 flex sm:justify-end">
@@ -3291,7 +3291,7 @@ function NewShiftCard({
           <input type="text" name="slotTitle" required placeholder="e.g., Clean-up Crew" className={EDIT_INPUT} />
         </div>
         <div className="sm:col-span-3">
-          <label className={EDIT_SUBLABEL}>Spots Needed</label>
+          <label className={EDIT_SUBLABEL}>Spots</label>
           <input type="number" name="slotCapacity" min={1} max={999} defaultValue={1} className={EDIT_INPUT} />
         </div>
       </div>
@@ -4381,10 +4381,9 @@ export default function EventView() {
         a.signedUpAt.localeCompare(b.signedUpAt)
       );
   }, [initialSignups, slots, event.eventDate]);
-  const rosterExportHref =
-    adminToken
-      ? `/events/${event.id}/export?admin=${encodeURIComponent(adminToken)}`
-      : `/events/${event.id}/export`;
+  // No ?admin= here: the HttpOnly admin cookie (Path=/events) authenticates
+  // the download, and a token in the URL would land in download history.
+  const rosterExportHref = `/events/${event.id}/export`;
   // Winning option for the finalized badge (day + time stay visible after
   // close — the result is the most useful fact on the page).
   const winningSlotForBadge = useMemo(
@@ -4420,10 +4419,9 @@ export default function EventView() {
     () => pickCalendarSlot(slots, event.winningSlotId),
     [slots, event.winningSlotId]
   );
-  const icsHref =
-    isAdmin && adminToken
-      ? `/events/${event.id}/ics?admin=${encodeURIComponent(adminToken)}`
-      : `/events/${event.id}/ics`;
+  // No ?admin= either: the admin cookie also reaches /ics, which is what adds
+  // the organizer email for organizers.
+  const icsHref = `/events/${event.id}/ics`;
   const googleCalendarHref = useMemo(() => {
     return buildGoogleCalendarUrl({
       title: event.title,
@@ -6213,17 +6211,20 @@ export default function EventView() {
                           <td key={s.id} className="p-3 text-center border-r border-slate-100">
                             {resp === "YES" && (
                               <span className="inline-flex items-center justify-center w-8 h-8 rounded-xl bg-green-500 text-white shadow-sm">
-                                <Check className="w-4 h-4" />
+                                <Check className="w-4 h-4" aria-hidden="true" />
+                                <span className="sr-only">Yes</span>
                               </span>
                             )}
                             {resp === "MAYBE" && (
                               <span className="inline-flex items-center justify-center w-8 h-8 rounded-xl bg-amber-400 text-slate-900 shadow-sm">
-                                <Check className="w-4 h-4" />
+                                <Check className="w-4 h-4" aria-hidden="true" />
+                                <span className="sr-only">Maybe</span>
                               </span>
                             )}
                             {resp === "NO" && (
                               <span className="inline-flex items-center justify-center w-8 h-8 rounded-xl bg-slate-100 text-slate-400">
-                                <Minus className="w-4 h-4" />
+                                <Minus className="w-4 h-4" aria-hidden="true" />
+                                <span className="sr-only">No</span>
                               </span>
                             )}
                           </td>

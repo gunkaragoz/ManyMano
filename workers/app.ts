@@ -3,6 +3,7 @@ import { cloudflareContext, type CloudflareEnv } from "../app/utils/cloudflare-c
 import { getDb } from "../app/db";
 import { getSiteConfig } from "../app/utils/site";
 import { runScheduledReminders } from "../app/utils/reminders-run";
+import { negotiateMarkdown } from "../app/utils/markdown";
 
 const requestHandler = createRequestHandler(
   () => import("virtual:react-router/server-build"),
@@ -37,7 +38,9 @@ export default {
       },
       caches,
     });
-    return requestHandler(request, loadContext);
+    // Markdown for Agents: `Accept: text/markdown` gets the page as Markdown,
+    // browsers keep HTML (see app/utils/markdown.ts).
+    return negotiateMarkdown(request, await requestHandler(request, loadContext));
   },
 
   // Hourly reminder scan (see [triggers] in wrangler.toml). Each run sends

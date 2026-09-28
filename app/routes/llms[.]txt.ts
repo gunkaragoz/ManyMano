@@ -51,6 +51,8 @@ export async function loader({ request, context }: LoaderFunctionArgs) {
     "## Key pages",
     "",
     ...links,
+    "Every page is also available as Markdown: send `Accept: text/markdown`.",
+    "",
     ...(isMcpEnabled(env) ? mcpLlmsSection(siteUrl) : []),
   ].join("\n");
 
