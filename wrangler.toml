@@ -81,7 +81,7 @@ name = "manymano"
 # NOTE: env sections do NOT inherit top-level [vars] in the generated deploy
 # config — vars are repeated here explicitly (kept in sync with [vars] above).
 [env.production.vars]
-MCP_ENABLED = "false"
+MCP_ENABLED = "true"
 MCP_DAILY_LIMIT = "2000"
 MCP_WRITE_DAILY_LIMIT = "200"
 SITE_URL = "https://manymano.com"
