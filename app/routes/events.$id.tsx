@@ -5690,7 +5690,10 @@ export default function EventView() {
               <a
                 href={rosterExportHref}
                 download
-                className="inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl border border-slate-200 bg-white hover:bg-slate-50 hover:border-slate-300 text-slate-700 text-xs font-bold shadow-sm transition-all shrink-0"
+                aria-disabled={rosterRows.length === 0}
+                title={rosterRows.length === 0 ? "No signups to export yet" : "Download signup list as CSV"}
+                onClick={rosterRows.length === 0 ? (e) => e.preventDefault() : undefined}
+                className={`inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl border border-slate-200 bg-white text-slate-700 text-xs font-bold shadow-sm transition-all shrink-0 ${rosterRows.length === 0 ? "opacity-50 cursor-not-allowed" : "hover:bg-slate-50 hover:border-slate-300"}`}
               >
                 <Download className="w-4 h-4 text-slate-500" />
                 <span>Export CSV</span>
