@@ -1,4 +1,5 @@
 // Zero-dependency SVG charts for /pulse. No new npm deps, SSR-safe.
+import { useState } from "react";
 
 export function Sparkline({
   values,
@@ -22,14 +23,30 @@ export function Sparkline({
   });
   const line = pts.join(" ");
   const area = values.length > 0 ? `0,${height} ${line} ${width},${height}` : "";
+  const [hover, setHover] = useState<number | null>(null);
+  const pick = (clientX: number, target: Element) => {
+    const r = (target as Element).getBoundingClientRect();
+    if (r.width <= 0 || values.length === 0) return null;
+    const ratio = (clientX - r.left) / r.width;
+    const idx = Math.round(ratio * (values.length - 1));
+    return Math.max(0, Math.min(values.length - 1, idx));
+  };
   return (
+    <div className="relative inline-block">
+      {hover !== null && values[hover] !== undefined && (
+        <div className="pointer-events-none absolute -top-8 left-1/2 -translate-x-1/2 whitespace-nowrap rounded-lg bg-slate-900 px-2 py-1 text-[11px] font-bold tabular-nums text-white shadow-lg z-10">
+          {values[hover]}
+        </div>
+      )}
     <svg
       width={width}
       height={height}
       viewBox={`0 0 ${width} ${height}`}
       role="img"
       aria-label={label ?? `Trend: ${values.join(", ")}`}
-      className="overflow-visible"
+      className="overflow-visible block"
+      onMouseMove={(e) => setHover(pick(e.clientX, e.currentTarget))}
+      onMouseLeave={() => setHover(null)}
     >
       {area && <polygon points={area} fill={stroke} opacity={0.12} />}
       {line && (
@@ -45,11 +62,15 @@ export function Sparkline({
       {values.map((v, i) => {
         const x = i * step;
         const y = height - 3 - (v / max) * (height - 8);
+        if (hover === i) {
+          return <circle key={i} cx={x} cy={y} r={4} fill={stroke} opacity={0.35} />;
+        }
         return i === values.length - 1 ? (
           <circle key={i} cx={x} cy={y} r={2.5} fill={stroke} />
         ) : null;
       })}
     </svg>
+    </div>
   );
 }
 
@@ -118,13 +139,27 @@ export function DailyChart({
     .map((v, i) => `${Math.round((PAD_L + i * slotW + slotW / 2) * 10) / 10},${Math.round(yFor(v) * 10) / 10}`)
     .join(" ");
 
+  // Immediate custom tooltip (native <title> has a ~1s delay). A transparent
+  // rect per day captures hover across the full slot — including zero days —
+  // and state updates render the card synchronously.
+  const [hover, setHover] = useState<number | null>(null);
+  const hoverDay = hover !== null ? days[hover] : null;
+  const hoverCx = hover !== null ? PAD_L + hover * slotW + slotW / 2 : 0;
+  const hoverLeftPct = (hoverCx / W) * 100;
+  // Keep the card on-screen: anchor left / center / right by horizontal slot.
+  const hoverRatio = hover !== null ? hoverCx / W : 0.5;
+  const hoverTransform =
+    hoverRatio < 0.22 ? "translateX(-4%)" : hoverRatio > 0.78 ? "translateX(-96%)" : "translateX(-50%)";
+
   return (
     <div className="overflow-x-auto -mx-1 px-1">
+      <div className="relative block h-auto w-full min-w-[540px]">
       <svg
         viewBox={`0 0 ${W} ${H}`}
         role="img"
         aria-label={`Daily activity over ${n} days, peak ${max} actions in a day`}
-        className="block h-auto w-full min-w-[540px]"
+        className="block h-auto w-full"
+        onMouseLeave={() => setHover(null)}
       >
         {yTicks.map((t) => (
           <g key={t}>
@@ -156,16 +191,27 @@ export function DailyChart({
           const nonEmpty = series.filter((s) => d[s] > 0);
           const topKey = nonEmpty[nonEmpty.length - 1];
           let acc = 0;
+          const isHover = hover === i;
           return (
             <g key={d.label + i}>
-              <title>{`${d.label}: ${series.map((s) => `${s} ${d[s]}`).join(" · ")}`}</title>
+              {isHover && (
+                <rect
+                  x={PAD_L + i * slotW + 1}
+                  y={PAD_T}
+                  width={Math.max(0, slotW - 2)}
+                  height={innerH}
+                  rx={6}
+                  fill="#0f172a"
+                  opacity={0.05}
+                />
+              )}
               {total === 0 ? (
                 <line
                   x1={x}
                   x2={x + barW}
                   y1={baseline - 0.5}
                   y2={baseline - 0.5}
-                  stroke="#e2e8f0"
+                  stroke={isHover ? "#94a3b8" : "#e2e8f0"}
                   strokeWidth={3}
                   strokeLinecap="round"
                 />
@@ -181,9 +227,9 @@ export function DailyChart({
                   const y = y1;
                   const h = Math.max(1.5, y0 - y1 + (isBottom ? 0 : 1));
                   return isTop ? (
-                    <path key={s} d={topRoundedPath(x, y, barW, h, topR)} fill={colors[s]} />
+                    <path key={s} d={topRoundedPath(x, y, barW, h, topR)} fill={colors[s]} opacity={isHover || hover === null ? 1 : 0.35} />
                   ) : (
-                    <rect key={s} x={x} y={y} width={barW} height={h} fill={colors[s]} />
+                    <rect key={s} x={x} y={y} width={barW} height={h} fill={colors[s]} opacity={isHover || hover === null ? 1 : 0.35} />
                   );
                 })
               )}
@@ -192,10 +238,47 @@ export function DailyChart({
                   {d.label}
                 </text>
               )}
+              {/* Full-slot hover target: makes empty days hoverable, zero delay. */}
+              <rect
+                x={PAD_L + i * slotW}
+                y={0}
+                width={slotW}
+                height={H - PAD_B}
+                fill="transparent"
+                onMouseEnter={() => setHover(i)}
+                onMouseMove={() => setHover(i)}
+              />
             </g>
           );
         })}
       </svg>
+      {hoverDay && (
+        <div
+          className="pointer-events-none absolute top-0 z-10 whitespace-nowrap rounded-xl bg-slate-900 px-3 py-2 text-xs text-white shadow-xl"
+          style={{ left: `${hoverLeftPct}%`, transform: hoverTransform }}
+        >
+          <div className="font-bold">{hoverDay.label}</div>
+          <div className="mt-1 space-y-0.5 tabular-nums">
+            {series.map((s) => (
+              <div key={s} className="flex items-center gap-1.5">
+                <span className="h-2 w-2 rounded-full shrink-0" style={{ background: colors[s] }} />
+                <span className="capitalize text-slate-300">{s}</span>
+                <span className="ml-auto pl-3 font-bold">{hoverDay[s]}</span>
+              </div>
+            ))}
+            <div className="flex items-center gap-1.5 border-t border-white/15 pt-1 mt-1">
+              <span className="text-slate-300">Total</span>
+              <span className="ml-auto pl-3 font-bold">{totals[hover!]}</span>
+            </div>
+            {avg[hover!] !== undefined && (
+              <div className="text-[10px] text-slate-400 tabular-nums">
+                7-day avg {avg[hover!].toFixed(1)}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+      </div>
     </div>
   );
 }
@@ -211,7 +294,8 @@ export function Donut({
   thickness?: number;
   label?: string;
 }) {
-  const total = segments.reduce((s, x) => s + x.value, 0) || 1;
+  const realTotal = segments.reduce((s, x) => s + x.value, 0);
+  const total = realTotal || 1;
   const R = (size - thickness) / 2;
   const C = 2 * Math.PI * R;
   let acc = 0;
@@ -242,10 +326,10 @@ export function Donut({
           ) : null;
         })}
         <text x={size / 2} y={size / 2 - 2} textAnchor="middle" fontSize={20} fontWeight={800} fill="#0f172a">
-          {total === 0 ? 0 : segments[0]?.value ?? 0}
+          {realTotal}
         </text>
         <text x={size / 2} y={size / 2 + 14} textAnchor="middle" fontSize={10} fill="#64748b">
-          {segments[0]?.name ?? ""}
+          total
         </text>
       </svg>
       <ul className="space-y-1.5 text-xs">
