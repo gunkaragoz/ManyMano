@@ -2891,15 +2891,16 @@ function formatSignedUpAt(iso: string): string {
 
 /**
  * Format one roster entry as `Name <email>` for pasting into To/CC/BCC.
- * Names containing ,;"<> are RFC-quoted; newlines/quotes are stripped so a
- * single bad name can't break the whole list. Empty names fall back to the
- * bare address.
+ * Only plain names (letters, digits, space, dot, hyphen, apostrophe) stay
+ * unquoted — anything else (`,:;"<>@()[]`, backslash, non-ASCII, …) is
+ * RFC-quoted so a single odd name can't break the whole list. Newlines are
+ * collapsed and empty names fall back to the bare address.
  */
 function formatEmailRecipient(name: string, email: string): string {
   const cleanName = (name || "").replace(/[\r\n]+/g, " ").trim().replace(/\s+/g, " ");
   if (!cleanName) return email;
-  const needsQuotes = /[",;<>]/.test(cleanName) || /^\s|\s$/.test(name);
-  if (!needsQuotes) return `${cleanName} <${email}>`;
+  const plainName = /^[A-Za-z0-9][A-Za-z0-9 .'\-]*$/.test(cleanName);
+  if (plainName) return `${cleanName} <${email}>`;
   const quoted = cleanName.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
   return `"${quoted}" <${email}>`;
 }
