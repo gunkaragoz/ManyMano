@@ -2889,6 +2889,37 @@ function formatSignedUpAt(iso: string): string {
   });
 }
 
+/**
+ * Format one roster entry as `Name <email>` for pasting into To/CC/BCC.
+ * Only plain names (letters, digits, space, dot, hyphen, apostrophe) stay
+ * unquoted — anything else (`,:;"<>@()[]`, backslash, non-ASCII, …) is
+ * RFC-quoted so a single odd name can't break the whole list. Newlines are
+ * collapsed and empty names fall back to the bare address.
+ */
+function formatEmailRecipient(name: string, email: string): string {
+  const cleanName = (name || "").replace(/[\r\n]+/g, " ").trim().replace(/\s+/g, " ");
+  if (!cleanName) return email;
+  const plainName = /^[A-Za-z0-9][A-Za-z0-9 .'\-]*$/.test(cleanName);
+  if (plainName) return `${cleanName} <${email}>`;
+  const quoted = cleanName.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
+  return `"${quoted}" <${email}>`;
+}
+
+/** Deduped (case-insensitive email) `Name <email>, …` list for organizers. */
+function buildRosterEmailList(rows: Array<{ name: string; email: string }>): string {
+  const seen = new Set<string>();
+  const parts: string[] = [];
+  for (const r of rows) {
+    const email = (r.email || "").trim();
+    if (!email) continue;
+    const key = email.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    parts.push(formatEmailRecipient(r.name || "", email));
+  }
+  return parts.join(", ");
+}
+
 /** Auto title for TIME_POLL options with an empty label — same format as create/poll. */
 function autoPollTitle(
   _label: string,
@@ -4381,6 +4412,13 @@ export default function EventView() {
         a.signedUpAt.localeCompare(b.signedUpAt)
       );
   }, [initialSignups, slots, event.eventDate]);
+  // Paste-ready `Name <email>, …` list (deduped) so organizers can email
+  // everyone from their own inbox without a CSV export round-trip.
+  const rosterEmailList = useMemo(() => buildRosterEmailList(rosterRows), [rosterRows]);
+  const rosterEmailCount = useMemo(
+    () => new Set(rosterRows.map((r) => (r.email || "").trim().toLowerCase()).filter(Boolean)).size,
+    [rosterRows]
+  );
   // No ?admin= here: the HttpOnly admin cookie (Path=/events) authenticates
   // the download, and a token in the URL would land in download history.
   const rosterExportHref = `/events/${event.id}/export`;
@@ -4475,13 +4513,13 @@ export default function EventView() {
     <span
       title={liveBadgeTitle}
       aria-live="off"
-      className="inline-flex items-center gap-1.5 text-[11px] font-semibold text-green-700 bg-green-50 border border-green-200 px-2.5 py-1 rounded-full"
+      className="inline-flex shrink-0 items-center gap-1 self-center whitespace-nowrap rounded-full border border-green-200 bg-green-50 px-2 py-0.5 text-[10px] font-semibold leading-tight text-green-700"
     >
-      <span className="relative flex h-2 w-2">
+      <span className="relative flex h-1.5 w-1.5">
         <span
           className={`absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75 ${syncing ? "animate-ping" : "animate-pulse"}`}
         />
-        <span className="relative inline-flex rounded-full h-2 w-2 bg-green-500" />
+        <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-green-500" />
       </span>
       Live{syncing ? " · syncing…" : ""}
     </span>
@@ -5615,7 +5653,7 @@ export default function EventView() {
             <div>
               <h2 className="text-xl font-bold text-slate-900 tracking-tight inline-flex items-center gap-2 flex-wrap">
                 Signup List
-                <span className="text-[11px] font-bold uppercase tracking-wider px-2.5 py-1 rounded-full bg-amber-50 text-amber-800 border border-amber-200">
+                <span className="inline-flex shrink-0 items-center self-center whitespace-nowrap rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-[10px] font-bold uppercase leading-tight tracking-wider text-amber-800">
                   Organizers only
                 </span>
                 {liveBadge}
@@ -5624,14 +5662,44 @@ export default function EventView() {
                 {rosterRows.length} {rosterRows.length === 1 ? "signup" : "signups"} · Only visible to organizers.
               </p>
             </div>
-            <a
-              href={rosterExportHref}
-              download
-              className="inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl border border-slate-200 bg-white hover:bg-slate-50 hover:border-slate-300 text-slate-700 text-xs font-bold shadow-sm transition-all shrink-0"
-            >
-              <Download className="w-4 h-4 text-slate-500" />
-              <span>Export CSV</span>
-            </a>
+            <div className="flex flex-wrap items-center gap-2 shrink-0">
+              <button
+                type="button"
+                disabled={rosterEmailCount === 0}
+                title={
+                  rosterEmailCount === 0
+                    ? "No email addresses to copy yet"
+                    : `Copy ${rosterEmailCount} ${rosterEmailCount === 1 ? "address" : "addresses"} as "Name <email>, …" for your mail app`
+                }
+                onClick={() => copyToClipboard(rosterEmailList, "roster-emails")}
+                className="inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl border border-slate-200 bg-white hover:bg-slate-50 hover:border-slate-300 text-slate-700 text-xs font-bold shadow-sm transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {copiedLink === "roster-emails" ? (
+                  <>
+                    <Check className="w-4 h-4 text-green-600" />
+                    <span>Copied!</span>
+                  </>
+                ) : (
+                  <>
+                    <Copy className="w-4 h-4 text-slate-500" />
+                    <span>
+                      Copy all emails{rosterEmailCount > 0 ? ` (${rosterEmailCount})` : ""}
+                    </span>
+                  </>
+                )}
+              </button>
+              <a
+                href={rosterExportHref}
+                download
+                aria-disabled={rosterRows.length === 0}
+                title={rosterRows.length === 0 ? "No signups to export yet" : "Download signup list as CSV"}
+                onClick={rosterRows.length === 0 ? (e) => e.preventDefault() : undefined}
+                className={`inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl border border-slate-200 bg-white text-slate-700 text-xs font-bold shadow-sm transition-all shrink-0 ${rosterRows.length === 0 ? "opacity-50 cursor-not-allowed" : "hover:bg-slate-50 hover:border-slate-300"}`}
+              >
+                <Download className="w-4 h-4 text-slate-500" />
+                <span>Export CSV</span>
+              </a>
+            </div>
           </div>
 
           {rosterRows.length === 0 ? (
