@@ -13,6 +13,7 @@ import {
   Clock,
   Copy,
   Download,
+  Eye,
   Globe,
   KeyRound,
   Link2,
@@ -134,6 +135,7 @@ import {
   truncate,
 } from "~/utils/seo";
 import { getSiteConfig } from "~/utils/site";
+import { trackEventView } from "~/utils/event-views";
 import {
   COMMENT_MAX,
   DESCRIPTION_MAX,
@@ -370,11 +372,20 @@ export async function loader({ params, request, context, url }: LoaderFunctionAr
   // If a valid ?admin= token was presented via URL, (re)issue the cookie and
   // redirect to the clean URL so the secret leaves history/logs.
   const adminQuery = url.searchParams.get("admin");
+  // Unique view tracking (best-effort, never breaks loads): one count per
+  // browser (persistent viewer cookie), bots / live-sync polls / organizer
+  // views excluded. Runs before the admin redirect so the viewer cookie can
+  // ride along on it too.
+  const { viewCount, setViewerCookie } = await trackEventView(env.DB, eventId, request, {
+    isAdmin,
+    isPoll,
+  });
   if (isAdmin && adminQuery) {
     const clean = new URL(url.toString());
     clean.searchParams.delete("admin");
     const headers = new Headers();
     headers.append("Set-Cookie", buildAdminCookie(eventId, adminQuery));
+    if (setViewerCookie) headers.append("Set-Cookie", setViewerCookie);
     headers.set("Cache-Control", "private, no-store");
     headers.set("Referrer-Policy", "no-referrer");
     return redirect(clean.toString(), { headers });
@@ -467,6 +478,13 @@ export async function loader({ params, request, context, url }: LoaderFunctionAr
       createdAt: s.createdAt,
     }));
 
+    const viewHeaders = new Headers();
+    viewHeaders.set(
+      "Cache-Control",
+      isAdmin || pendingCancel || isPoll ? "private, no-store" : "public, max-age=15"
+    );
+    if (setViewerCookie) viewHeaders.append("Set-Cookie", setViewerCookie);
+
     return data(
       {
         event: isAdmin
@@ -492,12 +510,11 @@ export async function loader({ params, request, context, url }: LoaderFunctionAr
         turnstileSiteKey: env.TURNSTILE_SITE_KEY ?? null,
         origin: url.origin,
         siteName: site.siteName,
+        // Unique browsers seen (bots, live-sync polls and organizer views excluded).
+        viewCount,
       },
       {
-        headers: {
-          "Cache-Control":
-            isAdmin || pendingCancel || isPoll ? "private, no-store" : "public, max-age=15",
-        },
+        headers: viewHeaders,
       }
     );
   } else {
@@ -549,6 +566,13 @@ export async function loader({ params, request, context, url }: LoaderFunctionAr
       });
     });
 
+    const pollViewHeaders = new Headers();
+    pollViewHeaders.set(
+      "Cache-Control",
+      isAdmin || pendingCancel || isPoll ? "private, no-store" : "public, max-age=15"
+    );
+    if (setViewerCookie) pollViewHeaders.append("Set-Cookie", setViewerCookie);
+
     return data(
       {
         event: isAdmin
@@ -575,12 +599,11 @@ export async function loader({ params, request, context, url }: LoaderFunctionAr
         turnstileSiteKey: env.TURNSTILE_SITE_KEY ?? null,
         origin: url.origin,
         siteName: site.siteName,
+        // Unique browsers seen (bots, live-sync polls and organizer views excluded).
+        viewCount,
       },
       {
-        headers: {
-          "Cache-Control":
-            isAdmin || pendingCancel || isPoll ? "private, no-store" : "public, max-age=15",
-        },
+        headers: pollViewHeaders,
       }
     );
   }
@@ -3725,6 +3748,7 @@ export default function EventView() {
     turnstileSiteKey,
     origin,
     siteName,
+    viewCount: serverViewCount,
   } = useLoaderData<typeof loader>();
   const actionData = useActionData<{ success?: boolean; message?: string; error?: string; closed?: boolean; voteId?: string; voteToken?: string; proposedSlotId?: string; needsVerification?: boolean }>();
   const [searchParams] = useSearchParams();
@@ -3762,6 +3786,16 @@ export default function EventView() {
   const slots = live?.slots ?? serverSlots;
   const initialSignups = live?.signups ?? serverSignups;
   const pollData = live?.pollData ?? serverPollData;
+  // Unique views stay on the initial-load value: background polls re-read
+  // the count but never increment it (see trackEventView).
+  const viewCount = live?.viewCount ?? serverViewCount ?? 0;
+  const pollResponseCount = pollData?.votes.length ?? 0;
+  // Total spots across capped slots (capacity <= 0 means unlimited). When
+  // nothing is capped there is no denominator — show the bare count.
+  const totalSpots = slots.reduce(
+    (sum, s) => sum + ((s.capacity ?? 0) > 0 ? s.capacity : 0),
+    0
+  );
   // Closing state comes from the loader (server clock, SSR-safe) and
   // refreshes with the live poll above — never Date.now() in render.
   const hasEnded = Boolean((event as { hasEnded?: boolean }).hasEnded);
@@ -4760,6 +4794,37 @@ export default function EventView() {
                 "Open for Responses"
               )}
             </span>
+            {/* Social proof, kept subtle next to the status: unique views
+                (one count per browser — refreshes, bots, live-sync polls and
+                organizer views excluded) + confirmed interest. */}
+            <span
+              title="Unique views — one count per browser"
+              className="inline-flex items-center gap-1.5 text-[11px] font-medium text-slate-500"
+            >
+              <Eye className="w-3.5 h-3.5 text-slate-400" aria-hidden="true" />
+              <span>
+                {viewCount} {viewCount === 1 ? "view" : "views"}
+              </span>
+              <span className="text-slate-300" aria-hidden="true">
+                •
+              </span>
+              <span>
+                {event.type === "TIME_POLL" ? (
+                  <>
+                    {pollResponseCount} {pollResponseCount === 1 ? "response" : "responses"}
+                  </>
+                ) : totalSpots > 0 ? (
+                  <>
+                    {initialSignups.length}/{totalSpots} signups
+                  </>
+                ) : (
+                  <>
+                    {initialSignups.length}{" "}
+                    {initialSignups.length === 1 ? "signup" : "signups"}
+                  </>
+                )}
+              </span>
+            </span>
           </div>
 
           <div className="flex items-start justify-between gap-3">
@@ -5305,9 +5370,6 @@ export default function EventView() {
               {hasEnded ? "Shifts & Tasks" : "Available Shifts & Tasks"}
               {liveBadge}
             </h2>
-            <span className="text-xs font-medium text-slate-500">
-              {initialSignups.length} confirmed {initialSignups.length === 1 ? "signup" : "signups"}
-            </span>
           </div>
 
           {/* Organizer ended panel sits with the list it summarizes — guests
