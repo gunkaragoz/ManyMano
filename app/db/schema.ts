@@ -91,6 +91,22 @@ export const reminderSends = sqliteTable(
   (t) => [primaryKey({ columns: [t.eventId, t.reminderKey, t.kind] })]
 );
 
+// Unique page views per event (see app/utils/event-views.ts). One row per
+// (event, viewer); viewer_key is a SHA-256 hash of the viewer's random
+// cookie (or a salted IP+UA fallback), never a raw token or raw IP.
+export const eventViews = sqliteTable(
+  "event_views",
+  {
+    eventId: text("event_id")
+      .notNull()
+      .references(() => events.id, { onDelete: "cascade" }),
+    viewerKey: text("viewer_key").notNull(),
+    firstSeen: text("first_seen").notNull(),
+    lastSeen: text("last_seen").notNull(),
+  },
+  (t) => [primaryKey({ columns: [t.eventId, t.viewerKey] })]
+);
+
 // Free-tier quota tracking (Resend email counts + alert dedupe).
 // Keys are period-scoped so rows never grow unboundedly in practice:
 //   email:daily:YYYY-MM-DD, email:monthly:YYYY-MM,
