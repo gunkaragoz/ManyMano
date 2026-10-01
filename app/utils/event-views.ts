@@ -70,29 +70,27 @@ export async function trackEventView(
     if (cookieId) {
       // Known browser identity: single-row invariant, refresh-safe.
       const viewerKey = await sha256Hex(`event-view:${cookieId}`);
-      const inserted = await d1
+      await d1
         .prepare(
           `INSERT OR IGNORE INTO event_views (event_id, viewer_key, first_seen, last_seen)
            VALUES (?1, ?2, ?3, ?3)`
         )
         .bind(eventId, viewerKey, now)
         .run();
-      if ((inserted.meta?.changes ?? 0) > 0) {
-        // First sighting of this cookie: its very first load was counted
-        // under today's shared IP slot (no cookie yet then). Adopt that row
-        // instead of double counting. Scoped to today's IP key, and if the
-        // slot belongs to another cookie-less browser behind the same NAT,
-        // their next refresh simply re-creates it (self-healing, ±1 at most).
-        const ipKey = await ipDayKey(eventId, ip, ua);
-        if (ipKey !== viewerKey) {
-          await d1
-            .prepare(`DELETE FROM event_views WHERE event_id = ?1 AND viewer_key = ?2`)
-            .bind(eventId, ipKey)
-            .run();
-        }
-      } else {
-        await refreshLastSeen(d1, eventId, viewerKey, now);
+      // Adopt today's shared IP slot into this personal row. Runs on every
+      // load (idempotent): if a previous adoption-delete was lost to a
+      // transient D1 failure, a later load heals it instead of double
+      // counting this browser forever. Scoped to today's IP key, and if the
+      // slot belongs to another cookie-less browser behind the same NAT,
+      // their next refresh simply re-creates it (self-healing, ±1 at most).
+      const ipKey = await ipDayKey(eventId, ip, ua);
+      if (ipKey !== viewerKey) {
+        await d1
+          .prepare(`DELETE FROM event_views WHERE event_id = ?1 AND viewer_key = ?2`)
+          .bind(eventId, ipKey)
+          .run();
       }
+      await refreshLastSeen(d1, eventId, viewerKey, now);
       return { viewCount: await countEventViews(d1, eventId), setViewerCookie: null };
     }
 

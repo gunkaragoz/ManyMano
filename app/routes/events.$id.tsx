@@ -255,6 +255,17 @@ export const headers: HeadersFunction = ({ loaderHeaders }) => {
   return headers;
 };
 
+/**
+ * "3/10 signups" for fully capped sheets. Mixed capped + unlimited sheets
+ * can't share one meaningful fraction ("7/2 signups" — the numerator covers
+ * every slot), so fall back to a plain headcount then. Mirrors the
+ * mixed-capacity headline in ~/utils/reminders.
+ */
+export function signupCountLabel(filled: number, totalSpots: number, hasUnlimited: boolean): string {
+  if (totalSpots > 0 && !hasUnlimited) return `${filled}/${totalSpots} signups`;
+  return `${filled} ${filled === 1 ? "signup" : "signups"}`;
+}
+
 export function ErrorBoundary() {
   const error = useRouteError();
 
@@ -3796,6 +3807,7 @@ export default function EventView() {
     (sum, s) => sum + ((s.capacity ?? 0) > 0 ? s.capacity : 0),
     0
   );
+  const hasUnlimitedSlot = slots.some((s) => (s.capacity ?? 0) <= 0);
   // Closing state comes from the loader (server clock, SSR-safe) and
   // refreshes with the live poll above — never Date.now() in render.
   const hasEnded = Boolean((event as { hasEnded?: boolean }).hasEnded);
@@ -4813,15 +4825,8 @@ export default function EventView() {
                   <>
                     {pollResponseCount} {pollResponseCount === 1 ? "response" : "responses"}
                   </>
-                ) : totalSpots > 0 ? (
-                  <>
-                    {initialSignups.length}/{totalSpots} signups
-                  </>
                 ) : (
-                  <>
-                    {initialSignups.length}{" "}
-                    {initialSignups.length === 1 ? "signup" : "signups"}
-                  </>
+                  <>{signupCountLabel(initialSignups.length, totalSpots, hasUnlimitedSlot)}</>
                 )}
               </span>
             </span>

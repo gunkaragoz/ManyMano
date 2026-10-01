@@ -1,6 +1,6 @@
 // Unique view counting for event pages: one count per browser, refresh-safe.
 import { beforeEach, describe, expect, it } from "vitest";
-import { loader } from "~/routes/events.$id";
+import { loader, signupCountLabel } from "~/routes/events.$id";
 import { trackEventView } from "~/utils/event-views";
 import { createSqliteD1, type SqliteD1 } from "./helpers/sqlite-d1";
 import { SITE_URL, routeContext, seedEvent, testEnv } from "./helpers/route-harness";
@@ -93,6 +93,62 @@ describe("trackEventView", () => {
       isPoll: false,
     });
     expect(second.viewCount).toBe(1);
+  });
+
+  it("heals a lost adoption-delete instead of double counting forever", async () => {
+    // Partial failure state: personal row inserted, but the fallback IP
+    // slot deletion was lost — both rows present for one browser.
+    await seedEvent(db, { id: "ev6" });
+    const now = new Date().toISOString();
+    const { sha256Hex } = await import("~/utils/auth");
+    const personal = await sha256Hex("event-view:BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB");
+    db.sqlite
+      .prepare(
+        `INSERT INTO event_views (event_id, viewer_key, first_seen, last_seen) VALUES (?, ?, ?, ?)`
+      )
+      .run("ev6", personal, now, now);
+    // Orphaned IP slot for the same browser (same test IP+UA as req()).
+    const orphan = await trackEventView(
+      db.d1,
+      "ev6",
+      req("/events/ev6", { "cf-connecting-ip": "198.51.100.9" }),
+      { isAdmin: false, isPoll: false }
+    );
+    expect(orphan.viewCount).toBe(2);
+    // Next load presents the cookie: adoption is retried, count heals to 1.
+    const healed = await trackEventView(
+      db.d1,
+      "ev6",
+      req("/events/ev6", {
+        cookie: "mm_viewer=BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB",
+        "cf-connecting-ip": "198.51.100.9",
+      }),
+      { isAdmin: false, isPoll: false }
+    );
+    expect(healed.viewCount).toBe(1);
+    const again = await trackEventView(
+      db.d1,
+      "ev6",
+      req("/events/ev6", {
+        cookie: "mm_viewer=BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB",
+        "cf-connecting-ip": "198.51.100.9",
+      }),
+      { isAdmin: false, isPoll: false }
+    );
+    expect(again.viewCount).toBe(1);
+  });
+});
+
+describe("signupCountLabel", () => {
+  it("shows a fraction for fully capped sheets", () => {
+    expect(signupCountLabel(3, 10, false)).toBe("3/10 signups");
+    expect(signupCountLabel(0, 5, false)).toBe("0/5 signups");
+  });
+
+  it("falls back to a headcount when any slot is unlimited", () => {
+    expect(signupCountLabel(7, 2, true)).toBe("7 signups");
+    expect(signupCountLabel(1, 0, true)).toBe("1 signup");
+    expect(signupCountLabel(0, 0, false)).toBe("0 signups");
   });
 });
 
