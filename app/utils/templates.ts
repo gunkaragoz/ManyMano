@@ -1274,6 +1274,168 @@ export const TEMPLATES: EventTemplate[] = [
     },
   },
 
+  {
+    slug: "snack-schedule",
+    type: "SIGNUP_SHEET",
+    name: "Team snack schedule",
+    tagline: "One snack family per game for eight weeks",
+    category: "sports",
+    icon: "sandwich",
+    seo: {
+      title: "Team Snack Sign-Up Sheet — Free Weekly Schedule",
+      description: "Plan eight weekly games with one snack family per game. Edit game dates and the season length before sharing. Free, no accounts or ads.",
+      h1: "Team snack sign-up sheet",
+      intro: [
+        "To run a team snack schedule, give each game one snack slot with room for one family. This template repeats every Saturday for eight games, so parents can see which dates still need snacks.",
+        "Change the first game date, repeat pattern and season length before sharing. Adjust individual dates for bye weeks or rescheduled games, and put the team size and food restrictions in the description.",
+      ],
+      tips: [
+        "List the number of players so each family knows how many snacks to bring.",
+        "Confirm food restrictions with the coach before suggesting snacks.",
+        "Review all game dates against the team calendar before sharing the link.",
+      ],
+      faqs: [
+        { question: "Can I change the game day or season length?", answer: "Yes. Edit the first date, repeat settings and end of the series before creating the sheet. The starter schedule has eight Saturday games." },
+        { question: "Does each game have its own snack slot?", answer: "Yes. Each date has one slot for one family. Once claimed, that game's snack slot is full; other games remain available." },
+      ],
+    },
+    prefill: {
+      details: {
+        title: "Team Snack Schedule",
+        description: "Please choose a game to bring snacks for [number] players. Check with the coach about food restrictions and bring snacks to the team area after the game.",
+        location: "[Your team's field]",
+        timezone: null,
+      },
+      anchor: nextWeekday(SAT),
+      dates: { mode: "repeat", rule: { type: "weekly", interval: 1, weekdays: [SAT] }, ends: { after: 8 } },
+      shifts: [{ name: "Game snacks", startTime: "", endTime: "", days: { kind: "all" }, tasks: [task("Snack family", 1)] }],
+    },
+  },
+  {
+    slug: "trunk-or-treat",
+    type: "SIGNUP_SHEET",
+    name: "Trunk-or-treat",
+    tagline: "Decorated cars, candy donations and event helpers",
+    category: "community",
+    icon: "party",
+    seo: {
+      title: "Trunk-or-Treat Sign-Up Sheet — Free Template",
+      description: "Organize decorated cars, candy donations, setup and cleanup for a trunk-or-treat. Edit dates, times and spots. Free, no accounts or ads.",
+      h1: "Trunk-or-treat sign-up sheet",
+      intro: [
+        "Organize a trunk-or-treat with separate sign-up spots for decorated cars, candy donations and volunteer shifts. This template starts with twelve car spaces, eight candy donations and timed setup, welcome and cleanup roles.",
+        "Choose your October event date before sharing; the starter date is the next Saturday. Adjust the car capacity to match your venue and add arrival instructions for drivers.",
+      ],
+      tips: [
+        "Ask drivers to arrive before visitors and keep cars parked until the event ends.",
+        "Include venue-approved parking and pedestrian routes in the description.",
+        "State candy requirements and offer a non-food treat option for visitors.",
+      ],
+      faqs: [
+        { question: "Can people donate candy without decorating a car?", answer: "Yes. Candy donations and decorated cars have separate spots, so people can choose how to help." },
+        { question: "Is the template already set to Halloween?", answer: "No. It starts on the next Saturday. Choose your event date and update the arrival and event times before sharing." },
+      ],
+    },
+    prefill: {
+      details: {
+        title: "Trunk-or-Treat",
+        description: "Decorated cars should arrive by 4:30 PM and stay parked until visitors leave at 7:00 PM. Drop candy donations at the welcome table. Follow [your venue's parking instructions].",
+        location: "[Your venue] parking lot",
+        timezone: null,
+      },
+      anchor: nextWeekday(SAT),
+      dates: { mode: "single" },
+      shifts: [
+        { name: "Setup", startTime: "16:00", endTime: "17:00", days: { kind: "all" }, tasks: [task("Setup helper", 4)] },
+        { name: "Decorated cars", startTime: "16:30", endTime: "19:00", days: { kind: "all" }, tasks: [task("Decorated car", 12)] },
+        { name: "Welcome table", startTime: "17:00", endTime: "19:00", days: { kind: "all" }, tasks: [task("Welcome helper", 2)] },
+        { name: "Candy donations", startTime: "", endTime: "", days: { kind: "all" }, tasks: [task("Bag of individually wrapped candy", 8)] },
+        { name: "Cleanup", startTime: "19:00", endTime: "19:30", days: { kind: "all" }, tasks: [task("Cleanup helper", 4)] },
+      ],
+    },
+  },
+  {
+    slug: "food-pantry-shifts",
+    type: "SIGNUP_SHEET",
+    name: "Food pantry shifts",
+    tagline: "First-Saturday volunteer shifts for six months",
+    category: "community",
+    icon: "soup",
+    seo: {
+      title: "Food Pantry Volunteer Sign-Up Sheet — Monthly Shifts",
+      description: "Schedule food pantry volunteers on the first Saturday of each month for six months. Sorting, packing and distribution shifts. Free, no accounts.",
+      h1: "Food pantry volunteer sign-up sheet",
+      intro: [
+        "Schedule food pantry volunteers with separate spots for sorting, packing and distribution. This template repeats on the first Saturday of each month for six months, with two shifts per day.",
+        "Each month has its own volunteer spots. Change the first date, monthly pattern, times and capacities to match your pantry before sharing with your church, club or neighborhood group.",
+      ],
+      tips: [
+        "Include check-in instructions and any lifting requirements in the description.",
+        "Reserve enough time for packing before distribution begins.",
+        "Check holiday closures before sharing the six-month schedule.",
+      ],
+      faqs: [
+        { question: "Does this repeat on the first Saturday each month?", answer: "Yes. The starter schedule uses the next first Saturday and repeats monthly for six dates. It follows the weekday's position in the month rather than a fixed day number." },
+        { question: "Must volunteers commit to all six months?", answer: "No. Each date has separate spots. Volunteers choose the dates and roles they can cover." },
+      ],
+    },
+    prefill: {
+      details: {
+        title: "Food Pantry Volunteer Shifts",
+        description: "Help prepare and distribute food on the first Saturday of each month. Choose the dates and roles you can cover. Check in at [volunteer entrance]. Contact [organizer] about accessibility or lifting requirements.",
+        location: "[Your food pantry]",
+        timezone: null,
+      },
+      anchor: { kind: "monthlyNth", weekday: SAT, ordinal: 1, minOffsetDays: 1 },
+      dates: { mode: "repeat", rule: { type: "monthlyNth", interval: 1 }, ends: { after: 6 } },
+      shifts: [
+        { name: "Prepare food", startTime: "08:00", endTime: "10:00", days: { kind: "all" }, tasks: [task("Sort donations", 3), task("Pack food bags", 4)] },
+        { name: "Distribution", startTime: "10:00", endTime: "12:00", days: { kind: "all" }, tasks: [task("Welcome visitors", 2), task("Distribute food bags", 4), task("Cleanup helper", 2)] },
+      ],
+    },
+  },
+  {
+    slug: "volunteer",
+    type: "SIGNUP_SHEET",
+    name: "Volunteer sign-up sheet",
+    tagline: "Morning and afternoon roles for any event",
+    category: "community",
+    icon: "heart",
+    seo: {
+      title: "Volunteer Sign-Up Sheet — Free Editable Template",
+      description: "Create a free volunteer sign-up sheet with morning and afternoon shifts, role limits and a shareable link. No accounts or ads. Edit every role.",
+      h1: "Volunteer sign-up sheet",
+      intro: [
+        "Create a volunteer sign-up sheet by listing the roles, shift times and number of helpers needed. This starter has setup, morning, afternoon and cleanup shifts, with separate spots for welcome and activity helpers.",
+        "Rename the roles for your event, adjust capacities and choose a date before sharing the link. Volunteers claim an open spot with their name, and you can export the roster from organizer mode.",
+      ],
+      tips: [
+        "Name roles clearly so volunteers know what they are signing up to do.",
+        "Add a check-in location and a contact for questions before the event.",
+        "Review open spots before event day and share the link again if help is still needed.",
+      ],
+      faqs: [
+        { question: "Can I change the volunteer roles and shift times?", answer: "Yes. Every role, time and capacity is editable before you create the sheet. Add or remove shifts to match your event." },
+        { question: "Do volunteers need an account or email?", answer: "No account is needed. Volunteers enter their name to claim a spot; email is optional. Sign-up names and notes are visible to people with the event link." },
+      ],
+    },
+    prefill: {
+      details: {
+        title: "Volunteer Sign-Up",
+        description: "Choose a role and shift to help with our event. Please arrive ten minutes before your shift and check in at [welcome desk]. Contact [organizer] if you have questions about a role.",
+        location: "[Your event venue]",
+        timezone: null,
+      },
+      anchor: nextWeekday(SAT),
+      dates: { mode: "single" },
+      shifts: [
+        { name: "Setup", startTime: "08:00", endTime: "09:00", days: { kind: "all" }, tasks: [task("Setup helper", 4)] },
+        { name: "Morning", startTime: "09:00", endTime: "12:00", days: { kind: "all" }, tasks: [task("Welcome desk", 2), task("Activity helper", 4)] },
+        { name: "Afternoon", startTime: "12:00", endTime: "15:00", days: { kind: "all" }, tasks: [task("Welcome desk", 2), task("Activity helper", 4)] },
+        { name: "Cleanup", startTime: "15:00", endTime: "16:00", days: { kind: "all" }, tasks: [task("Cleanup helper", 4)] },
+      ],
+    },
+  },
   // --- Meeting polls --------------------------------------------------------
   {
     slug: "team-meeting",
@@ -1685,6 +1847,40 @@ export const TEMPLATES: EventTemplate[] = [
       dayOffsets: [0, 1, 2, 3, 5],
       startTimes: ["19:00"],
       durationMinutes: 120,
+    },
+  },
+  {
+    slug: "committee-meeting",
+    type: "TIME_POLL",
+    name: "Committee meeting",
+    tagline: "Find a weeknight time for your volunteer committee",
+    category: "community",
+    icon: "presentation",
+    seo: {
+      title: "Committee Meeting Poll — Find a Time, Free",
+      description: "Find a committee meeting time with six weeknight options and Yes, Maybe or No voting. Lock the chosen time when ready. Free, no accounts or ads.",
+      h1: "Committee meeting scheduling poll",
+      intro: [
+        "Find a committee meeting time by offering several options and asking each member to vote Yes, Maybe or No. This template offers six one-hour options on Monday, Tuesday and Wednesday evenings next week.",
+        "Edit the dates and times for your volunteer committee, then share one link. Compare availability and lock the chosen time when the group is ready; members can add it to their calendars.",
+      ],
+      tips: [
+        "Include a short agenda so members know what the meeting will cover.",
+        "Ask everyone to vote on all options, including times they cannot attend.",
+        "Give members a response deadline before choosing and locking the time.",
+      ],
+      faqs: [
+        { question: "Can members vote without an account?", answer: "Yes. Members open the link, enter their name and vote Yes, Maybe or No on each option. Email is optional." },
+        { question: "Does the poll automatically schedule recurring meetings?", answer: "No. This poll chooses a time for one meeting. Create another poll or copy the event when you need to find a new meeting time." },
+      ],
+    },
+    poll: {
+      title: "Committee Meeting",
+      description: "Let's find an hour for our committee meeting. Vote on every option by [response deadline]. Agenda: [topics].",
+      anchor: nextWeekday(MON),
+      dayOffsets: [0, 1, 2],
+      startTimes: ["18:00", "19:30"],
+      durationMinutes: 60,
     },
   },
 ];
