@@ -30,3 +30,29 @@ Entry format:
   test.
 - Next: add Search Console credentials (seo/README.md → Setup), then let
   4 weeks of conversion data build up before picking the first page.
+
+## 2026-10-01 — template library — first expansion batch prepared
+
+- Why: `seo/BRIEF.md` targets snack schedules and volunteer organizers in
+  schools, nonprofits and churches. The catalog had no snack schedule,
+  monthly recurrence example or generic volunteer template. Trunk-or-treat
+  adds a distinct October use case; a committee poll serves volunteer groups.
+- Pages: `/signup-sheet/snack-schedule`, `/signup-sheet/trunk-or-treat`,
+  `/signup-sheet/food-pantry-shifts`, `/signup-sheet/volunteer`,
+  `/meeting-poll/committee-meeting`.
+- Scope: library and template landing pages; existing create-menu selection
+  unchanged. Sitemap, llms.txt and conversion attribution use the catalog
+  automatically. No paid services or new dependencies.
+- Baseline (28d before): new pages have no prior baseline. Search Console
+  impressions, clicks, CTR and position unavailable; conversions unavailable.
+  Measurement began September 27, so there is no mature sitewide baseline yet.
+- Shipped: pending review and deployment; this entry records preparation,
+  not a production launch.
+- Judge after: at least 28 days after actual deployment (November 1 if
+  deployed October 1, allowing for Search Console's reporting delay).
+- Next report: use the existing weekly SEO check to review indexing and
+  conversions by these landing pages. Compare evergreen pages over equal
+  windows; judge trunk-or-treat in its October season separately. Treat low
+  traffic as inconclusive, not a miss. Prioritize next additions using actual
+  query impressions and organizer creations; candidates include office hours,
+  field day, church volunteering, study groups and distinct holiday templates.

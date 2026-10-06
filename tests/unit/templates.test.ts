@@ -24,6 +24,12 @@ import {
 } from "~/utils/validation";
 import { expandDates } from "~/utils/recurrence";
 import { selectionToSpec } from "~/utils/formDates";
+import { loadTemplatePage } from "~/components/TemplatePage";
+import { loader as libraryLoader } from "~/routes/templates._index";
+import { loader as sitemapLoader } from "~/routes/sitemap[.]xml";
+import { loader as llmsLoader } from "~/routes/llms[.]txt";
+import { createSqliteD1 } from "./helpers/sqlite-d1";
+import { SITE_URL, routeContext, testEnv } from "./helpers/route-harness";
 
 // Several "todays": month/year ends, a leap day, and every weekday.
 const TODAYS = ["2026-09-25", "2026-09-26", "2026-09-27", "2026-12-31", "2028-02-28", "2028-02-29", "2027-06-30", "2026-10-01", "2026-10-05"];
@@ -181,6 +187,55 @@ describe("template catalog", () => {
     // Early June: next school year, not a one-week sheet.
     expect(at("2027-06-07").start).toBe("2027-09-02");
     expect(at("2027-06-07").dates.length).toBeGreaterThan(30);
+  });
+
+  it("new templates appear in the library and discovery pages without changing the create menu", async () => {
+    const slugs = ["snack-schedule", "trunk-or-treat", "food-pantry-shifts", "volunteer", "committee-meeting"];
+    const library = (await libraryLoader()).data.templates;
+    const context = routeContext(testEnv(createSqliteD1()));
+    const args = { request: new Request(SITE_URL), url: new URL(SITE_URL), pattern: "/", params: {}, context };
+    const sitemap = await (await sitemapLoader(args)).text();
+    const llms = await (await llmsLoader(args)).text();
+    for (const slug of slugs) {
+      const t = getTemplate(slug)!;
+      const path = templatePath(t);
+      expect(library.find((entry) => entry.slug === slug)?.path).toBe(path);
+      expect(loadTemplatePage(slug, t.type).template.createPath).toBe(templateCreatePath(t));
+      expect(sitemap).toContain(`<loc>${SITE_URL}${path}</loc>`);
+      expect(llms).toContain(`${SITE_URL}${path}`);
+    }
+    expect(HEADER_MENU_SLUGS).toEqual([
+      "book-fair", "meal-train", "parent-teacher-conferences", "staff-appreciation-week", "bake-sale",
+      "team-meeting", "family-reunion", "book-club", "happy-hour", "pta-meeting",
+    ]);
+  });
+
+  it("snack schedule generates eight Saturday games with one family per game", () => {
+    const t = getTemplate("snack-schedule");
+    if (!t || t.type !== "SIGNUP_SHEET") throw new Error("missing");
+    const r = resolveSignupPrefill(signupPrefillFromTemplate(t), { today: "2026-10-01", timezone: "UTC" });
+    if (isUnsupported(r)) throw new Error(r.reason);
+    const dates = expandDates(selectionToSpec(r.dateSel, r.details.eventDate), r.details.eventDate);
+    expect(dates).toHaveLength(8);
+    expect(dates[0]).toBe("2026-10-03");
+    expect(dates[7]).toBe("2026-11-21");
+    expect(dates.every((d) => new Date(`${d}T00:00:00Z`).getUTCDay() === 6)).toBe(true);
+    const sim = simulateSignupSubmission(r, "2026-10-01");
+    if ("error" in sim) throw new Error(sim.error);
+    expect(sim.rows).toHaveLength(8);
+    expect(sim.rows.every((slot) => slot.capacity === 1)).toBe(true);
+  });
+
+  it("food pantry repeats on the first Saturday across year boundaries", () => {
+    const t = getTemplate("food-pantry-shifts");
+    if (!t || t.type !== "SIGNUP_SHEET") throw new Error("missing");
+    const r = resolveSignupPrefill(signupPrefillFromTemplate(t), { today: "2026-10-03", timezone: "UTC" });
+    if (isUnsupported(r)) throw new Error(r.reason);
+    const dates = expandDates(selectionToSpec(r.dateSel, r.details.eventDate), r.details.eventDate);
+    expect(dates).toEqual(["2026-11-07", "2026-12-05", "2027-01-02", "2027-02-06", "2027-03-06", "2027-04-03"]);
+    const sim = simulateSignupSubmission(r, "2026-10-03");
+    if ("error" in sim) throw new Error(sim.error);
+    expect(sim.rows).toHaveLength(30);
   });
 
   it("header menu lists a short set of real templates", () => {
