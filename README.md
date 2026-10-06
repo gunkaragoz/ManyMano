@@ -134,8 +134,8 @@ Keep the rest short and readable: `feat/multi-day-repeating-sheets`, `fix/timezo
 
 `POST /mcp` is a stateless [MCP](https://modelcontextprotocol.io/) server
 (Streamable HTTP, JSON responses, no sessions, no auth) on the same Worker.
-It's **off unless `MCP_ENABLED="true"`** (production ships `"false"`; staging
-and previews `"true"`). Turning it off again is the kill switch.
+It's **off unless `MCP_ENABLED="true"`** (production, staging and previews
+ship `"true"`; local defaults to `"false"`). Turning it off again is the kill switch.
 
 | Tool | What it does |
 |---|---|
@@ -190,7 +190,7 @@ change at a time.
 ## 🛠️ Tech Stack
 
 - **Framework**: [React Router 8](https://reactrouter.com/) + [React 19](https://react.dev/) (SSR on the edge)
-- **Build**: [Vite 8](https://vite.dev/) + [@cloudflare/vite-plugin](https://developers.cloudflare.com/workers/vite-plugin/)
+- **Build**: [Vite 8](https://vite.dev/) + [@cloudflare/vite-plugin 1.62.5+](https://developers.cloudflare.com/workers/vite-plugin/), with Wrangler 4.147+ and matching Workers types
 - **Edge Runtime**: [Cloudflare Workers](https://developers.cloudflare.com/workers/) (fetch handler + hourly [Cron Trigger](https://developers.cloudflare.com/workers/configuration/cron-triggers/) for reminder emails)
 - **Database**: [Cloudflare D1](https://developers.cloudflare.com/d1/) (Serverless edge SQLite)
 - **ORM & Migrations**: [Drizzle ORM](https://orm.drizzle.team/) + Drizzle Kit
