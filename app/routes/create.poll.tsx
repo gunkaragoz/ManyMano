@@ -1,3 +1,4 @@
+import { recordTemplateClone } from "~/utils/template-popularity";
 import { getCloudflareEnv } from "~/utils/cloudflare-context";
 import type { ActionFunctionArgs, HeadersFunction, LoaderFunctionArgs, MetaFunction } from "react-router";
 import { data, redirect } from "react-router";
@@ -376,6 +377,7 @@ export async function action({ request, context }: ActionFunctionArgs) {
   });
   // SEO loop: count the conversion against the visit's landing page.
   await recordConversion(env.DB, "TIME_POLL", formData);
+  await recordTemplateClone(env.DB, "TIME_POLL", formData);
 
   const headers = new Headers();
   headers.append("Set-Cookie", buildAdminCookie(eventId, adminToken));
@@ -480,6 +482,10 @@ export default function CreateMeetingPoll() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  const [templateSlug, setTemplateSlug, clearTemplateSlug, templateRestored] = usePersistentState<string>(
+    "mm_poll_template", ""
+  );
+
   const wasSubmitting = useRef(false);
   const titleSentinelRef = useRef<HTMLDivElement>(null);
   // Polls have no event date — sticky header shows the title only.
@@ -490,6 +496,7 @@ export default function CreateMeetingPoll() {
     } else if (navigation.state === "loading" && wasSubmitting.current) {
       wasSubmitting.current = false;
       clearDetails();
+      clearTemplateSlug();
       clearDays();
       clearDuration();
     } else if (navigation.state === "idle") {
@@ -501,6 +508,7 @@ export default function CreateMeetingPoll() {
     setDetails((prev) => ({ ...prev, ...patch }));
 
   const startOver = () => {
+    clearTemplateSlug();
     clearDetails();
     clearDays();
     clearDuration();
@@ -523,11 +531,12 @@ export default function CreateMeetingPoll() {
     dismiss: dismissPrefill,
   } = usePrefill<PollPrefill>({
     load: prefill,
-    restored: detailsRestored && daysRestored && durationRestored,
+    restored: templateRestored && detailsRestored && daysRestored && durationRestored,
     apply: (p) => {
       const timezone = prefillTimezone(p.details, detectLocalTimezone());
       const resolved = resolvePollPrefill(p, { today: todayInZone(timezone), timezone });
       if (isUnsupported(resolved)) return resolved;
+      setTemplateSlug(p.source.kind === "template" ? p.source.slug : "");
       setDetails(resolved.details);
       setDays(resolved.days);
       setDurationMinutes(resolved.durationMinutes);
@@ -682,6 +691,7 @@ export default function CreateMeetingPoll() {
       )}
 
       <Form method="post" className="bg-white border border-slate-200/80 rounded-3xl p-8 sm:p-10 shadow-[0_2px_12px_rgba(0,0,0,0.03)] space-y-10">
+        <input type="hidden" name="templateSlug" value={templateSlug} />
         <AttributionFields />
         <input type="hidden" name="durationMinutes" value={durationMinutes === null ? "allday" : String(durationMinutes)} />
         <div className="relative pl-9 space-y-8">

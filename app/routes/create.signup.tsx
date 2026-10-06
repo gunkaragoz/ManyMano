@@ -1,3 +1,4 @@
+import { recordTemplateClone } from "~/utils/template-popularity";
 import { getCloudflareEnv } from "~/utils/cloudflare-context";
 import type { ActionFunctionArgs, HeadersFunction, LoaderFunctionArgs, MetaFunction } from "react-router";
 import { data, redirect } from "react-router";
@@ -467,6 +468,7 @@ export async function action({ request, context }: ActionFunctionArgs) {
   });
   // SEO loop: count the conversion against the visit's landing page.
   await recordConversion(env.DB, "SIGNUP_SHEET", formData);
+  await recordTemplateClone(env.DB, "SIGNUP_SHEET", formData);
 
   const headers = new Headers();
   headers.append("Set-Cookie", buildAdminCookie(eventId, adminToken));
@@ -591,6 +593,10 @@ export default function CreateSignupSheet() {
     );
   };
 
+  const [templateSlug, setTemplateSlug, clearTemplateSlug, templateRestored] = usePersistentState<string>(
+    "mm_signup_template", ""
+  );
+
   const wasSubmitting = useRef(false);
   const titleSentinelRef = useRef<HTMLDivElement>(null);
   useCreateStickyHeader(details.title, details.eventDate, titleSentinelRef);
@@ -624,6 +630,7 @@ export default function CreateSignupSheet() {
       // Form POST succeeded and we're redirecting to the new event.
       wasSubmitting.current = false;
       clearDetails();
+      clearTemplateSlug();
       clearShifts();
       clearDateSel();
     } else if (navigation.state === "idle") {
@@ -636,6 +643,7 @@ export default function CreateSignupSheet() {
     setDetails((prev) => ({ ...prev, ...patch }));
 
   const startOver = () => {
+    clearTemplateSlug();
     clearDetails();
     clearShifts();
     clearDateSel();
@@ -657,11 +665,12 @@ export default function CreateSignupSheet() {
     dismiss: dismissPrefill,
   } = usePrefill<SignupPrefill>({
     load: prefill,
-    restored: detailsRestored && shiftsRestored && dateSelRestored,
+    restored: templateRestored && detailsRestored && shiftsRestored && dateSelRestored,
     apply: (p) => {
       const timezone = prefillTimezone(p.details, detectLocalTimezone());
       const resolved = resolveSignupPrefill(p, { today: todayInZone(timezone), timezone });
       if (isUnsupported(resolved)) return resolved;
+      setTemplateSlug(p.source.kind === "template" ? p.source.slug : "");
       setDetails(resolved.details);
       setShifts(resolved.shifts);
       setDateSel(resolved.dateSel);
@@ -779,6 +788,7 @@ export default function CreateSignupSheet() {
       )}
 
       <Form method="post" className="bg-white border border-slate-200/80 rounded-3xl p-8 sm:p-10 shadow-[0_2px_12px_rgba(0,0,0,0.03)] space-y-10">
+        <input type="hidden" name="templateSlug" value={templateSlug} />
         <AttributionFields />
         <div className="relative pl-9 space-y-8">
           {/* Thin vertical line connecting steps */}

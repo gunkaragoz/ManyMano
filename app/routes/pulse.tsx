@@ -68,7 +68,7 @@ export const meta: MetaFunction<typeof loader> = ({ loaderData, matches }) => {
   const site = rootSiteFromMatches(matches);
   const title = `Pulse — live activity | ${site.siteName}`;
   const description =
-    "Live counts of events, sign-ups and votes, daily trends and timezone spread. Aggregate stats only — no personal data.";
+    "Live counts of events, sign-ups and votes, popular templates, daily trends and timezone spread. Aggregate stats only — no personal data.";
   return mergeParentMeta(matches, [
     ...pageMetaOverrides({ title, description, path: "/pulse", siteUrl: site.siteUrl }),
     {
@@ -230,6 +230,39 @@ export default function Pulse() {
           ))}
         </div>
       </div>
+
+      <section className="bg-white border border-slate-200/80 rounded-3xl p-6 sm:p-8 shadow-[0_2px_12px_rgba(0,0,0,0.03)] space-y-5">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <h2 className="text-lg font-bold text-slate-900 tracking-tight">Most popular templates</h2>
+            <p className="text-xs text-slate-500 mt-0.5">
+              Last {stats.days} days · ranked by views + clones, with clones breaking ties.
+            </p>
+          </div>
+          <Link to="/templates" className="text-sm font-semibold text-blue-600 hover:underline">Browse all templates</Link>
+        </div>
+        {stats.popularTemplates.length > 0 ? (
+          <ol className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            {stats.popularTemplates.map((template, index) => (
+              <li key={template.slug}>
+                <Link to={template.path} className="flex items-start gap-3 rounded-2xl border border-slate-100 bg-slate-50/60 p-4 hover:border-blue-200 hover:bg-blue-50/60 transition-colors">
+                  <span className="text-sm font-bold text-slate-400 tabular-nums">{index + 1}</span>
+                  <div className="min-w-0">
+                    <h3 className="text-sm font-semibold text-slate-900">{template.name}</h3>
+                    <p className="text-xs text-slate-500 mt-1">{template.type === "SIGNUP_SHEET" ? "Sign-up sheet" : "Meeting poll"}</p>
+                    <p className="text-xs text-slate-600 tabular-nums mt-2">
+                      {template.views} {template.views === 1 ? "view" : "views"} · {template.clones} {template.clones === 1 ? "clone" : "clones"}
+                    </p>
+                  </div>
+                </Link>
+              </li>
+            ))}
+          </ol>
+        ) : (
+          <p className="text-sm text-slate-500">No template activity recorded in this window yet.</p>
+        )}
+        <p className="text-[11px] text-slate-400">Views count page loads, excluding known bots and prefetches. Clones count events created from a template.</p>
+      </section>
 
       {isEmpty ? (
         <div className="bg-white border border-slate-200/80 rounded-3xl p-10 text-center space-y-4 shadow-[0_2px_12px_rgba(0,0,0,0.03)]">
