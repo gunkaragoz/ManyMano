@@ -149,7 +149,6 @@ function PopularTemplates({ stats }: { stats: PulseStats }) {
         <h2 className="text-lg font-bold text-slate-900 tracking-tight flex items-center gap-2">
           <ClipboardList className="w-5 h-5 text-blue-600" /> Popular templates
         </h2>
-        <p className="text-xs text-slate-500 mt-0.5">Favorites from the last {stats.days} days</p>
       </div>
       {stats.popularTemplates.length > 0 ? (
         <ol className="divide-y divide-slate-100">
@@ -169,10 +168,10 @@ function PopularTemplates({ stats }: { stats: PulseStats }) {
           ))}
         </ol>
       ) : (
-        <p className="text-sm text-slate-500">Favorites will appear as people explore and use templates.</p>
+        <p className="text-sm text-slate-500">No favorites yet.</p>
       )}
       <Link to="/templates" className="inline-flex items-center gap-1.5 text-xs font-semibold text-blue-600 hover:underline">
-        Browse templates <ArrowRight className="w-3.5 h-3.5" />
+        All templates <ArrowRight className="w-3.5 h-3.5" />
       </Link>
     </section>
   );
@@ -189,18 +188,7 @@ export default function Pulse() {
     setVisible((v) => (v.includes(k) ? (v.length > 1 ? v.filter((x) => x !== k) : v) : [...v, k]));
 
   const dailyTotals = stats.daily.map((d) => d.events + d.signups + d.votes);
-  const peak = stats.daily.reduce((m, d) => Math.max(m, d.events + d.signups + d.votes), 0);
-  const peakDay = stats.daily.find((d) => d.events + d.signups + d.votes === peak && peak > 0);
   const isEmpty = stats.totals.events === 0;
-  const minOff = stats.offsetSpread.min;
-  const maxOff = stats.offsetSpread.max;
-  const fmtOff = (m: number) => {
-    const sign = m < 0 ? "−" : "+";
-    const abs = Math.abs(m);
-    const h = Math.floor(abs / 60);
-    const mm = abs % 60;
-    return mm === 0 ? `UTC${sign}${h}` : `UTC${sign}${h}:${String(mm).padStart(2, "0")}`;
-  };
 
   return (
     <div className="space-y-6 py-2">
@@ -210,9 +198,6 @@ export default function Pulse() {
           <h1 className="text-3xl sm:text-4xl font-extrabold tracking-tight text-slate-900">
             ManyMano <span className="text-blue-600">Pulse</span>
           </h1>
-          <p className="text-sm text-slate-500 leading-relaxed">
-            A look at what people are planning together.
-          </p>
           <p className="text-xs font-medium text-slate-400">
             {prettyRange(stats.rangeStart, stats.rangeEnd)}
           </p>
@@ -276,7 +261,7 @@ export default function Pulse() {
               icon={<CalendarDays className="w-4 h-4" />}
               label="Events"
               value={stats.totals.events}
-              sub={`${stats.totals.signupSheets} sheets · ${stats.totals.polls} polls · ${stats.active7d.events} this week`}
+              sub={`${stats.totals.signupSheets} sheets · ${stats.totals.polls} polls`}
               delta={stats.deltas.events}
               spark={stats.daily.map((d) => d.events)}
               sparkColor="#2563eb"
@@ -285,7 +270,7 @@ export default function Pulse() {
               icon={<Users className="w-4 h-4" />}
               label="Sign-ups"
               value={stats.totals.signups}
-              sub={`~${stats.engagement.avgSignupsPerSheet} per sheet · ${stats.active7d.signups} this week`}
+              sub={`${stats.engagement.avgSignupsPerSheet} per sheet`}
               delta={stats.deltas.signups}
               spark={stats.daily.map((d) => d.signups)}
               sparkColor="#16a34a"
@@ -294,7 +279,7 @@ export default function Pulse() {
               icon={<Vote className="w-4 h-4" />}
               label="Votes"
               value={stats.totals.votes}
-              sub={`~${stats.engagement.avgVotesPerPoll} per poll · ${stats.active7d.votes} this week`}
+              sub={`${stats.engagement.avgVotesPerPoll} per poll`}
               delta={stats.deltas.votes}
               spark={stats.daily.map((d) => d.votes)}
               sparkColor="#9333ea"
@@ -303,11 +288,7 @@ export default function Pulse() {
               icon={<Globe2 className="w-4 h-4" />}
               label="Timezones"
               value={stats.totals.timezones}
-              sub={
-                minOff !== null && maxOff !== null
-                  ? `Spanning ${fmtOff(minOff)} → ${fmtOff(maxOff)} · ${stats.totals.slots} slots`
-                  : `${stats.totals.slots} time slots proposed`
-              }
+              sub={`${stats.totals.slots} time slots`}
               spark={dailyTotals}
               sparkColor="#0ea5e9"
             />
@@ -318,11 +299,6 @@ export default function Pulse() {
             <div className="flex flex-col xl:flex-row xl:items-center justify-between gap-3">
               <div className="min-w-0">
                 <h2 className="text-lg font-bold text-slate-900 tracking-tight">Daily activity</h2>
-                <p className="text-xs text-slate-500 mt-0.5">
-                  {peakDay
-                    ? `Peak: ${peak} actions on ${peakDay.label} · dashed line is the 7-day average`
-                    : "Dashed line is the 7-day average"}
-                </p>
               </div>
               <div className="flex flex-wrap gap-2 shrink-0">
                 {(Object.keys(SERIES_META) as SeriesKey[]).map((k) => {
@@ -347,26 +323,6 @@ export default function Pulse() {
               </div>
             </div>
             <DailyChart days={stats.daily} series={visible} />
-            <div className="flex flex-wrap gap-x-6 gap-y-1 text-[11px] text-slate-500">
-              <span>
-                <span className="font-bold text-slate-800 tabular-nums">
-                  {stats.daily.reduce((s, d) => s + d.events, 0)}
-                </span>{" "}
-                events in window
-              </span>
-              <span>
-                <span className="font-bold text-slate-800 tabular-nums">
-                  {stats.daily.reduce((s, d) => s + d.signups, 0)}
-                </span>{" "}
-                sign-ups in window
-              </span>
-              <span>
-                <span className="font-bold text-slate-800 tabular-nums">
-                  {stats.daily.reduce((s, d) => s + d.votes, 0)}
-                </span>{" "}
-                votes in window
-              </span>
-            </div>
           </section>
 
           {/* Timezones + mix */}
@@ -377,10 +333,6 @@ export default function Pulse() {
                   <h2 className="text-lg font-bold text-slate-900 tracking-tight flex items-center gap-2">
                     <Globe2 className="w-5 h-5 text-sky-600" /> Spanning timezones
                   </h2>
-                  <p className="text-xs text-slate-500 mt-0.5">
-                    Organizer timezones across {stats.totals.timezones} zone{stats.totals.timezones === 1 ? "" : "s"}
-                    {minOff !== null && maxOff !== null && ` · ${fmtOff(minOff)} to ${fmtOff(maxOff)}`}
-                  </p>
                 </div>
                 {stats.timezones.length === 0 ? (
                   <p className="text-sm text-slate-400">No timezone data yet.</p>
@@ -499,18 +451,13 @@ export default function Pulse() {
                       {stats.totals.finalized} <span className="text-xs font-semibold text-slate-500">({stats.engagement.finalizePct}%)</span>
                     </span>
                   </div>
-                  <div className="flex items-center justify-between text-slate-500">
-                    <span>Avg. options per event</span>
-                    <span className="font-bold text-slate-800 tabular-nums">{stats.engagement.avgSlotsPerEvent}</span>
-                  </div>
                 </div>
               </section>
             </div>
           </div>
 
           <p className="text-center text-[11px] text-slate-400 pt-2">
-            Aggregate counts only — no names, emails or event titles. Data:{" "}
-            <Link to="/api/pulse" className="underline hover:text-slate-600">/api/pulse</Link>
+            Anonymous totals. Your details stay private.
           </p>
         </>
       )}
