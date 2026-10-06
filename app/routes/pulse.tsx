@@ -456,9 +456,6 @@ export default function Pulse() {
             </div>
           </div>
 
-          <p className="text-center text-[11px] text-slate-400 pt-2">
-            Anonymous totals. Your details stay private.
-          </p>
         </>
       )}
     </div>
