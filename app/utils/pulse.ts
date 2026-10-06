@@ -1,3 +1,5 @@
+import { getPopularTemplates, type PopularTemplate } from "~/utils/template-popularity";
+
 // Pulse aggregation — public, aggregate-only stats for /pulse + /api/pulse.
 // No PII ever leaves D1: counts, day buckets (UTC), timezone names, response mix.
 
@@ -31,6 +33,7 @@ export interface PulseTimezoneRow {
 
 export interface PulseStats {
   days: number;
+  popularTemplates: PopularTemplate[];
   generatedAt: string;
   rangeStart: string; // YYYY-MM-DD
   rangeEnd: string; // YYYY-MM-DD
@@ -184,6 +187,7 @@ export async function getPulseStats(d1: D1, days: number, now = new Date()): Pro
   const dayKeys = dayRange(windowDays, now);
 
   const [
+    popularTemplates,
     totalEvents,
     signupSheets,
     polls,
@@ -209,6 +213,7 @@ export async function getPulseStats(d1: D1, days: number, now = new Date()): Pro
     curVotes,
     prevVotes,
   ] = await Promise.all([
+    getPopularTemplates(d1, windowDays, now),
     count(d1, "SELECT COUNT(*) AS n FROM events"),
     count(d1, "SELECT COUNT(*) AS n FROM events WHERE type = 'SIGNUP_SHEET'"),
     count(d1, "SELECT COUNT(*) AS n FROM events WHERE type = 'TIME_POLL'"),
@@ -350,6 +355,7 @@ export async function getPulseStats(d1: D1, days: number, now = new Date()): Pro
 
   return {
     days: windowDays,
+    popularTemplates,
     generatedAt,
     rangeStart: dayKeys[0] ?? generatedAt.slice(0, 10),
     rangeEnd: dayKeys[dayKeys.length - 1] ?? generatedAt.slice(0, 10),

@@ -109,6 +109,7 @@ describe("sign-up create page with a template", () => {
     renderAt("signup", "/create/signup?template=potluck");
 
     await waitFor(() => expect(byName("title").value).toBe("Potluck Dinner"));
+    expect(byName("templateSlug").value).toBe("potluck");
     expect(byName("organizerName").value).toBe("");
     expect(byName("organizerEmail").value).toBe("");
     expect(byName("location").value).toBe("[Venue or address]");
@@ -132,6 +133,7 @@ describe("sign-up create page with a template", () => {
     // A refresh lands on the stripped URL.
     renderAt("signup", "/create/signup");
     await waitFor(() => expect(byName("title").value).toBe("Our potluck"));
+    expect(byName("templateSlug").value).toBe("potluck");
   });
 
   it("keeps edits after a failed submit (no re-apply on revalidation)", async () => {
@@ -146,6 +148,7 @@ describe("sign-up create page with a template", () => {
     });
     await waitFor(() => expect(screen.getAllByText("Please enter your name.").length).toBeGreaterThan(0));
     expect(byName("title").value).toBe("Edited");
+    expect(byName("templateSlug").value).toBe("potluck");
   });
 
   it("uses today on the event's calendar, not UTC", async () => {
@@ -164,6 +167,7 @@ describe("sign-up create page with a template", () => {
     await waitFor(() => expect(byName("title").value).toBe("Potluck Dinner"));
     fireEvent.click(screen.getByLabelText("Dismiss"));
     expect(screen.queryByText(/Started from the Potluck template/)).toBeNull();
+    expect(byName("templateSlug").value).toBe("potluck");
     expect(byName("title").value).toBe("Potluck Dinner");
     cleanup();
 
@@ -172,6 +176,7 @@ describe("sign-up create page with a template", () => {
     await waitFor(() => expect(byName("title").value).toBe("Potluck Dinner"));
     fireEvent.click(screen.getByText("Start blank"));
     await waitFor(() => expect(byName("title").value).toBe(""));
+    expect(byName("templateSlug").value).toBe("");
     expect(screen.queryByText(/Started from the Potluck template/)).toBeNull();
     expect(byName("timezone").value).toBe("America/New_York");
   });

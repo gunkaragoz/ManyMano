@@ -179,6 +179,14 @@ general volunteer shifts, school field trip chaperones and committee meeting
 polls. The header create menu keeps a smaller selection; browse the library
 for the full catalog.
 
+[Pulse](https://manymano.com/pulse) shows the six most popular templates in
+its selected 7-, 30-, or 90-day window, ranked by views plus clones (clones
+break ties). Views count template page loads excluding known bots and
+prefetches; clones count successful event creations from a template.
+Anonymous daily counts use the existing D1 counters, with no migration or
+new service. Tracking starts when this feature is released; the links to
+template pages are server-rendered.
+
 A weekly, free-tools-only SEO habit lives in [`seo/`](seo/README.md): event
 creations are attributed to their landing page (`GET /api/conversions`), a
 GitHub Actions job checks every sitemap page plus Search Console and PageSpeed

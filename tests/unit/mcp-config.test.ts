@@ -25,13 +25,13 @@ const value = (body: string, key: string) => body.match(new RegExp(`^${key}\\s*=
 describe("MCP config", () => {
   const expected: Record<string, string> = {
     "[vars]": "false",
-    "[env.production.vars]": "false",
+    "[env.production.vars]": "true",
     "[env.staging.vars]": "true",
     "[previews.vars]": "true",
     "[env.staging.previews.vars]": "true",
   };
 
-  it("every Wrangler var block sets all three MCP vars; production starts off", () => {
+  it("every Wrangler var block sets all three MCP vars with the intended enablement", () => {
     for (const [name, enabled] of Object.entries(expected)) {
       const body = table(name);
       expect(value(body, "MCP_ENABLED"), name).toBe(enabled);
