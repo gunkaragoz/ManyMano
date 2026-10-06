@@ -190,7 +190,8 @@ change at a time.
 ## 🛠️ Tech Stack
 
 - **Framework**: [React Router 8](https://reactrouter.com/) + [React 19](https://react.dev/) (SSR on the edge)
-- **Build**: [Vite 8](https://vite.dev/) + [@cloudflare/vite-plugin 1.62.5+](https://developers.cloudflare.com/workers/vite-plugin/), with Wrangler 4.147+ and matching Workers types
+- **Build**: [Vite 8](https://vite.dev/) + [@cloudflare/vite-plugin 1.62.5+](https://developers.cloudflare.com/workers/vite-plugin/), with Wrangler 4.147+
+- **Worker types**: pinned to `4.20260702.1` to preserve Node globals while [the v5 declaration defect](https://github.com/cloudflare/workerd/issues/7026) remains unresolved. Wrangler's optional v5 types peer warning is expected.
 - **Edge Runtime**: [Cloudflare Workers](https://developers.cloudflare.com/workers/) (fetch handler + hourly [Cron Trigger](https://developers.cloudflare.com/workers/configuration/cron-triggers/) for reminder emails)
 - **Database**: [Cloudflare D1](https://developers.cloudflare.com/d1/) (Serverless edge SQLite)
 - **ORM & Migrations**: [Drizzle ORM](https://orm.drizzle.team/) + Drizzle Kit
