@@ -12,7 +12,7 @@ import {
   Users,
   Vote,
 } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { DailyChart, Donut, HBar, Sparkline } from "~/components/pulse-charts";
 import { clampPulseDays, getPulseStats, PULSE_DAY_OPTIONS, type PulseStats } from "~/utils/pulse";
 import {
@@ -21,7 +21,6 @@ import {
   pageMetaOverrides,
   rootSiteFromMatches,
 } from "~/utils/seo";
-import { detectLocalTimezone, formatUtcOffsetShort, timezoneCity } from "~/utils/timezones";
 
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 
@@ -116,24 +115,22 @@ function Kpi({
 }) {
   return (
     <div className="bg-white border border-slate-200/80 rounded-3xl p-5 shadow-[0_2px_12px_rgba(0,0,0,0.03)] flex flex-col gap-3 min-w-0">
-      <div className="flex items-center justify-between gap-2">
-        <div className="flex items-center gap-2 text-slate-500">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div className="flex items-center gap-2 text-slate-500 [&>svg]:shrink-0">
           {icon}
-          <span className="text-[11px] font-bold uppercase tracking-wider">{label}</span>
+          <span className="text-[11px] font-bold uppercase tracking-wider whitespace-nowrap">{label}</span>
         </div>
         {delta !== undefined && <Delta value={delta} />}
       </div>
-      <div className="flex items-end justify-between gap-3">
-        <div className="min-w-0">
-          <div className="text-3xl font-extrabold tracking-tight text-slate-900 tabular-nums leading-none">
-            {value}
-          </div>
-          <div className="mt-1.5 text-[11px] text-slate-500 leading-snug">{sub}</div>
+      <div className="flex flex-wrap items-end justify-between gap-3">
+        <div className="text-3xl font-extrabold tracking-tight text-slate-900 tabular-nums leading-none">
+          {value}
         </div>
         <div className="shrink-0 opacity-90">
           <Sparkline values={spark} stroke={sparkColor} label={`${label} trend`} />
         </div>
       </div>
+      <p className="text-[11px] text-slate-500 leading-relaxed">{sub}</p>
     </div>
   );
 }
@@ -145,14 +142,48 @@ const SERIES_META = {
 } as const;
 type SeriesKey = keyof typeof SERIES_META;
 
+function PopularTemplates({ stats }: { stats: PulseStats }) {
+  return (
+    <section className="bg-white border border-slate-200/80 rounded-3xl p-6 sm:p-8 shadow-[0_2px_12px_rgba(0,0,0,0.03)] space-y-4">
+      <div>
+        <h2 className="text-lg font-bold text-slate-900 tracking-tight flex items-center gap-2">
+          <ClipboardList className="w-5 h-5 text-blue-600" /> Popular templates
+        </h2>
+        <p className="text-xs text-slate-500 mt-0.5">Favorites from the last {stats.days} days</p>
+      </div>
+      {stats.popularTemplates.length > 0 ? (
+        <ol className="divide-y divide-slate-100">
+          {stats.popularTemplates.map((template, index) => (
+            <li key={template.slug}>
+              <Link to={template.path} className="flex items-start gap-3 py-3 rounded-lg hover:bg-blue-50/60 transition-colors">
+                <span className="text-xs font-bold text-slate-400 tabular-nums pt-0.5">{index + 1}</span>
+                <div className="min-w-0 flex-1">
+                  <h3 className="text-sm font-semibold text-slate-900">{template.name}</h3>
+                  <p className="text-xs text-slate-500 tabular-nums mt-1">
+                    {template.views} {template.views === 1 ? "view" : "views"} · {template.clones} {template.clones === 1 ? "clone" : "clones"}
+                  </p>
+                </div>
+                <ArrowRight className="w-4 h-4 shrink-0 text-slate-400 mt-0.5" />
+              </Link>
+            </li>
+          ))}
+        </ol>
+      ) : (
+        <p className="text-sm text-slate-500">Favorites will appear as people explore and use templates.</p>
+      )}
+      <Link to="/templates" className="inline-flex items-center gap-1.5 text-xs font-semibold text-blue-600 hover:underline">
+        Browse templates <ArrowRight className="w-3.5 h-3.5" />
+      </Link>
+    </section>
+  );
+}
+
 export default function Pulse() {
   const { stats } = useLoaderData<typeof loader>();
   const navigate = useNavigate();
   const navigation = useNavigation();
   const switching = navigation.state !== "idle";
   const [visible, setVisible] = useState<SeriesKey[]>(["events", "signups", "votes"]);
-  const [localTz, setLocalTz] = useState<string | null>(null);
-  useEffect(() => setLocalTz(detectLocalTimezone()), []);
 
   const toggle = (k: SeriesKey) =>
     setVisible((v) => (v.includes(k) ? (v.length > 1 ? v.filter((x) => x !== k) : v) : [...v, k]));
@@ -172,39 +203,18 @@ export default function Pulse() {
   };
 
   return (
-    <div className="space-y-8 py-2">
+    <div className="space-y-6 py-2">
       {/* Hero */}
-      <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-4">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div className="space-y-2">
-          <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-green-50 border border-green-200/70 text-green-700 text-xs font-semibold">
-            <span className="relative flex h-2 w-2">
-              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75" />
-              <span className="relative inline-flex rounded-full h-2 w-2 bg-green-500" />
-            </span>
-            Live · updated just now
-          </div>
           <h1 className="text-3xl sm:text-4xl font-extrabold tracking-tight text-slate-900">
             ManyMano <span className="text-blue-600">Pulse</span>
           </h1>
-          <p className="text-sm text-slate-500 max-w-xl leading-relaxed">
-            Every event created, spot claimed and vote cast — counted in public.{" "}
-            <span className="whitespace-nowrap font-medium text-slate-600">
-              {prettyRange(stats.rangeStart, stats.rangeEnd)} · UTC
-            </span>
-            . Aggregate only, no personal data.
-            {localTz && (
-              <span className="mt-1 block text-[13px]">
-                You&apos;re viewing from{" "}
-                <span
-                  className="whitespace-nowrap font-semibold text-slate-700"
-                  title={localTz}
-                >
-                  {timezoneCity(localTz)}
-                  {formatUtcOffsetShort(localTz) ? ` (${formatUtcOffsetShort(localTz)})` : ""}
-                </span>
-                .
-              </span>
-            )}
+          <p className="text-sm text-slate-500 leading-relaxed">
+            A look at what people are planning together.
+          </p>
+          <p className="text-xs font-medium text-slate-400">
+            {prettyRange(stats.rangeStart, stats.rangeEnd)}
           </p>
         </div>
         <div
@@ -225,46 +235,14 @@ export default function Pulse() {
                   : "text-slate-500 hover:text-slate-900 hover:bg-slate-100"
               }`}
             >
-              {d}D
+              {d} days
             </button>
           ))}
         </div>
       </div>
 
-      <section className="bg-white border border-slate-200/80 rounded-3xl p-6 sm:p-8 shadow-[0_2px_12px_rgba(0,0,0,0.03)] space-y-5">
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <div>
-            <h2 className="text-lg font-bold text-slate-900 tracking-tight">Most popular templates</h2>
-            <p className="text-xs text-slate-500 mt-0.5">
-              Last {stats.days} days · ranked by views + clones, with clones breaking ties.
-            </p>
-          </div>
-          <Link to="/templates" className="text-sm font-semibold text-blue-600 hover:underline">Browse all templates</Link>
-        </div>
-        {stats.popularTemplates.length > 0 ? (
-          <ol className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            {stats.popularTemplates.map((template, index) => (
-              <li key={template.slug}>
-                <Link to={template.path} className="flex items-start gap-3 rounded-2xl border border-slate-100 bg-slate-50/60 p-4 hover:border-blue-200 hover:bg-blue-50/60 transition-colors">
-                  <span className="text-sm font-bold text-slate-400 tabular-nums">{index + 1}</span>
-                  <div className="min-w-0">
-                    <h3 className="text-sm font-semibold text-slate-900">{template.name}</h3>
-                    <p className="text-xs text-slate-500 mt-1">{template.type === "SIGNUP_SHEET" ? "Sign-up sheet" : "Meeting poll"}</p>
-                    <p className="text-xs text-slate-600 tabular-nums mt-2">
-                      {template.views} {template.views === 1 ? "view" : "views"} · {template.clones} {template.clones === 1 ? "clone" : "clones"}
-                    </p>
-                  </div>
-                </Link>
-              </li>
-            ))}
-          </ol>
-        ) : (
-          <p className="text-sm text-slate-500">No template activity recorded in this window yet.</p>
-        )}
-        <p className="text-[11px] text-slate-400">Views count page loads, excluding known bots and prefetches. Clones count events created from a template.</p>
-      </section>
-
       {isEmpty ? (
+        <>
         <div className="bg-white border border-slate-200/80 rounded-3xl p-10 text-center space-y-4 shadow-[0_2px_12px_rgba(0,0,0,0.03)]">
           <Activity className="w-10 h-10 mx-auto text-slate-300" />
           <div className="space-y-1">
@@ -288,6 +266,8 @@ export default function Pulse() {
             </Link>
           </div>
         </div>
+        <PopularTemplates stats={stats} />
+        </>
       ) : (
         <>
           {/* KPI cards */}
@@ -391,73 +371,76 @@ export default function Pulse() {
 
           {/* Timezones + mix */}
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-            <section className="bg-white border border-slate-200/80 rounded-3xl p-6 sm:p-8 shadow-[0_2px_12px_rgba(0,0,0,0.03)] space-y-5">
-              <div>
-                <h2 className="text-lg font-bold text-slate-900 tracking-tight flex items-center gap-2">
-                  <Globe2 className="w-5 h-5 text-sky-600" /> Spanning timezones
-                </h2>
-                <p className="text-xs text-slate-500 mt-0.5">
-                  Organizer timezones across {stats.totals.timezones} zone{stats.totals.timezones === 1 ? "" : "s"}
-                  {minOff !== null && maxOff !== null && ` · ${fmtOff(minOff)} to ${fmtOff(maxOff)}`}
-                </p>
-              </div>
-              {stats.timezones.length === 0 ? (
-                <p className="text-sm text-slate-400">No timezone data yet.</p>
-              ) : (
-                <ul className="space-y-3.5">
-                  {stats.timezones.map((t) => (
-                    <li key={t.timezone} className="space-y-1.5">
-                      <div className="flex items-baseline justify-between gap-3 text-xs">
-                        <span className="min-w-0 truncate font-semibold text-slate-800">
-                          {t.city}{" "}
-                          <span className="font-normal text-slate-400">
-                            {t.region}{t.offsetLabel ? ` · ${t.offsetLabel}` : ""}
+            <div className="space-y-4 min-w-0">
+              <section className="bg-white border border-slate-200/80 rounded-3xl p-6 sm:p-8 shadow-[0_2px_12px_rgba(0,0,0,0.03)] space-y-5">
+                <div>
+                  <h2 className="text-lg font-bold text-slate-900 tracking-tight flex items-center gap-2">
+                    <Globe2 className="w-5 h-5 text-sky-600" /> Spanning timezones
+                  </h2>
+                  <p className="text-xs text-slate-500 mt-0.5">
+                    Organizer timezones across {stats.totals.timezones} zone{stats.totals.timezones === 1 ? "" : "s"}
+                    {minOff !== null && maxOff !== null && ` · ${fmtOff(minOff)} to ${fmtOff(maxOff)}`}
+                  </p>
+                </div>
+                {stats.timezones.length === 0 ? (
+                  <p className="text-sm text-slate-400">No timezone data yet.</p>
+                ) : (
+                  <ul className="space-y-3.5">
+                    {stats.timezones.map((t) => (
+                      <li key={t.timezone} className="space-y-1.5">
+                        <div className="flex items-baseline justify-between gap-3 text-xs">
+                          <span className="min-w-0 truncate font-semibold text-slate-800">
+                            {t.city}{" "}
+                            <span className="font-normal text-slate-400">
+                              {t.region}{t.offsetLabel ? ` · ${t.offsetLabel}` : ""}
+                            </span>
                           </span>
-                        </span>
-                        <span className="shrink-0 tabular-nums text-slate-500">
-                          <span className="font-bold text-slate-800">{t.count}</span> · {t.pct}%
-                        </span>
-                      </div>
-                      <HBar pct={t.pct} color="#0ea5e9" label={`${t.city}: ${t.count} events`} />
-                    </li>
-                  ))}
-                </ul>
-              )}
-              {stats.regions.length > 0 && (
-                <div className="flex flex-wrap gap-2 pt-1">
-                  {stats.regions.map((r) => (
-                    <span
-                      key={r.region}
-                      className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-sky-50 border border-sky-100 text-[11px] font-semibold text-sky-800"
-                    >
-                      {r.region} · {r.pct}%
-                    </span>
-                  ))}
+                          <span className="shrink-0 tabular-nums text-slate-500">
+                            <span className="font-bold text-slate-800">{t.count}</span> · {t.pct}%
+                          </span>
+                        </div>
+                        <HBar pct={t.pct} color="#0ea5e9" label={`${t.city}: ${t.count} events`} />
+                      </li>
+                    ))}
+                  </ul>
+                )}
+                {stats.regions.length > 0 && (
+                  <div className="flex flex-wrap gap-2 pt-1">
+                    {stats.regions.map((r) => (
+                      <span
+                        key={r.region}
+                        className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-sky-50 border border-sky-100 text-[11px] font-semibold text-sky-800"
+                      >
+                        {r.region} · {r.pct}%
+                      </span>
+                    ))}
+                  </div>
+                )}
+                <div className="pt-1">
+                  <div className="text-[11px] font-bold uppercase tracking-wider text-slate-400 mb-2">
+                    UTC coverage
+                  </div>
+                  <div className="flex items-end gap-1.5 h-14" role="img" aria-label="UTC offset coverage histogram">
+                    {stats.offsetSpread.bins.map((b) => {
+                      const m = Math.max(...stats.offsetSpread.bins.map((x) => x.count), 1);
+                      return (
+                        <div key={b.label} className="flex-1 flex flex-col items-center gap-1 min-w-0">
+                          <div
+                            className="w-full rounded-md bg-gradient-to-t from-sky-500 to-cyan-300 min-h-[3px]"
+                            style={{ height: `${Math.max(6, (b.count / m) * 44)}px`, opacity: b.count ? 1 : 0.25 }}
+                            title={`${b.label}: ${b.count} zones`}
+                          />
+                          <span className="text-[9px] text-slate-400 whitespace-nowrap">{b.label}</span>
+                        </div>
+                      );
+                    })}
+                  </div>
                 </div>
-              )}
-              <div className="pt-1">
-                <div className="text-[11px] font-bold uppercase tracking-wider text-slate-400 mb-2">
-                  UTC coverage
-                </div>
-                <div className="flex items-end gap-1.5 h-14" role="img" aria-label="UTC offset coverage histogram">
-                  {stats.offsetSpread.bins.map((b) => {
-                    const m = Math.max(...stats.offsetSpread.bins.map((x) => x.count), 1);
-                    return (
-                      <div key={b.label} className="flex-1 flex flex-col items-center gap-1 min-w-0">
-                        <div
-                          className="w-full rounded-md bg-gradient-to-t from-sky-500 to-cyan-300 min-h-[3px]"
-                          style={{ height: `${Math.max(6, (b.count / m) * 44)}px`, opacity: b.count ? 1 : 0.25 }}
-                          title={`${b.label}: ${b.count} zones`}
-                        />
-                        <span className="text-[9px] text-slate-400 whitespace-nowrap">{b.label}</span>
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-            </section>
+              </section>
+              <PopularTemplates stats={stats} />
+            </div>
 
-            <div className="space-y-4">
+            <div className="space-y-4 min-w-0">
               <section className="bg-white border border-slate-200/80 rounded-3xl p-6 sm:p-8 shadow-[0_2px_12px_rgba(0,0,0,0.03)] space-y-4">
                 <h2 className="text-lg font-bold text-slate-900 tracking-tight">Event mix</h2>
                 <Donut
