@@ -190,7 +190,7 @@ describe("template catalog", () => {
   });
 
   it("new templates appear in the library and discovery pages without changing the create menu", async () => {
-    const slugs = ["snack-schedule", "trunk-or-treat", "food-pantry-shifts", "volunteer", "committee-meeting"];
+    const slugs = ["snack-schedule", "trunk-or-treat", "food-pantry-shifts", "volunteer", "committee-meeting", "field-trip-chaperones"];
     const library = (await libraryLoader()).data.templates;
     const context = routeContext(testEnv(createSqliteD1()));
     const args = { request: new Request(SITE_URL), url: new URL(SITE_URL), pattern: "/", params: {}, context };
@@ -236,6 +236,23 @@ describe("template catalog", () => {
     const sim = simulateSignupSubmission(r, "2026-10-03");
     if ("error" in sim) throw new Error(sim.error);
     expect(sim.rows).toHaveLength(30);
+  });
+
+  it("field trip gives three groups two chaperone spots for the full trip", () => {
+    const t = getTemplate("field-trip-chaperones");
+    if (!t || t.type !== "SIGNUP_SHEET") throw new Error("missing");
+    const r = resolveSignupPrefill(signupPrefillFromTemplate(t), { today: "2026-10-05", timezone: "UTC" });
+    if (isUnsupported(r)) throw new Error(r.reason);
+    expect(r.details.eventDate).toBe("2026-10-09");
+    expect(r.shifts).toHaveLength(1);
+    expect(r.shifts[0]).toMatchObject({ startTime: "09:00", endTime: "14:00" });
+    const sim = simulateSignupSubmission(r, "2026-10-05");
+    if ("error" in sim) throw new Error(sim.error);
+    expect(sim.rows.map((row) => ({ title: row.title, capacity: row.capacity }))).toEqual([
+      { title: "Group A chaperone", capacity: 2 },
+      { title: "Group B chaperone", capacity: 2 },
+      { title: "Group C chaperone", capacity: 2 },
+    ]);
   });
 
   it("header menu lists a short set of real templates", () => {
