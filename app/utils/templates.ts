@@ -1283,11 +1283,11 @@ export const TEMPLATES: EventTemplate[] = [
     icon: "sandwich",
     seo: {
       title: "Team Snack Sign-Up Sheet — Free Weekly Schedule",
-      description: "Plan eight weekly games with one snack family per game. Edit game dates and the season length before sharing. Free, no accounts or ads.",
+      description: "Plan eight weekly games with one snack family per game. Change the game day and season length before sharing. Free, no accounts or ads.",
       h1: "Team snack sign-up sheet",
       intro: [
         "To run a team snack schedule, give each game one snack slot with room for one family. This template repeats every Saturday for eight games, so parents can see which dates still need snacks.",
-        "Change the first game date, repeat pattern and season length before sharing. Adjust individual dates for bye weeks or rescheduled games, and put the team size and food restrictions in the description.",
+        "Change the first game date, repeat pattern and season length before sharing. The schedule follows the repeat pattern; individual games cannot be skipped or moved. Put the team size and food restrictions in the description.",
       ],
       tips: [
         "List the number of players so each family knows how many snacks to bring.",
