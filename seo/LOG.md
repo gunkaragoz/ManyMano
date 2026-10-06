@@ -56,3 +56,15 @@ Entry format:
   traffic as inconclusive, not a miss. Prioritize next additions using actual
   query impressions and organizer creations; candidates include office hours,
   field day, church volunteering, study groups and distinct holiday templates.
+
+## 2026-10-05 — field trip chaperones — template prepared
+
+- Why: requested school field trip use case; editable chaperone capacities
+  for three groups, all covering the full trip. No approval or permission-slip
+  features implied. Existing create-menu selection unchanged.
+- Page: `/signup-sheet/field-trip-chaperones`.
+- Baseline (28d before): new page; prior search and conversion data unavailable.
+- Shipped: pending review and deployment in the template library PR.
+- Judge after: at least 28 days after confirmed deployment, plus Search Console
+  reporting lag. Include this page in the existing weekly report; sparse data
+  remains inconclusive.

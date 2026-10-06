@@ -175,8 +175,9 @@ When enabled, the endpoint is listed in `/.well-known/ai-catalog.json` and
 
 The [template library](https://manymano.com/templates) includes editable
 team snack schedules, trunk-or-treat planning, monthly food pantry shifts,
-general volunteer shifts and committee meeting polls. The header create menu
-keeps a smaller selection; browse the library for the full catalog.
+general volunteer shifts, school field trip chaperones and committee meeting
+polls. The header create menu keeps a smaller selection; browse the library
+for the full catalog.
 
 A weekly, free-tools-only SEO habit lives in [`seo/`](seo/README.md): event
 creations are attributed to their landing page (`GET /api/conversions`), a

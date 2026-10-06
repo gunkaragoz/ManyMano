@@ -1436,6 +1436,46 @@ export const TEMPLATES: EventTemplate[] = [
       ],
     },
   },
+  {
+    slug: "field-trip-chaperones",
+    type: "SIGNUP_SHEET",
+    name: "School field trip chaperones",
+    tagline: "Chaperone spots for three student groups",
+    category: "school",
+    icon: "backpack",
+    seo: {
+      title: "Field Trip Chaperone Sign-Up Sheet — Free Template",
+      description: "Organize school field trip chaperones with spots for three groups, trip times and meeting instructions. Free, no accounts or ads. Edit every group.",
+      h1: "School field trip chaperone sign-up sheet",
+      intro: [
+        "Organize field trip chaperones by listing each group and the number of adults needed. This template starts with three groups, two chaperone spots per group and a 9:00 AM to 2:00 PM trip window.",
+        "Choose the trip date, rename the groups and adjust times and capacities before sharing with families. Add the destination, meeting point and return instructions in the description so volunteers know what to expect.",
+      ],
+      tips: [
+        "Set the number of chaperone spots using your school's requirements for this trip.",
+        "Include the departure time, return time and where chaperones should meet the teacher.",
+        "Confirm volunteer requirements with the school and keep student rosters and sensitive information off the shared sheet.",
+      ],
+      faqs: [
+        { question: "Can I change the number of groups and chaperones?", answer: "Yes. Rename, add or remove group roles and adjust the number of spots before creating the sheet. The starter has three groups with two chaperones each." },
+        { question: "Does signing up approve a chaperone or collect permission slips?", answer: "No. The sheet coordinates volunteer spots. The school handles chaperone approval and student permission slips separately." },
+        { question: "Do parents need an account?", answer: "No. Parents choose a group and enter their name; email is optional. Names and sign-up notes are visible to people with the event link." },
+      ],
+    },
+    prefill: {
+      details: {
+        title: "School Field Trip Chaperones",
+        description: "Please choose a group to chaperone for the full trip. Meet the teacher at [school meeting point] by 8:45 AM. Depart at 9:00 AM for [destination] and return at 2:00 PM. Confirm volunteer requirements with the school before signing up.",
+        location: "[School meeting point]",
+        timezone: null,
+      },
+      anchor: nextWeekday(FRI),
+      dates: { mode: "single" },
+      shifts: [
+        { name: "Field trip", startTime: "09:00", endTime: "14:00", days: { kind: "all" }, tasks: [task("Group A chaperone", 2), task("Group B chaperone", 2), task("Group C chaperone", 2)] },
+      ],
+    },
+  },
   // --- Meeting polls --------------------------------------------------------
   {
     slug: "team-meeting",
