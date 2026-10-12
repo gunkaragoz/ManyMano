@@ -588,7 +588,7 @@ function convertPage(html: string, pageUrl: string): { markdown: string; robots?
 // ---------------------------------------------------------------------------
 // Response wrapping (used by workers/app.ts)
 
-function addVaryAccept(headers: Headers): void {
+export function addVaryAccept(headers: Headers): void {
   const vary = headers.get("Vary");
   if (!vary) headers.set("Vary", "Accept");
   else if (!/(^|,)\s*(accept|\*)\s*(,|$)/i.test(vary)) headers.set("Vary", `${vary}, Accept`);

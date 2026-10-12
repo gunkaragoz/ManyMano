@@ -77,8 +77,10 @@ describe("framework imports (RR7)", () => {
     const server = readFileSync(resolve(ROOT, "app/entry.server.tsx"), "utf8");
     expect(client).toMatch(/HydratedRouter/);
     expect(server).toMatch(/ServerRouter/);
-    expect(server).toMatch(/Content-Security-Policy/);
-    expect(server).toMatch(/Strict-Transport-Security/);
+    expect(server).toMatch(/setDocumentSecurityHeaders\(responseHeaders\)/);
+    const headers = readFileSync(resolve(ROOT, "app/utils/document-headers.ts"), "utf8");
+    expect(headers).toMatch(/Content-Security-Policy/);
+    expect(headers).toMatch(/Strict-Transport-Security/);
   });
 
   it("vite plugin is reactRouter + Cloudflare with no v3 future flags", () => {

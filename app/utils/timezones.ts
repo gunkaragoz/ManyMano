@@ -165,6 +165,11 @@ export function getOffsetMinutes(timeZone: string, at: Date): number | null {
 /** Full offset label, e.g. "GMT+03:00". Null when unknown. */
 export function formatUtcOffsetLabel(timeZone: string, at: Date = new Date()): string | null {
   const minutes = getOffsetMinutes(timeZone, at);
+  return formatUtcOffsetMinutes(minutes);
+}
+
+/** Format a computed offset without constructing another Intl formatter. */
+export function formatUtcOffsetMinutes(minutes: number | null): string | null {
   if (minutes === null) return null;
   const sign = minutes < 0 ? "-" : "+";
   const abs = Math.abs(minutes);

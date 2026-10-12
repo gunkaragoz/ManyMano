@@ -161,7 +161,16 @@ if (((env.SITE_URL ?? "").trim()) && !/^https?:\/\//.test(env.SITE_URL.trim().re
 
 // --- 4. Build artifact + critical routes + worker entry present ---------------
 console.log("\n[4/6] Build artifact, worker entry and critical routes present");
-for (const artifact of ["build/server/index.js", "build/client"]) {
+for (const artifact of [
+  "build/server/index.js",
+  "build/client",
+  "build/client/index.html",
+  "build/client/_.data",
+  "build/client/templates/index.html",
+  "build/client/templates.data",
+  "build/client/_prerender/home.md",
+  "build/client/_prerender/templates.md",
+]) {
   if (!existsSync(resolve(ROOT, artifact))) {
     fail(`${artifact} not found — run the build before this gate (pnpm run build)`);
   } else ok(artifact);

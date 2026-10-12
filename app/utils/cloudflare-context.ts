@@ -10,6 +10,7 @@ import { createContext, type RouterContextProvider } from "react-router";
 import type { D1Database } from "@cloudflare/workers-types";
 
 export interface CloudflareEnv {
+  ASSETS?: Fetcher;
   DB: D1Database;
   EMAIL_PROVIDER?: string;
   RESEND_API_KEY?: string;

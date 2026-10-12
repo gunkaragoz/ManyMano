@@ -63,7 +63,7 @@ function devPort(): number {
   }
 }
 
-export default defineConfig({
+export default defineConfig(({ command }) => ({
   // Vite 8 resolves tsconfig paths natively (replaces vite-tsconfig-paths).
   resolve: {
     tsconfigPaths: true,
@@ -96,7 +96,12 @@ export default defineConfig({
     // entry, importing virtual:react-router/server-build) builds with the
     // client manifest available. Without this the plugin spawns its own
     // worker environment and the server-manifest virtual module 404s.
-    cloudflare({ viteEnvironment: { name: "ssr" } }),
+    cloudflare({
+      viteEnvironment: { name: "ssr" },
+      // Prerender only public pages with deployment vars, never local overrides
+      // or mail credentials. This controls local loading, not deployed secrets.
+      config: command === "build" ? { secrets: { required: [] } } : undefined,
+    }),
     reactRouter(),
   ],
-});
+}));

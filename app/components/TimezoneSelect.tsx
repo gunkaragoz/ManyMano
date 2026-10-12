@@ -4,6 +4,7 @@ import {
   detectLocalTimezone,
   formatTimeInTimezone,
   formatUtcOffsetLabel,
+  formatUtcOffsetMinutes,
   getAllTimezones,
   getOffsetMinutes,
   timezoneCity,
@@ -76,7 +77,8 @@ export default function TimezoneSelect({ id, name, value, onChange, accent = "gr
   const searchRef = useRef<HTMLInputElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
 
-  const all = useMemo(() => getAllTimezones(), []);
+  // The closed picker needs only the selected zone, especially during SSR.
+  const all = useMemo(() => (open ? getAllTimezones() : []), [open]);
 
   useEffect(() => {
     setDetected(detectLocalTimezone());
@@ -118,11 +120,10 @@ export default function TimezoneSelect({ id, name, value, onChange, accent = "gr
 
   const entries: Entry[] = useMemo(
     () =>
-      all.map((tz) => ({
-        tz,
-        offsetMin: getOffsetMinutes(tz, at),
-        offset: formatUtcOffsetLabel(tz, at),
-      })),
+      all.map((tz) => {
+        const offsetMin = getOffsetMinutes(tz, at);
+        return { tz, offsetMin, offset: formatUtcOffsetMinutes(offsetMin) };
+      }),
     [all, at]
   );
 
@@ -178,7 +179,7 @@ export default function TimezoneSelect({ id, name, value, onChange, accent = "gr
     }
   };
 
-  const selectedOffset = formatUtcOffsetLabel(value);
+  const selectedOffset = useMemo(() => formatUtcOffsetLabel(value, at), [value, at]);
   const selectedCity = value === "UTC" ? "UTC" : timezoneCity(value);
 
   // Render rows with sticky GMT group headers. Pinned + selected-while-
