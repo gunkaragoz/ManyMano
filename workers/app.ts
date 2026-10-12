@@ -4,6 +4,7 @@ import { getDb } from "../app/db";
 import { getSiteConfig } from "../app/utils/site";
 import { runScheduledReminders } from "../app/utils/reminders-run";
 import { negotiateMarkdown } from "../app/utils/markdown";
+import { servePrerenderedPage } from "../app/utils/prerender";
 
 const requestHandler = createRequestHandler(
   () => import("virtual:react-router/server-build"),
@@ -27,6 +28,10 @@ export default {
     if (url.hostname.startsWith("www.")) {
       url.hostname = url.hostname.slice(4);
       return Response.redirect(url.toString(), 301);
+    }
+    if (import.meta.env.PROD && env.ASSETS) {
+      const prerendered = await servePrerenderedPage(request, env.ASSETS);
+      if (prerendered) return prerendered;
     }
     const loadContext = new RouterContextProvider();
     loadContext.set(cloudflareContext, {

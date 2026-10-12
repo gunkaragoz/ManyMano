@@ -37,6 +37,17 @@ ManyMano is architected to fit comfortably inside **Cloudflare's Free Tier**:
 - **Resend Transactional Email**: 3,000 free emails/month (default provider).
 - **SMTP / Amazon SES**: switch `EMAIL_PROVIDER` to `smtp` for higher volume via any SMTP server, including SES.
 
+The homepage and template library are prerendered as HTML, navigation data and
+Markdown during the build. They use the selected deployment's public vars;
+local overrides and credentials are excluded from prerendering. Event pages,
+creation forms and individual template pages keep their server loaders. The
+timezone picker computes its full list only when opened in the browser.
+
+Production stores a 10% sample of invocation logs and a 1% sample of traces.
+Query strings are redacted to protect organizer and cancellation tokens.
+Use Workers Observability to filter for outcome exceededCpu and compare CPU
+time by route after deployment.
+
 ### Step 1: Deploy the Worker
 ```bash
 pnpm install
@@ -197,7 +208,7 @@ change at a time.
 
 ## 🛠️ Tech Stack
 
-- **Framework**: [React Router 8](https://reactrouter.com/) + [React 19](https://react.dev/) (SSR on the edge)
+- **Framework**: [React Router 8](https://reactrouter.com/) + [React 19](https://react.dev/) (SSR on the edge; homepage and template library prerendered at build time)
 - **Build**: [Vite 8](https://vite.dev/) + [@cloudflare/vite-plugin 1.62.5+](https://developers.cloudflare.com/workers/vite-plugin/), with Wrangler 4.147+
 - **Worker types**: pinned to `4.20260702.1` to preserve Node globals while [the v5 declaration defect](https://github.com/cloudflare/workerd/issues/7026) remains unresolved. Wrangler's optional v5 types peer warning is expected.
 - **Edge Runtime**: [Cloudflare Workers](https://developers.cloudflare.com/workers/) (fetch handler + hourly [Cron Trigger](https://developers.cloudflare.com/workers/configuration/cron-triggers/) for reminder emails)
