@@ -43,6 +43,10 @@ local overrides and credentials are excluded from prerendering. Event pages,
 creation forms and individual template pages keep their server loaders. The
 timezone picker computes its full list only when opened in the browser.
 
+Workers Builds on branches other than main, without an explicit CLOUDFLARE_ENV,
+prerender with the top-level preview vars. Explicit production and staging
+builds keep their selected environment's vars.
+
 Production stores a 10% sample of invocation logs and a 1% sample of traces.
 Query strings are redacted to protect organizer and cancellation tokens.
 Use Workers Observability to filter for outcome exceededCpu and compare CPU
