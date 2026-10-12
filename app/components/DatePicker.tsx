@@ -48,15 +48,14 @@ function toISO(y: number, m: number, d: number): string {
 function formatDisplay(iso: string): string {
   const p = parseISO(iso);
   if (!p) return iso;
-  return new Date(p.y, p.m - 1, p.d).toLocaleDateString("en-US", {
-    weekday: "short",
-    month: "short",
-    day: "numeric",
-    year: "numeric",
-  });
+  // This UI is English; avoid constructing an Intl formatter for each field.
+  const weekday = DAY_NAMES[new Date(p.y, p.m - 1, p.d).getDay()];
+  return `${weekday}, ${MONTH_NAMES[p.m - 1]} ${p.d}, ${p.y}`;
 }
 
 const WEEKDAYS = ["Su", "Mo", "Tu", "We", "Th", "Fr", "Sa"];
+const DAY_NAMES = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+const MONTH_NAMES = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 
 export default function DatePicker({
   value,
@@ -108,6 +107,7 @@ export default function DatePicker({
   }, [open ]);
 
   const cells = useMemo(() => {
+    if (!open) return [];
     const firstWeekday = new Date(viewY, viewM, 1).getDay();
     const daysInMonth = new Date(viewY, viewM + 1, 0).getDate();
     const daysInPrev = new Date(viewY, viewM, 0).getDate();
@@ -131,7 +131,7 @@ export default function DatePicker({
       if (out.length >= 42) break;
     }
     return out.slice(0, 42);
-  }, [viewY, viewM]);
+  }, [open, viewY, viewM]);
 
   const commit = (iso: string) => {
     if (isDisabledDay(iso)) return;
@@ -146,10 +146,7 @@ export default function DatePicker({
     setViewM(d.getMonth());
   };
 
-  const monthLabel = new Date(viewY, viewM, 1).toLocaleDateString("en-US", {
-    month: "short",
-    year: "numeric",
-  });
+  const monthLabel = `${MONTH_NAMES[viewM]} ${viewY}`;
 
   const selectedKey = parsed ? toISO(parsed.y, parsed.m, parsed.d) : "";
   const todayKey = toISO(today.getFullYear(), today.getMonth() + 1, today.getDate());
@@ -157,7 +154,7 @@ export default function DatePicker({
   // given, else the browser's today. ISO days compare lexicographically, so
   // past cells are simply key < minKey.
   const minKey =
-    min === undefined ? (timeZone ? todayInZone(timeZone) : todayKey) : min || "";
+    !open ? "" : min === undefined ? (timeZone ? todayInZone(timeZone) : todayKey) : min || "";
   const isDisabledDay = (key: string) => Boolean(minKey && key < minKey);
 
   const accentStyles =

@@ -286,6 +286,7 @@ export function msUntilSlotClose(
 
 /** Organizer-local today (YYYY-MM-DD). Falls back to UTC. */
 export function todayInZone(tz: string | null | undefined, now: Date = new Date()): string {
+  if (!tz || tz === "UTC") return now.toISOString().slice(0, 10);
   try {
     return new Intl.DateTimeFormat("en-CA", { timeZone: tz || "UTC" }).format(now);
   } catch {

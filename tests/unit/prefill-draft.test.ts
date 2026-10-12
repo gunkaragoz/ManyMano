@@ -58,7 +58,12 @@ function stubFor(flow: "signup" | "poll") {
         const url = new URL(request.url);
         const prefill = await loadCreatePrefill(flow, url, { db: () => db, retentionDays: 365 });
         if ("redirect" in prefill) throw new Error("unexpected redirect");
-        return { turnstileSiteKey: null, prefill, isCopy: url.searchParams.has("from") };
+        return {
+          turnstileSiteKey: null,
+          prefill,
+          isCopy: url.searchParams.has("from"),
+          initialToday: new Date().toISOString().slice(0, 10),
+        };
       },
       action: async () => actionResult,
     },

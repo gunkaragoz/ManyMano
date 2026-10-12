@@ -5,10 +5,12 @@ import { getSiteConfig } from "../app/utils/site";
 import { runScheduledReminders } from "../app/utils/reminders-run";
 import { negotiateMarkdown } from "../app/utils/markdown";
 import { servePrerenderedPage } from "../app/utils/prerender";
+import { createCachedRequestHandler } from "../app/utils/request-handler";
 
-const requestHandler = createRequestHandler(
+const requestHandler = createCachedRequestHandler(
   () => import("virtual:react-router/server-build"),
-  import.meta.env.MODE
+  import.meta.env.MODE,
+  createRequestHandler
 );
 
 export default {

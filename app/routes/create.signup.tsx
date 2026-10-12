@@ -131,7 +131,8 @@ export async function loader({ context, url }: LoaderFunctionArgs) {
   const headers = new Headers();
   // A copy is built from another event's current content — never cache it.
   if (isCopy) headers.set("Cache-Control", "private, no-store");
-  return data({ turnstileSiteKey: env.TURNSTILE_SITE_KEY ?? null, prefill, isCopy }, { headers });
+  const initialToday = new Date().toISOString().slice(0, 10);
+  return data({ turnstileSiteKey: env.TURNSTILE_SITE_KEY ?? null, prefill, isCopy, initialToday }, { headers });
 }
 
 export const headers: HeadersFunction = ({ loaderHeaders }) => {
@@ -498,7 +499,7 @@ const defaultSignupShifts: Shift[] = [
 
 export default function CreateSignupSheet() {
   const actionData = useActionData<{ error?: string }>();
-  const { turnstileSiteKey, prefill } = useLoaderData<typeof loader>();
+  const { turnstileSiteKey, prefill, initialToday } = useLoaderData<typeof loader>();
   const navigation = useNavigation();
   const isSubmitting = navigation.state === "submitting";
   // Floating toast for validation errors. The inline banner below sits at the
@@ -533,7 +534,7 @@ export default function CreateSignupSheet() {
     SIGNUP_DETAILS_KEY,
     () => ({
       title: "",
-      eventDate: new Date().toISOString().split("T")[0],
+      eventDate: initialToday,
       description: "",
       location: "",
       organizerName: "",
@@ -547,7 +548,7 @@ export default function CreateSignupSheet() {
   );
   const [dateSel, setDateSel, clearDateSel, dateSelRestored] = usePersistentState<DateSelection>(
     SIGNUP_DATES_KEY,
-    () => defaultSelection(new Date().toISOString().split("T")[0])
+    () => defaultSelection(initialToday)
   );
 
   // Day on the sheet's own calendar (not UTC) — fallbacks and resets anchor
