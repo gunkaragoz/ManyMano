@@ -3,6 +3,21 @@ main = "./workers/app.ts"
 compatibility_date = "2024-09-23"
 compatibility_flags = ["nodejs_compat"]
 
+# Workers Builds on main can deploy the top-level configuration directly.
+# Keep the same logging policy as the explicit production environment.
+[observability]
+enabled = true
+redact_query_string = true
+
+[observability.logs]
+enabled = true
+invocation_logs = true
+head_sampling_rate = 0.1
+
+[observability.traces]
+enabled = true
+head_sampling_rate = 0.01
+
 # React Router client assets (./build/client) are served by the Worker.
 [assets]
 directory = "./build/client"
@@ -54,6 +69,9 @@ TURNSTILE_HOSTNAMES = "manymano.com,www.manymano.com"
 # keys, no reminder secret. SITE_URL is the staging origin rather than the
 # per-branch preview host, which changes with every branch name; it only
 # feeds links and metadata, never request checks.
+[previews.observability]
+enabled = false
+
 [previews.vars]
 MCP_ENABLED = "true"
 MCP_DAILY_LIMIT = "2000"
@@ -153,6 +171,9 @@ crons = ["0 * * * *"]
 [env.staging]
 name = "manymano-staging"
 
+[env.staging.observability]
+enabled = false
+
 # Staging is a prod copy with mail + bot verification disabled (see
 # tests/staging/no-mail.test.ts — the gate fails if creds ever appear):
 # RESEND_API_KEY / SMTP_* / ALERT_WEBHOOK_URL / TURNSTILE_* all unset,
@@ -185,6 +206,9 @@ migrations_dir = "./drizzle/migrations"
 # never be pointed at production data by accident. Same posture as staging:
 # the staging database, no mail credentials, no bot-check keys, no reminder
 # secret (so /api/reminders answers 503 rather than sending from a preview).
+[env.staging.previews.observability]
+enabled = false
+
 [env.staging.previews.vars]
 MCP_ENABLED = "true"
 MCP_DAILY_LIMIT = "2000"
