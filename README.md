@@ -48,6 +48,8 @@ prerender with the top-level preview vars. Explicit production and staging
 builds keep their selected environment's vars.
 
 Production stores a 10% sample of invocation logs and a 1% sample of traces.
+Both the top-level and explicit production build configurations preserve this
+policy; staging and branch previews do not persist logs.
 Query strings are redacted to protect organizer and cancellation tokens.
 Use Workers Observability to filter for outcome exceededCpu and compare CPU
 time by route after deployment.
