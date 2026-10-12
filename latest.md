@@ -1,6 +1,6 @@
-# SEO weekly check — 2026-10-05
+# SEO weekly check — 2026-10-12
 
-Site: https://manymano.com · 38 sitemap pages · search window 2026-09-05 → 2026-10-02
+Site: https://manymano.com · 44 sitemap pages · search window 2026-09-12 → 2026-10-09
 
 ## Health
 
@@ -9,41 +9,44 @@ No blocking errors.
 
 ## Search × conversions
 
-Site-wide: 1 clicks, 32 impressions. Search → create rate: 0.0%.
+Site-wide: 1 clicks, 93 impressions. Search → create rate: 0.0%.
 
 | Call | Page | Impr. | Clicks | CTR | Pos. | Conv. (search) | Upside conv./4wk | Why |
 |---|---|---:|---:|---:|---:|---:|---:|---|
-| · watch | `/` | 7 | 0 | 0.0% | 3.7 | 1 (0) | 0 | not enough impressions yet |
-| · watch | `/meeting-poll/family-reunion` | 4 | 0 | 0.0% | 23.5 | 0 (0) | 0 | not enough impressions yet |
-| · watch | `/meeting-poll/happy-hour` | 3 | 1 | 33.3% | 5 | 0 (0) | 0 | not enough impressions yet |
-| · watch | `/signup-sheet/thursday-folders` | 3 | 0 | 0.0% | 9.3 | 0 (0) | 0 | not enough impressions yet |
-| · watch | `/signup-sheet/concession-stand` | 3 | 0 | 0.0% | 8 | 0 (0) | 0 | not enough impressions yet |
-| · watch | `/signup-sheet/book-fair` | 2 | 0 | 0.0% | 34.5 | 0 (0) | 0 | not enough impressions yet |
-| · watch | `/signup-sheet/classroom-party` | 2 | 0 | 0.0% | 21 | 0 (0) | 0 | not enough impressions yet |
-| · watch | `/signup-sheet/culture-and-heritage-night` | 1 | 0 | 0.0% | 3 | 0 (0) | 0 | not enough impressions yet |
-| · watch | `/signup-sheet/restaurant-spirit-night` | 1 | 0 | 0.0% | 2 | 0 (0) | 0 | not enough impressions yet |
-| · watch | `/create/poll` | 1 | 0 | 0.0% | 9 | 0 (0) | 0 | not enough impressions yet |
-| · watch | `/create` | 1 | 0 | 0.0% | 2 | 0 (0) | 0 | not enough impressions yet |
-| · watch | `/meeting-poll/board-game-night` | 1 | 0 | 0.0% | 2 | 0 (0) | 0 | not enough impressions yet |
-| · watch | `/signup-sheet/back-to-school-night` | 1 | 0 | 0.0% | 7 | 0 (0) | 0 | not enough impressions yet |
-| · watch | `/meeting-poll/team-meeting` | 1 | 0 | 0.0% | 69 | 0 (0) | 0 | not enough impressions yet |
-| · watch | `/signup-sheet/meal-train` | 1 | 0 | 0.0% | 42 | 0 (0) | 0 | not enough impressions yet |
+| · watch | `/meeting-poll/family-reunion` | 13 | 0 | 0.0% | 19.8 | 0 (0) | 0 | not enough impressions yet |
+| · watch | `/signup-sheet/classroom-party` | 10 | 0 | 0.0% | 30.9 | 0 (0) | 0 | not enough impressions yet |
+| · watch | `/signup-sheet/parent-teacher-conferences` | 10 | 0 | 0.0% | 58 | 0 (0) | 0 | not enough impressions yet |
+| · watch | `/meeting-poll/happy-hour` | 9 | 1 | 11.1% | 4.9 | 0 (0) | 0 | not enough impressions yet |
+| · watch | `/` | 7 | 0 | 0.0% | 3.7 | 3 (0) | 0 | not enough impressions yet |
+| · watch | `/signup-sheet/thursday-folders` | 7 | 0 | 0.0% | 8.8 | 0 (0) | 0 | not enough impressions yet |
+| · watch | `/signup-sheet/book-fair` | 7 | 0 | 0.0% | 27.7 | 0 (0) | 0 | not enough impressions yet |
+| · watch | `/signup-sheet/concession-stand` | 6 | 0 | 0.0% | 8 | 0 (0) | 0 | not enough impressions yet |
+| · watch | `/meeting-poll/team-meeting` | 4 | 0 | 0.0% | 88.5 | 0 (0) | 0 | not enough impressions yet |
+| · watch | `/templates` | 3 | 0 | 0.0% | 3.7 | 0 (0) | 0 | not enough impressions yet |
+| · watch | `/create/poll` | 2 | 0 | 0.0% | 5.5 | 0 (0) | 0 | not enough impressions yet |
+| · watch | `/signup-sheet/meal-train` | 2 | 0 | 0.0% | 36 | 0 (0) | 0 | not enough impressions yet |
+| · watch | `/meeting-poll/book-club` | 2 | 0 | 0.0% | 8.5 | 0 (0) | 0 | not enough impressions yet |
+| · watch | `/signup-sheet/bake-sale` | 2 | 0 | 0.0% | 13.5 | 0 (0) | 0 | not enough impressions yet |
+| · watch | `/meeting-poll/pta-meeting` | 2 | 0 | 0.0% | 7.5 | 0 (0) | 0 | not enough impressions yet |
 
 <details><summary>Top queries</summary>
 
 | Query | Page | Impr. | Clicks | Pos. |
 |---|---|---:|---:|---:|
+| class party sign up sheet | `/signup-sheet/classroom-party` | 6 | 0 | 37.7 |
+| book fair volunteer sign up sheet | `/signup-sheet/book-fair` | 5 | 0 | 32.6 |
+| thursday folders | `/signup-sheet/thursday-folders` | 4 | 0 | 10 |
 | family poll | `/meeting-poll/family-reunion` | 3 | 0 | 28.3 |
-| book fair volunteer sign up sheet | `/signup-sheet/book-fair` | 2 | 0 | 34.5 |
-| class party sign up sheet | `/signup-sheet/classroom-party` | 2 | 0 | 21 |
-| thursday folders | `/signup-sheet/thursday-folders` | 2 | 0 | 11 |
+| family polls | `/meeting-poll/family-reunion` | 3 | 0 | 28 |
+| meeting polls | `/meeting-poll/team-meeting` | 2 | 0 | 68.5 |
+| room parent class party planning tool | `/signup-sheet/classroom-party` | 2 | 0 | 35.5 |
+| parent teacher conference time slot sign up | `/signup-sheet/parent-teacher-conferences` | 2 | 0 | 75.5 |
 | manyno | `/` | 1 | 0 | 8 |
-| time poll | `/meeting-poll/team-meeting` | 1 | 0 | 69 |
-| sign up genius meal train | `/signup-sheet/meal-train` | 1 | 0 | 42 |
+| free group poll | `/meeting-poll/team-meeting` | 1 | 0 | 148 |
 
 </details>
 
-Events created in the window by channel: direct 2.
+Events created in the window by channel: direct 4.
 
 ## Mobile speed (PageSpeed Insights)
 
