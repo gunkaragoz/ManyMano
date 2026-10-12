@@ -1,7 +1,31 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
+import type { WorkerConfig } from "@cloudflare/vite-plugin";
 import { estimateTokens, htmlToMarkdown } from "../app/utils/markdown";
 import { PRERENDER_PAGES } from "../app/utils/prerender";
+
+type BuildEnvironment = {
+  CLOUDFLARE_ENV?: string;
+  WORKERS_CI?: string;
+  WORKERS_CI_BRANCH?: string;
+};
+
+export function publicPrerenderConfig(
+  config: Partial<Pick<WorkerConfig, "vars" | "previews">>,
+  env: BuildEnvironment
+): Partial<WorkerConfig> {
+  // main is the production branch; named Wrangler environments remain explicit.
+  const preview = !env.CLOUDFLARE_ENV && env.WORKERS_CI === "1" &&
+    !!env.WORKERS_CI_BRANCH && env.WORKERS_CI_BRANCH !== "main";
+  if (preview && !config.previews?.vars?.SITE_URL) {
+    throw new Error("Worker preview prerender requires previews.vars.SITE_URL.");
+  }
+  return {
+    // Only public configuration belongs in the local prerender runtime.
+    secrets: { required: [] },
+    ...(preview ? { vars: { ...config.previews!.vars } } : {}),
+  };
+}
 
 export async function finishPublicPrerender(buildDirectory: string): Promise<void> {
   const clientDirectory = join(buildDirectory, "client");
