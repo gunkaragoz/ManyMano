@@ -135,6 +135,7 @@ export function detectLocalTimezone(): string | null {
 
 /** Offset of an IANA timezone in minutes east of UTC. Null when unknown. */
 export function getOffsetMinutes(timeZone: string, at: Date): number | null {
+  if (timeZone === "UTC") return Number.isFinite(at.getTime()) ? 0 : null;
   try {
     const dtf = new Intl.DateTimeFormat("en-US", {
       timeZone,

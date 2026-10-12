@@ -102,7 +102,8 @@ export async function loader({ context, url }: LoaderFunctionArgs) {
   const headers = new Headers();
   // A copy is built from another event's current content — never cache it.
   if (isCopy) headers.set("Cache-Control", "private, no-store");
-  return data({ turnstileSiteKey: env.TURNSTILE_SITE_KEY ?? null, prefill, isCopy }, { headers });
+  const initialToday = new Date().toISOString().slice(0, 10);
+  return data({ turnstileSiteKey: env.TURNSTILE_SITE_KEY ?? null, prefill, isCopy, initialToday }, { headers });
 }
 
 export const headers: HeadersFunction = ({ loaderHeaders }) => {
@@ -399,19 +400,18 @@ function toISODate(d: Date): string {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 }
 
-function defaultDays(): DayRow[] {
-  const today = new Date();
-  const tomorrow = new Date(today);
-  tomorrow.setDate(today.getDate() + 1);
+function defaultDays(today: string): DayRow[] {
+  const tomorrow = new Date(today + "T12:00:00Z");
+  tomorrow.setUTCDate(tomorrow.getUTCDate() + 1);
   return [
-    { id: 1, date: toISODate(today), startTime: "10:00", label: "" },
-    { id: 2, date: toISODate(tomorrow), startTime: "10:00", label: "" },
+    { id: 1, date: today, startTime: "10:00", label: "" },
+    { id: 2, date: tomorrow.toISOString().slice(0, 10), startTime: "10:00", label: "" },
   ];
 }
 
 export default function CreateMeetingPoll() {
   const actionData = useActionData<{ error?: string }>();
-  const { turnstileSiteKey, prefill } = useLoaderData<typeof loader>();
+  const { turnstileSiteKey, prefill, initialToday } = useLoaderData<typeof loader>();
   const navigation = useNavigation();
   const isSubmitting = navigation.state === "submitting";
   // Floating toast for validation errors. The inline banner below sits at the
@@ -451,7 +451,10 @@ export default function CreateMeetingPoll() {
       timezone: "UTC",
     })
   );
-  const [days, setDays, clearDays, daysRestored] = usePersistentState<DayRow[]>(POLL_DAYS_KEY, defaultDays);
+  // The loader's day keeps SSR and hydration identical across UTC boundaries.
+  const [days, setDays, clearDays, daysRestored] = usePersistentState<DayRow[]>(
+    POLL_DAYS_KEY, () => defaultDays(initialToday)
+  );
   const [durationMinutes, setDurationMinutes, clearDuration, durationRestored] = usePersistentState<number | null>(
     POLL_DURATION_KEY,
     () => 60
@@ -515,7 +518,7 @@ export default function CreateMeetingPoll() {
     // A fresh draft, like a first visit: the browser's timezone.
     const timezone = detectLocalTimezone() || "UTC";
     setDetails((prev) => ({ ...prev, timezone }));
-    setDays(defaultDays());
+    setDays(defaultDays(todayInZone(timezone)));
     setDurationMinutes(60);
     setCustomMinutes("");
     setShowCustom(false);

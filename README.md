@@ -42,6 +42,9 @@ Markdown during the build. They use the selected deployment's public vars;
 local overrides and credentials are excluded from prerendering. Event pages,
 creation forms and individual template pages keep their server loaders. The
 timezone picker computes its full list only when opened in the browser.
+Production initializes the React Router handler once per Worker isolate.
+Closed date pickers skip calendar generation, UTC calculations avoid locale
+formatters, and creation forms share a loader-provided day for hydration.
 
 Workers Builds on branches other than main, without an explicit CLOUDFLARE_ENV,
 prerender with the top-level preview vars. Explicit production and staging
