@@ -3,6 +3,7 @@ import { cloudflare } from "@cloudflare/vite-plugin";
 import { defineConfig } from "vite";
 import { existsSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
+import { publicPrerenderConfig } from "./scripts/prerender-public-pages";
 
 /** Parse a KEY=VALUE dotenv-style file (quotes stripped, `#` comments ignored). */
 function parseDevVarsFile(path: string): Record<string, string> {
@@ -98,9 +99,10 @@ export default defineConfig(({ command }) => ({
     // worker environment and the server-manifest virtual module 404s.
     cloudflare({
       viteEnvironment: { name: "ssr" },
-      // Prerender only public pages with deployment vars, never local overrides
-      // or mail credentials. This controls local loading, not deployed secrets.
-      config: command === "build" ? { secrets: { required: [] } } : undefined,
+      // Select preview vars before rendering HTML and serializing loader data.
+      config: command === "build"
+        ? (config) => publicPrerenderConfig(config, process.env)
+        : undefined,
     }),
     reactRouter(),
   ],
