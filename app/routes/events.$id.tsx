@@ -723,6 +723,7 @@ export async function action({ request, params, context }: ActionFunctionArgs) {
   const notifyOrganizerOfSignup = async (
     kind: "signup" | "cancellation",
     participantName: string,
+    participantEmail: string | null,
     slot: typeof eventSlots.$inferSelect | null,
     comment: string
   ) => {
@@ -744,6 +745,7 @@ export async function action({ request, params, context }: ActionFunctionArgs) {
       kind,
       eventTitle: event.title,
       participantName,
+      participantEmail: participantEmail && isValidEmail(participantEmail) ? participantEmail : null,
       taskLabel,
       taskTitle: slotTitle || "A spot",
       shiftName: shiftPrefix,
@@ -971,7 +973,7 @@ export async function action({ request, params, context }: ActionFunctionArgs) {
       });
     }
 
-    await notifyOrganizerOfSignup("signup", participantName, targetSlot, comment);
+    await notifyOrganizerOfSignup("signup", participantName, safeEmail, targetSlot, comment);
     return data({ success: true, message: `Thank you ${participantName}! Your spot has been confirmed.` });
   }
 
@@ -1064,7 +1066,7 @@ export async function action({ request, params, context }: ActionFunctionArgs) {
       }
     }
 
-    await notifyOrganizerOfSignup("cancellation", existing.participantName, cancelledSlot ?? null, signupComment(existing.customFields));
+    await notifyOrganizerOfSignup("cancellation", existing.participantName, existing.participantEmail, cancelledSlot ?? null, signupComment(existing.customFields));
     return data({ success: true, message: "Signup cancelled." });
   }
 
@@ -2738,7 +2740,7 @@ export async function action({ request, params, context }: ActionFunctionArgs) {
           return redirect(`/events/${eventId}?cancel_closed=1`);
         }
         await db.delete(signups).where(eq(signups.id, s.id));
-        await notifyOrganizerOfSignup("cancellation", s.participantName, cancelSlot ?? null, signupComment(s.customFields));
+        await notifyOrganizerOfSignup("cancellation", s.participantName, s.participantEmail, cancelSlot ?? null, signupComment(s.customFields));
         return redirect(`/events/${eventId}?cancelled=1`);
       }
     }

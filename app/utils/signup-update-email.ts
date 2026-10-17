@@ -5,6 +5,7 @@ export function buildSignupUpdateEmail(args: {
   kind: "signup" | "cancellation";
   eventTitle: string;
   participantName: string;
+  participantEmail?: string | null;
   taskLabel: string;
   taskTitle: string;
   shiftName?: string | null;
@@ -22,13 +23,13 @@ export function buildSignupUpdateEmail(args: {
     html: `
       <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto; padding: 24px; color: #1e293b;">
         <h2 style="color: #0f172a; margin-top: 0;">${heading}</h2>
-        <p><strong>${escapeHtml(args.participantName)}</strong> ${action} <strong>${escapeHtml(args.eventTitle)}</strong>.</p>
+        <p><strong>${escapeHtml(args.participantName)}${args.participantEmail ? ` (${escapeHtml(args.participantEmail)})` : ""}</strong> ${action} <strong>${escapeHtml(args.eventTitle)}</strong>.</p>
         <p><strong>Task:</strong> ${escapeHtml(args.taskTitle)}</p>
         ${args.shiftName ? `<p><strong>Shift:</strong> ${escapeHtml(args.shiftName)}</p>` : ""}
         ${args.whenLine ? `<p><strong>When:</strong> ${escapeHtml(args.whenLine)}</p>` : ""}
         ${args.location ? `<p><strong>Where:</strong> ${escapeHtml(args.location)}</p>` : ""}
         ${args.comment ? `<p><strong>Participant note:</strong><br>${escapeHtml(args.comment).replace(/\r?\n/g, "<br>")}</p>` : ""}
-        <p><a href="${escapeHtml(args.eventUrl)}" style="color: #2563eb;">View sign-up sheet</a></p>
+        <p><a href="${escapeHtml(args.eventUrl)}" style="color: #2563eb;">Open event</a></p>
         ${emailFooter(args.site)}
       </div>
     `,
