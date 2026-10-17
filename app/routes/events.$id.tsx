@@ -37,9 +37,11 @@ import {
   trackEmailUsage,
   getEmailLimits,
   guestEmailAllowed,
+  organizerUpdateAllowed,
   emailBudgetAvailable,
   reserveCounterBelowLimit,
 } from "~/utils/quota";
+import { buildSignupUpdateEmail, signupComment } from "~/utils/signup-update-email";
 import {
   ORGANIZER_EMAIL_CHANGES_PER_HOUR,
   buildOrganizerLinkEmail,
@@ -718,6 +720,52 @@ export async function action({ request, params, context }: ActionFunctionArgs) {
   // Guest confirmation emails respect the daily email budget.
   const canEmailGuest = () =>
     guestEmailAllowed(env.DB, eventId, getEmailLimits(resolveEmailProvider(env), env));
+  const notifyOrganizerOfSignup = async (
+    kind: "signup" | "cancellation",
+    participantName: string,
+    slot: typeof eventSlots.$inferSelect | null,
+    comment: string
+  ) => {
+    const recipient = (event.organizerEmail || "").trim();
+    if (!recipient || !isValidEmail(recipient) || !isEmailDeliveryConfigured(env)) return;
+    const limits = getEmailLimits(resolveEmailProvider(env), env);
+    if (!(await organizerUpdateAllowed(env.DB, eventId, limits))) return;
+    const shiftPrefix = (slot?.shiftName || "").trim();
+    const slotTitle = (slot?.title || "").trim();
+    const taskLabel = slotTitle
+      ? shiftPrefix && shiftPrefix !== slotTitle ? `${shiftPrefix} – ${slotTitle}` : slotTitle
+      : shiftPrefix || "a spot";
+    const slotDate = slot ? effectiveDateForSlot(slot, event.eventDate) : event.eventDate;
+    const whenDatePart = slotDate ? formatLongDateLabel(slotDate) : "";
+    const whenTimePart = slot?.startTime
+      ? `${formatTime(slot.startTime)}${slot.endTime ? ` – ${formatTime(slot.endTime)}` : ""}`
+      : slot?.endTime ? formatTime(slot.endTime) : "";
+    const message = buildSignupUpdateEmail({
+      kind,
+      eventTitle: event.title,
+      participantName,
+      taskLabel,
+      taskTitle: slotTitle || "A spot",
+      shiftName: shiftPrefix,
+      whenLine: [whenDatePart, whenTimePart].filter(Boolean).join(" · "),
+      location: event.location,
+      comment,
+      eventUrl: `${site.siteUrl}/events/${eventId}`,
+      site,
+    });
+    const result = await sendEmail({
+      ...getEmailSenderConfig(env),
+      from: site.fromEmail,
+      to: recipient,
+      ...message,
+    });
+    await trackEmailUsage(env.DB, {
+      webhookUrl: env.ALERT_WEBHOOK_URL,
+      appName: site.siteName,
+      result,
+      limits: getEmailLimits(result.provider, env),
+    });
+  };
   const reclaimViaEmailMessage =
     "That name already voted. If that's you, vote from your original browser or device, or open the link in your vote confirmation email. Otherwise pick a different name, e.g. \"John S.\"";
   const finalizedError = () =>
@@ -747,7 +795,7 @@ export async function action({ request, params, context }: ActionFunctionArgs) {
     const guestCheck = assessGuestRequest(formData, {
       ip: request.headers.get("cf-connecting-ip") || "unknown",
       eventId,
-      sendsEmail: Boolean(participantEmail),
+      sendsEmail: Boolean(participantEmail || (event.organizerEmail && isEmailDeliveryConfigured(env))),
     });
     if (guestCheck.verdict === "bot") {
       // Silent fake-success: don't tip bots that the honeypot caught them.
@@ -923,6 +971,7 @@ export async function action({ request, params, context }: ActionFunctionArgs) {
       });
     }
 
+    await notifyOrganizerOfSignup("signup", participantName, targetSlot, comment);
     return data({ success: true, message: `Thank you ${participantName}! Your spot has been confirmed.` });
   }
 
@@ -958,6 +1007,9 @@ export async function action({ request, params, context }: ActionFunctionArgs) {
       }
     }
 
+    const [cancelledSlot] = existing.slotId
+      ? await db.select().from(eventSlots).where(eq(eventSlots.id, existing.slotId)).limit(1)
+      : [null];
     await db.delete(signups).where(eq(signups.id, signupId));
 
     // Organizer-initiated removal: notify the person by email (best-effort —
@@ -966,9 +1018,7 @@ export async function action({ request, params, context }: ActionFunctionArgs) {
     if (adminOk) {
       const removedEmail = (existing.participantEmail || "").trim();
       if (removedEmail && isValidEmail(removedEmail)) {
-        const [removedSlot] = existing.slotId
-          ? await db.select().from(eventSlots).where(eq(eventSlots.id, existing.slotId)).limit(1)
-          : [null];
+        const removedSlot = cancelledSlot;
         const shiftPrefix = ((removedSlot as { shiftName?: string | null } | null)?.shiftName || "").trim();
         const slotTitle = (removedSlot?.title || "").trim();
         const taskLabel = slotTitle
@@ -1014,6 +1064,7 @@ export async function action({ request, params, context }: ActionFunctionArgs) {
       }
     }
 
+    await notifyOrganizerOfSignup("cancellation", existing.participantName, cancelledSlot ?? null, signupComment(existing.customFields));
     return data({ success: true, message: "Signup cancelled." });
   }
 
@@ -2687,6 +2738,7 @@ export async function action({ request, params, context }: ActionFunctionArgs) {
           return redirect(`/events/${eventId}?cancel_closed=1`);
         }
         await db.delete(signups).where(eq(signups.id, s.id));
+        await notifyOrganizerOfSignup("cancellation", s.participantName, cancelSlot ?? null, signupComment(s.customFields));
         return redirect(`/events/${eventId}?cancelled=1`);
       }
     }

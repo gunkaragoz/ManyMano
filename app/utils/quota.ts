@@ -428,6 +428,30 @@ export const GUEST_EMAILS_PER_EVENT_PER_DAY = 50;
 /** Guest emails stop once daily usage reaches this share of the limit. */
 export const GUEST_EMAIL_DAILY_HEADROOM_PCT = 80;
 
+/** Limit guest-driven organizer updates per event and UTC day. */
+export const ORGANIZER_UPDATES_PER_EVENT_PER_DAY = 50;
+
+export async function organizerUpdateAllowed(
+  d1: D1Database,
+  eventId: string,
+  limits: EmailLimits,
+  now = new Date()
+): Promise<boolean> {
+  try {
+    if (!(await emailBudgetAvailable(d1, limits, now))) return false;
+    const usage = await getEmailUsage(d1, now, limits);
+    if (usage.dailyPct >= GUEST_EMAIL_DAILY_HEADROOM_PCT) return false;
+    return await reserveCounterBelowLimit(
+      d1,
+      `email:organizer-update:${eventId}:${utcDayString(now)}`,
+      ORGANIZER_UPDATES_PER_EVENT_PER_DAY,
+      now.toISOString()
+    );
+  } catch {
+    return false;
+  }
+}
+
 export async function guestEmailAllowed(
   d1: D1Database,
   eventId: string,
