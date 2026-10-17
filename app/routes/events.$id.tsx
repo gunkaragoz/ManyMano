@@ -1,7 +1,7 @@
 import { getCloudflareEnv } from "~/utils/cloudflare-context";
 import type { ActionFunctionArgs, HeadersFunction, LoaderFunctionArgs, MetaFunction } from "react-router";
 import { data, redirect } from "react-router";
-import { useLoaderData, useActionData, useNavigation, useSearchParams, useFetcher, Form, Link, isRouteErrorResponse, useRouteError } from "react-router";
+import { useLoaderData, useActionData, useNavigation, useSearchParams, useFetcher, useSubmit, Form, Link, isRouteErrorResponse, useRouteError } from "react-router";
 import { eq, and, inArray, isNull } from "drizzle-orm";
 import { useState, useMemo, useEffect, useRef } from "react";
 import {
@@ -3816,6 +3816,7 @@ export default function EventView() {
     viewCount: serverViewCount,
   } = useLoaderData<typeof loader>();
   const actionData = useActionData<{ success?: boolean; message?: string; error?: string; closed?: boolean; voteId?: string; voteToken?: string; proposedSlotId?: string; needsVerification?: boolean }>();
+  const submit = useSubmit();
   const [searchParams] = useSearchParams();
   const navigation = useNavigation();
   const isSubmitting = navigation.state === "submitting";
@@ -3966,10 +3967,19 @@ export default function EventView() {
   const cancelError = Boolean(searchParams.get("cancel_error"));
   const cancelClosed = Boolean(searchParams.get("cancel_closed"));
   const [selectedSlotForSignup, setSelectedSlotForSignup] = useState<{ id: string; title: string } | null>(null);
+  const signupFormRef = useRef<HTMLFormElement>(null);
+  const signupAutoRetryRef = useRef(false);
+  const [signupCheckFailed, setSignupCheckFailed] = useState(false);
+  const [signupAutoSubmitting, setSignupAutoSubmitting] = useState(false);
+  const [signupWidgetRetryKey, setSignupWidgetRetryKey] = useState(0);
   // Close the signup modal on success; keep it open on error/challenge so
   // the on-demand Turnstile stays visible for a retry.
   useEffect(() => {
     if (actionData?.success && selectedSlotForSignup) setSelectedSlotForSignup(null);
+    if (signupAutoRetryRef.current) {
+      if (actionData?.needsVerification) setSignupCheckFailed(true);
+      setSignupAutoSubmitting(false);
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [actionData]);
   const [copiedLink, setCopiedLink] = useState<string | null>(null);
@@ -6803,7 +6813,22 @@ export default function EventView() {
               <span className="text-blue-700">at {event.title}</span>
             </div>
 
-            <Form method="post" className="space-y-4 text-xs">
+            <Form
+              ref={signupFormRef}
+              method="post"
+              className="space-y-4 text-xs"
+              onSubmit={(event) => {
+                if (needsHumanCheck && signupCheckFailed) {
+                  event.preventDefault();
+                  signupAutoRetryRef.current = false;
+                  setSignupCheckFailed(false);
+                  setSignupWidgetRetryKey((key) => key + 1);
+                  return;
+                }
+                signupAutoRetryRef.current = false;
+                setSignupCheckFailed(false);
+              }}
+            >
               <input type="hidden" name="intent" value="signup" />
               <input type="hidden" name="slotId" value={selectedSlotForSignup.id} />
               <input type="hidden" name="formStartedAt" value={pageLoadedAt} />
@@ -6850,9 +6875,9 @@ export default function EventView() {
                 />
               </div>
 
-              {needsHumanCheck && actionData?.error && (
-                <p className="text-xs font-medium text-amber-700 bg-amber-50 border border-amber-200 rounded-xl px-3 py-2">
-                  {actionData.error}
+              {needsHumanCheck && (
+                <p role="status" className="text-xs text-slate-600">
+                  {signupCheckFailed ? "Verification didn't finish. Please try again." : "Checking…"}
                 </p>
               )}
               {actionData?.closed && actionData?.error && (
@@ -6873,7 +6898,21 @@ export default function EventView() {
                 </div>
               )}
               {needsHumanCheck && turnstileSiteKey && (
-                <Turnstile siteKey={turnstileSiteKey} action="event-signup" resetKey={navigation.state} />
+                <Turnstile
+                  key={signupWidgetRetryKey}
+                  siteKey={turnstileSiteKey}
+                  action="event-signup"
+                  resetKey={navigation.state}
+                  onError={() => setSignupCheckFailed(true)}
+                  onSuccess={(token) => {
+                    if (!signupFormRef.current || signupAutoRetryRef.current) return;
+                    signupAutoRetryRef.current = true;
+                    setSignupAutoSubmitting(true);
+                    const formData = new FormData(signupFormRef.current);
+                    formData.set("cf-turnstile-response", token);
+                    submit(formData, { method: "post", preventScrollReset: true });
+                  }}
+                />
               )}
 
               <div className="flex items-center justify-end gap-3 pt-3 border-t border-slate-100">
@@ -6886,9 +6925,10 @@ export default function EventView() {
                 </button>
                 <button
                   type="submit"
-                  className="px-6 py-2.5 rounded-2xl bg-blue-600 text-white font-bold hover:bg-blue-700 shadow-sm transition-colors"
+                  disabled={isSubmitting || signupAutoSubmitting || (needsHumanCheck && !signupCheckFailed)}
+                  className="px-6 py-2.5 rounded-2xl bg-blue-600 text-white font-bold hover:bg-blue-700 disabled:opacity-60 disabled:cursor-wait shadow-sm transition-colors"
                 >
-                  Confirm Spot
+                  {isSubmitting || signupAutoSubmitting ? "Confirming…" : needsHumanCheck ? signupCheckFailed ? "Try verification again" : "Checking…" : "Confirm Spot"}
                 </button>
               </div>
             </Form>
