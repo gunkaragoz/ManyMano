@@ -40,6 +40,23 @@ beforeEach(() => {
 afterEach(() => vi.unstubAllGlobals());
 
 describe("organizer sign-up updates", () => {
+  it("echoes the confirmation attempt through challenge and completion", async () => {
+    const { id } = await seedEvent(db, { id: "attempt_round_trip", slot: { id: "slot_attempt" } });
+    const fields = {
+      intent: "signup", slotId: "slot_attempt", signupAttemptId: "7",
+      participantName: "Pat", participantEmail: "pat@example.com",
+    };
+    const challenged = await post(id, fields) as unknown as { data: Record<string, unknown> };
+    expect(challenged.data).toMatchObject({ needsVerification: true, signupAttemptId: "7" });
+    expect(db.sqlite.prepare("SELECT COUNT(*) AS n FROM signups").get()).toMatchObject({ n: 0 });
+
+    const completed = await post(id, { ...fields, "cf-turnstile-response": "solved" }) as unknown as {
+      data: Record<string, unknown>;
+    };
+    expect(completed.data).toMatchObject({ success: true, signupAttemptId: "7" });
+    expect(db.sqlite.prepare("SELECT COUNT(*) AS n FROM signups").get()).toMatchObject({ n: 1 });
+  });
+
   it("emails the organizer after a guest signs up without an email and tracks the send", async () => {
     const { id } = await seedEvent(db, {
       id: "notify_signup",
