@@ -59,13 +59,25 @@ describe("organizer sign-up updates", () => {
     expect(sent[0].to).toEqual(["sam@example.com"]);
     expect(sent[0].subject).toContain("New sign-up: \"Morning – Tables\"");
     expect(sent[0].html).toContain("Pat &lt;Guest&gt;");
+    expect(sent[0].html).toContain("<strong>Pat &lt;Guest&gt;</strong> signed up for");
     expect(sent[0].html).toContain("<strong>Task:</strong> Tables");
     expect(sent[0].html).toContain("<strong>Shift:</strong> Morning");
     expect(sent[0].html).toContain("<strong>Where:</strong> Community Hall");
     expect(sent[0].html).toContain("I can bring &lt;supplies&gt;.");
     expect(sent[0].html).toContain(`${SITE_URL}/events/${id}`);
+    expect(sent[0].html).toContain(">Open event</a>");
     expect(sent[0].html).toContain("May 10th, 2099");
     expect(db.sqlite.prepare("SELECT count FROM usage_counters WHERE key LIKE 'email:daily:%'").get()).toMatchObject({ count: 1 });
+  });
+
+  it("shows the participant email beside the name when provided", async () => {
+    const { id } = await seedEvent(db, { id: "notify_with_email", organizerEmail: "sam@example.com", slot: { id: "slot_email", title: "Tables" } });
+    await post(id, {
+      intent: "signup", slotId: "slot_email", participantName: "Pat Kay",
+      participantEmail: "pat@kay.com", "cf-turnstile-response": "solved",
+    });
+    const organizerMail = sent.find((mail) => mail.to.includes("sam@example.com"));
+    expect(organizerMail?.html).toContain("<strong>Pat Kay (pat@kay.com)</strong> signed up for <strong>Park &lt;Cleanup&gt;</strong>.");
   });
 
   it("emails the organizer for self-service cancellation and sends only once", async () => {
@@ -73,14 +85,14 @@ describe("organizer sign-up updates", () => {
     const token = "a-secret-cancel-token";
     db.sqlite.prepare(
       `INSERT INTO signups (id, slot_id, event_id, participant_name, participant_email, edit_token, custom_fields, status, created_at)
-       VALUES (?, ?, ?, ?, NULL, ?, ?, 'CONFIRMED', ?)`
-    ).run("signup_1", "slot_2", id, "Pat", await sha256Hex(token), JSON.stringify({ comment: "Bring a ladder" }), new Date().toISOString());
+       VALUES (?, ?, ?, ?, ?, ?, ?, 'CONFIRMED', ?)`
+    ).run("signup_1", "slot_2", id, "Pat", "pat@kay.com", await sha256Hex(token), JSON.stringify({ comment: "Bring a ladder" }), new Date().toISOString());
     const first = await post(id, { intent: "cancel_by_token", cancel_token: token });
     expect(first).toBeInstanceOf(Response);
     expect((first as Response).headers.get("Location")).toContain("cancelled=1");
     expect(sent).toHaveLength(1);
     expect(sent[0].subject).toContain("Sign-up cancelled");
-    expect(sent[0].html).toContain("Pat");
+    expect(sent[0].html).toContain("<strong>Pat (pat@kay.com)</strong> cancelled their sign-up for");
     expect(sent[0].html).toContain("Bring a ladder");
     await post(id, { intent: "cancel_by_token", cancel_token: token });
     expect(sent).toHaveLength(1);
@@ -119,13 +131,14 @@ describe("organizer sign-up updates", () => {
 
   it("escapes event, task, and participant content", () => {
     const message = buildSignupUpdateEmail({
-      kind: "signup", eventTitle: "<event>", participantName: "<person>",
+      kind: "signup", eventTitle: "<event>", participantName: "<person>", participantEmail: "person+<test>@example.com",
       taskLabel: "<task>", taskTitle: "<task>", shiftName: "<shift>", whenLine: "<date>",
       location: "<place>", comment: "<note>\nmore", eventUrl: `${SITE_URL}/events/test`,
       site: getSiteConfig(testEnv(db)),
     });
     expect(message.html).toContain("&lt;event&gt;");
     expect(message.html).toContain("&lt;person&gt;");
+    expect(message.html).toContain("&lt;person&gt; (person+&lt;test&gt;@example.com)");
     expect(message.html).toContain("&lt;task&gt;");
     expect(message.html).toContain("&lt;date&gt;");
     expect(message.html).toContain("&lt;shift&gt;");

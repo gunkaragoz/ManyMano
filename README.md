@@ -16,7 +16,7 @@
 - **Instant Calendar Invites**: Direct RFC 5545 `.ics` file generation right at the edge—no email mandatory. Organizer email is omitted from public calendar files.
 - **Zero Login Barrier**: Participants sign up in 5 seconds with name & optional email.
 - **Private Edit Links**: Participants who share an email get a cancel link; organizers can remove anyone.
-- **Organizer updates**: When an organizer email is set, sign-ups and cancellations send an email with the participant, task, shift, time, location, participant note, and event link. Updates respect the free-tier email budget.
+- **Organizer updates**: When an organizer email is set, sign-ups and cancellations send an email with the participant's name and optional email, task, shift, time, location, participant note, and event link. Updates respect the free-tier email budget.
 - **Organizer Admin Mode**: Attendance rosters, CSV export (organizer-only), and full event delete. Admin link upgrades to an HttpOnly cookie and secrets are stored hashed.
 - **Organizer email in admin mode**: Add or change the organizer email from the admin page. Saving emails a backup of the organizer link (Turnstile-checked, 5 changes per event per hour) and makes "Lost your organizer link?" work for that event.
 - **No accounts needed**: Participants sign up in seconds with name & optional email; organizers can delete anytime.
