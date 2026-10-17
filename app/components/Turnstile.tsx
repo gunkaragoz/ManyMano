@@ -35,6 +35,8 @@ function loadTurnstileScript(): Promise<void> {
 interface TurnstileProps {
   siteKey: string;
   action: string;
+  onSuccess?: (token: string) => void;
+  onError?: () => void;
   /** Pass navigation.state — widget resets to a fresh token when a submission settles. */
   resetKey?: string;
   /**
@@ -60,10 +62,14 @@ interface TurnstileProps {
  * solved `cf-turnstile-response` token is submitted with the form data.
  * Tokens are single-use: after each completed submission the widget resets.
  */
-export default function Turnstile({ siteKey, action, resetKey, appearance = "interaction-only", size = "compact", theme = "light" }: TurnstileProps) {
+export default function Turnstile({ siteKey, action, onSuccess, onError, resetKey, appearance = "interaction-only", size = "compact", theme = "light" }: TurnstileProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const widgetIdRef = useRef<string | null>(null);
   const prevResetKey = useRef(resetKey);
+  const onSuccessRef = useRef(onSuccess);
+  onSuccessRef.current = onSuccess;
+  const onErrorRef = useRef(onError);
+  onErrorRef.current = onError;
 
   useEffect(() => {
     let cancelled = false;
@@ -84,11 +90,12 @@ export default function Turnstile({ siteKey, action, resetKey, appearance = "int
           theme,
           appearance,
           size,
+          callback: (token: string) => onSuccessRef.current?.(token),
+          "error-callback": () => onErrorRef.current?.(),
         });
       })
       .catch(() => {
-        // CDN unreachable: form still submits; server fails closed when
-        // TURNSTILE_SECRET_KEY is configured. Nothing else to do client-side.
+        if (!cancelled) onErrorRef.current?.();
       });
     return () => {
       cancelled = true;
