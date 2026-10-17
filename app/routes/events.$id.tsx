@@ -1,4 +1,5 @@
 import { getCloudflareEnv } from "~/utils/cloudflare-context";
+import { matchesSignupAttempt } from "~/utils/signup-attempt";
 import type { ActionFunctionArgs, HeadersFunction, LoaderFunctionArgs, MetaFunction } from "react-router";
 import { data, redirect } from "react-router";
 import { useLoaderData, useActionData, useNavigation, useSearchParams, useFetcher, useSubmit, Form, Link, isRouteErrorResponse, useRouteError } from "react-router";
@@ -779,6 +780,7 @@ export async function action({ request, params, context }: ActionFunctionArgs) {
       return data({ error: "This event doesn't take sign-ups." }, { status: 400 });
     }
     const slotId = cleanText(formData.get("slotId"), 32);
+    const signupAttemptId = cleanText(formData.get("signupAttemptId"), 32);
     const participantName = cleanText(formData.get("participantName"), PARTICIPANT_NAME_MAX);
     const rawEmail = cleanText(formData.get("participantEmail"), EMAIL_MAX);
     const participantEmail = rawEmail || null;
@@ -801,7 +803,7 @@ export async function action({ request, params, context }: ActionFunctionArgs) {
     });
     if (guestCheck.verdict === "bot") {
       // Silent fake-success: don't tip bots that the honeypot caught them.
-      return data({ success: true, message: `Thank you ${participantName}! Your spot has been confirmed.` });
+      return data({ success: true, signupAttemptId, message: `Thank you ${participantName}! Your spot has been confirmed.` });
     }
     if (guestCheck.verdict === "challenge") {
       const turnstileSignup = await verifyTurnstile({
@@ -812,7 +814,7 @@ export async function action({ request, params, context }: ActionFunctionArgs) {
       });
       if (!turnstileSignup.ok) {
         const f = needsVerification(guestCheck);
-        return data(f.body, { status: f.status });
+        return data({ ...f.body, signupAttemptId }, { status: f.status });
       }
     } else if (hasTurnstileToken(formData)) {
       // Low-risk retry carrying a token (e.g. after a prior challenge):
@@ -974,7 +976,7 @@ export async function action({ request, params, context }: ActionFunctionArgs) {
     }
 
     await notifyOrganizerOfSignup("signup", participantName, safeEmail, targetSlot, comment);
-    return data({ success: true, message: `Thank you ${participantName}! Your spot has been confirmed.` });
+    return data({ success: true, signupAttemptId, message: `Thank you ${participantName}! Your spot has been confirmed.` });
   }
 
   // 2. Cancel Signup (admin, or owner via emailed edit token)
@@ -3815,7 +3817,7 @@ export default function EventView() {
     siteName,
     viewCount: serverViewCount,
   } = useLoaderData<typeof loader>();
-  const actionData = useActionData<{ success?: boolean; message?: string; error?: string; closed?: boolean; voteId?: string; voteToken?: string; proposedSlotId?: string; needsVerification?: boolean }>();
+  const actionData = useActionData<{ success?: boolean; message?: string; error?: string; closed?: boolean; voteId?: string; voteToken?: string; proposedSlotId?: string; needsVerification?: boolean; signupAttemptId?: string }>();
   const submit = useSubmit();
   const [searchParams] = useSearchParams();
   const navigation = useNavigation();
@@ -3966,18 +3968,43 @@ export default function EventView() {
   const justCancelled = Boolean(searchParams.get("cancelled"));
   const cancelError = Boolean(searchParams.get("cancel_error"));
   const cancelClosed = Boolean(searchParams.get("cancel_closed"));
-  const [selectedSlotForSignup, setSelectedSlotForSignup] = useState<{ id: string; title: string } | null>(null);
+  const [selectedSlotForSignup, setSelectedSlotForSignup] = useState<{ id: string; title: string; attemptId: number } | null>(null);
   const signupFormRef = useRef<HTMLFormElement>(null);
+  const nextSignupAttemptIdRef = useRef(0);
+  const signupPendingAttemptIdRef = useRef<number | null>(null);
   const signupAutoRetryRef = useRef(false);
   const [signupCheckFailed, setSignupCheckFailed] = useState(false);
   const [signupAutoSubmitting, setSignupAutoSubmitting] = useState(false);
   const [signupWidgetRetryKey, setSignupWidgetRetryKey] = useState(0);
+  const signupResponseMatches = matchesSignupAttempt(
+    actionData?.signupAttemptId,
+    selectedSlotForSignup?.attemptId ?? null,
+    signupPendingAttemptIdRef.current
+  );
+  const signupNeedsHumanCheck = Boolean(actionData?.needsVerification && signupResponseMatches);
+  const closeSignupDialog = () => {
+    signupPendingAttemptIdRef.current = null;
+    signupAutoRetryRef.current = false;
+    setSignupAutoSubmitting(false);
+    setSignupCheckFailed(false);
+    setSelectedSlotForSignup(null);
+  };
+  const openSignupDialog = (id: string, title: string) => {
+    signupPendingAttemptIdRef.current = null;
+    signupAutoRetryRef.current = false;
+    setSignupAutoSubmitting(false);
+    setSignupCheckFailed(false);
+    setSelectedSlotForSignup({ id, title, attemptId: ++nextSignupAttemptIdRef.current });
+  };
   // Close the signup modal on success; keep it open on error/challenge so
   // the on-demand Turnstile stays visible for a retry.
   useEffect(() => {
-    if (actionData?.success && selectedSlotForSignup) setSelectedSlotForSignup(null);
-    if (signupAutoRetryRef.current) {
-      if (actionData?.needsVerification) setSignupCheckFailed(true);
+    if (actionData?.success && signupResponseMatches) {
+      closeSignupDialog();
+    }
+    if (signupAutoRetryRef.current && selectedSlotForSignup &&
+        signupPendingAttemptIdRef.current === selectedSlotForSignup.attemptId) {
+      if (signupNeedsHumanCheck) setSignupCheckFailed(true);
       setSignupAutoSubmitting(false);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -5626,7 +5653,7 @@ export default function EventView() {
                         <button
                           type="button"
                           disabled={isFull}
-                          onClick={() => setSelectedSlotForSignup({ id: slot.id, title: signupLabel })}
+                          onClick={() => openSignupDialog(slot.id, signupLabel)}
                           className={`px-6 py-3 rounded-2xl text-xs font-bold transition-all shadow-sm shrink-0 inline-flex items-center gap-1.5 ${
                             isFull
                               ? "bg-slate-100 text-slate-400 cursor-not-allowed border border-slate-200"
@@ -6793,7 +6820,7 @@ export default function EventView() {
               <h3 className="font-extrabold text-xl text-slate-900">Claim Spot</h3>
               <button
                 type="button"
-                onClick={() => setSelectedSlotForSignup(null)}
+                onClick={closeSignupDialog}
                 className="text-slate-400 hover:text-slate-600 p-1"
               >
                 <X className="w-5 h-5" />
@@ -6818,19 +6845,21 @@ export default function EventView() {
               method="post"
               className="space-y-4 text-xs"
               onSubmit={(event) => {
-                if (needsHumanCheck && signupCheckFailed) {
+                if (signupNeedsHumanCheck && signupCheckFailed) {
                   event.preventDefault();
                   signupAutoRetryRef.current = false;
                   setSignupCheckFailed(false);
                   setSignupWidgetRetryKey((key) => key + 1);
                   return;
                 }
+                signupPendingAttemptIdRef.current = selectedSlotForSignup.attemptId;
                 signupAutoRetryRef.current = false;
                 setSignupCheckFailed(false);
               }}
             >
               <input type="hidden" name="intent" value="signup" />
               <input type="hidden" name="slotId" value={selectedSlotForSignup.id} />
+              <input type="hidden" name="signupAttemptId" value={selectedSlotForSignup.attemptId} />
               <input type="hidden" name="formStartedAt" value={pageLoadedAt} />
               {/* Honeypot: humans never see it, bots autofill it. */}
               <div className="absolute -left-[9999px] top-auto w-px h-px overflow-hidden" aria-hidden="true">
@@ -6875,7 +6904,7 @@ export default function EventView() {
                 />
               </div>
 
-              {needsHumanCheck && (
+              {signupNeedsHumanCheck && (
                 <p role="status" className="text-xs text-slate-600">
                   {signupCheckFailed ? "Verification didn't finish. Please try again." : "Checking…"}
                 </p>
@@ -6887,7 +6916,7 @@ export default function EventView() {
                     <button
                       type="button"
                       onClick={() => {
-                        setSelectedSlotForSignup(null);
+                        closeSignupDialog();
                         shiftsSectionRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
                       }}
                       className="px-4 py-2 rounded-xl bg-slate-900 hover:bg-slate-800 text-white text-xs font-bold transition-colors"
@@ -6897,15 +6926,20 @@ export default function EventView() {
                   )}
                 </div>
               )}
-              {needsHumanCheck && turnstileSiteKey && (
+              {signupNeedsHumanCheck && turnstileSiteKey && (
                 <Turnstile
                   key={signupWidgetRetryKey}
                   siteKey={turnstileSiteKey}
                   action="event-signup"
                   resetKey={navigation.state}
-                  onError={() => setSignupCheckFailed(true)}
+                  onError={() => {
+                    if (signupPendingAttemptIdRef.current === selectedSlotForSignup.attemptId) {
+                      setSignupCheckFailed(true);
+                    }
+                  }}
                   onSuccess={(token) => {
-                    if (!signupFormRef.current || signupAutoRetryRef.current) return;
+                    if (!signupNeedsHumanCheck || !signupFormRef.current || signupAutoRetryRef.current ||
+                        signupPendingAttemptIdRef.current !== selectedSlotForSignup.attemptId) return;
                     signupAutoRetryRef.current = true;
                     setSignupAutoSubmitting(true);
                     const formData = new FormData(signupFormRef.current);
@@ -6918,17 +6952,17 @@ export default function EventView() {
               <div className="flex items-center justify-end gap-3 pt-3 border-t border-slate-100">
                 <button
                   type="button"
-                  onClick={() => setSelectedSlotForSignup(null)}
+                  onClick={closeSignupDialog}
                   className="px-5 py-2.5 rounded-2xl border border-slate-200 text-slate-600 hover:bg-slate-50 font-semibold"
                 >
                   Cancel
                 </button>
                 <button
                   type="submit"
-                  disabled={isSubmitting || signupAutoSubmitting || (needsHumanCheck && !signupCheckFailed)}
+                  disabled={isSubmitting || signupAutoSubmitting || (signupNeedsHumanCheck && !signupCheckFailed)}
                   className="px-6 py-2.5 rounded-2xl bg-blue-600 text-white font-bold hover:bg-blue-700 disabled:opacity-60 disabled:cursor-wait shadow-sm transition-colors"
                 >
-                  {isSubmitting || signupAutoSubmitting ? "Confirming…" : needsHumanCheck ? signupCheckFailed ? "Try verification again" : "Checking…" : "Confirm Spot"}
+                  {isSubmitting || signupAutoSubmitting ? "Confirming…" : signupNeedsHumanCheck ? signupCheckFailed ? "Try verification again" : "Checking…" : "Confirm Spot"}
                 </button>
               </div>
             </Form>
