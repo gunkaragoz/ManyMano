@@ -7,17 +7,23 @@ allowBuilds:
   workerd: true
 
 # Security overrides for Dependabot alerts (transitive deps).
-# - ws 8.18.0 -> 8.21.0 (memory-exhaustion DoS from tiny fragments).
-#   Scoped to v8 only so vite-node's ws@7 stays on 7.x.
 # - esbuild (dev-server CORS: any website could read dev-server responses).
 #   Transitive via drizzle-kit/vite; force the patched line. Dev-only
 #   exposure (`pnpm run dev`), but Dependabot stays red until pinned.
+# - hono 4.13.9 -> 4.13.13 (serveStatic double-decode can bypass path middleware).
 # - postcss-selector-parser 6.1.4 -> 7.1.6 (quadratic selector parsing).
 #   Tailwind 3 and postcss-nested require v6; no patched v6 is available.
+# - sharp 0.35.4 -> 0.35.5 (librsvg memory vulnerability).
+# - shell-quote 1.10.0 -> 1.12.0 (critical command injection in quote()).
+# - ws 8.18.0 -> 8.21.0 (memory-exhaustion DoS from tiny fragments).
+#   Scoped to v8 only so vite-node's ws@7 stays on 7.x.
 # NOTE: overrides are mirrored in package.json ("pnpm.overrides") so frozen
 # installs still see them when the build environment doesn't load this file.
 # Keep both in sync — any change requires a lockfile update.
 overrides:
-  ws@8: 8.21.0
   esbuild: ^0.28.0
+  hono: 4.13.13
   postcss-selector-parser@6: 7.1.6
+  sharp: 0.35.5
+  shell-quote: 1.12.0
+  ws@8: 8.21.0

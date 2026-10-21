@@ -156,6 +156,7 @@ export async function handleMcp(request: Request, env: CloudflareEnv, ctx: Ctx):
   const transport = new WebStandardStreamableHTTPServerTransport({
     sessionIdGenerator: undefined,
     enableJsonResponse: true,
+    maxRequestBodySize: MAX_BODY_BYTES,
   });
   try {
     await server.connect(transport);

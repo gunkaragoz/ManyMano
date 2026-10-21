@@ -245,6 +245,14 @@ describe("tools", () => {
     expect(n.n).toBe(0);
   });
 
+  it("rejects oversized tool arguments before they reach schema validation", async () => {
+    const tasks = Array.from({ length: 100 }, (_, i) => ({ title: `Task ${i}`, capacity: 1 }));
+    const { json } = await send(call("create_signup_sheet", { ...SHEET, tasks }));
+    expect(json.result.isError).toBe(true);
+    expect(json.result.content[0].text).toContain("maximum of 256 elements");
+    expect((db.sqlite.prepare("SELECT COUNT(*) AS n FROM events").get() as { n: number }).n).toBe(0);
+  });
+
   it("returns domain errors as tool errors without writing", async () => {
     const past = await send(call("create_signup_sheet", { ...SHEET, date: "2020-01-01" }));
     expect(past.json.result).toMatchObject({ isError: true });

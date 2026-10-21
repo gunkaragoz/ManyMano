@@ -185,6 +185,8 @@ export function buildMcpServer(ctx: McpToolContext): McpServer {
     { name: ctx.siteName, version: "1.0.0" },
     {
       capabilities: { tools: {} },
+      // Cap SDK validation work while allowing the largest 31-item tool inputs.
+      maxToolInputElements: 256,
       jsonSchemaValidator: noJsonSchemaValidation,
       instructions:
         `Create ${ctx.siteName} sign-up sheets and meeting polls and read their public results. ` +

@@ -20,7 +20,7 @@
   },
   "dependencies": {
     "@cloudflare/vite-plugin": "^1.62.5",
-    "@modelcontextprotocol/sdk": "1.30.0",
+    "@modelcontextprotocol/sdk": "1.32.0",
     "@react-router/dev": "8.4.0",
     "@react-router/fs-routes": "8.4.0",
     "clsx": "^2.1.1",
@@ -53,9 +53,12 @@
   },
   "pnpm": {
     "overrides": {
-      "ws@8": "8.21.0",
       "esbuild": "^0.28.0",
-      "postcss-selector-parser@6": "7.1.6"
+      "hono": "4.13.13",
+      "postcss-selector-parser@6": "7.1.6",
+      "sharp": "0.35.5",
+      "shell-quote": "1.12.0",
+      "ws@8": "8.21.0"
     }
   }
 }
