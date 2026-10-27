@@ -118,6 +118,8 @@ pnpm run db:migrate:local                               # local dev
 
 ## 💻 Local Development
 
+Use Node.js 26 (see `.node-version`) and pnpm.
+
 ```bash
 # 1. Install dependencies
 pnpm install

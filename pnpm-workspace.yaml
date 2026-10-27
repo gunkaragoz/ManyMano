@@ -17,13 +17,22 @@ allowBuilds:
 # - shell-quote 1.10.0 -> 1.12.0 (critical command injection in quote()).
 # - ws 8.18.0 -> 8.21.0 (memory-exhaustion DoS from tiny fragments).
 #   Scoped to v8 only so vite-node's ws@7 stays on 7.x.
+# - body-parser 2.3.0 -> 2.4.0, fast-uri 3.1.8 -> 3.1.9,
+#   ip-address 10.7.2 -> 10.7.4, and qs 6.16.0 -> 6.16.1.
+# - undici 7.29.1 -> 7.30.1 and 8.11.2 -> 8.12.2, scoped by major.
 # NOTE: overrides are mirrored in package.json ("pnpm.overrides") so frozen
 # installs still see them when the build environment doesn't load this file.
 # Keep both in sync — any change requires a lockfile update.
 overrides:
   esbuild: ^0.28.0
   hono: 4.13.13
+  body-parser: 2.4.0
+  fast-uri: 3.1.9
+  ip-address: 10.7.4
   postcss-selector-parser@6: 7.1.6
+  qs: 6.16.1
   sharp: 0.35.5
   shell-quote: 1.12.0
+  undici@7: 7.30.1
+  undici@8: 8.12.2
   ws@8: 8.21.0
