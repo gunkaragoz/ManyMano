@@ -3,6 +3,9 @@
   "private": true,
   "sideEffects": false,
   "type": "module",
+  "engines": {
+    "node": ">=26"
+  },
   "scripts": {
     "build": "react-router build",
     "dev": "react-router dev",
