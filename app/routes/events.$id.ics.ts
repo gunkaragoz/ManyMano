@@ -7,8 +7,8 @@ import { getPresentedAdminToken, secretMatches } from "~/utils/auth";
 import {
   isExpired,
   latestSlotDate,
-  pruneExpiredEvents,
   resolveRetentionDays,
+  withConcurrentPrune,
 } from "~/utils/retention";
 import { getSiteConfig } from "~/utils/site";
 
@@ -25,11 +25,11 @@ export async function loader({ params, request, context }: LoaderFunctionArgs) {
   }
 
   const retentionDays = resolveRetentionDays(env);
-  try {
-    await pruneExpiredEvents(db, new Date(), retentionDays);
-  } catch {}
-
-  const [event] = await db.select().from(events).where(eq(events.id, eventId)).limit(1);
+  const [event] = await withConcurrentPrune(
+    db,
+    retentionDays,
+    db.select().from(events).where(eq(events.id, eventId)).limit(1)
+  );
   if (!event) {
     throw new Response("Event not found", { status: 404 });
   }
@@ -45,10 +45,14 @@ export async function loader({ params, request, context }: LoaderFunctionArgs) {
   // Use the winning slot when finalized, otherwise the earliest timed slot
   // (or first slot) so signup sheets and open polls still get real times.
   // Times are combined with event.eventDate inside generateICS.
-  const slots = await db
-    .select()
-    .from(eventSlots)
-    .where(eq(eventSlots.eventId, eventId));
+  // Organizer email is only embedded for organizers; the public .ics omits it
+  // so a shared calendar file doesn't leak the organizer's address. The token
+  // check is independent of the slot read, so both run together.
+  const presented = getPresentedAdminToken(request, eventId);
+  const [slots, isAdmin] = await Promise.all([
+    db.select().from(eventSlots).where(eq(eventSlots.eventId, eventId)),
+    presented ? secretMatches(presented, event.adminToken) : false,
+  ]);
   // ?slot=<id> exports one dated slot of a multi-day sheet (the link emails
   // use). Without it the behaviour is unchanged: the winning/earliest slot.
   const requestedSlotId = new URL(request.url).searchParams.get("slot");
@@ -56,11 +60,6 @@ export async function loader({ params, request, context }: LoaderFunctionArgs) {
     ? slots.find((s) => s.id === requestedSlotId) || null
     : null;
   const picked = requestedSlot || pickCalendarSlot(slots, event.winningSlotId);
-
-  // Organizer email is only embedded for organizers; the public .ics omits it
-  // so a shared calendar file doesn't leak the organizer's address.
-  const presented = getPresentedAdminToken(request, eventId);
-  const isAdmin = presented ? await secretMatches(presented, event.adminToken) : false;
 
   const origin = new URL(request.url).origin;
   const icsContent = generateICS({

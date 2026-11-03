@@ -40,37 +40,39 @@ export async function loadSourceEvent(
   now: Date = new Date()
 ): Promise<{ event: SourceEvent; slots: SourceSlot[] } | null> {
   if (!EVENT_ID_RE.test(eventId)) return null;
-  const [row] = await db
-    .select({
-      id: events.id,
-      type: events.type,
-      title: events.title,
-      description: events.description,
-      location: events.location,
-      eventDate: events.eventDate,
-      timezone: events.timezone,
-      durationMinutes: events.durationMinutes,
-      settings: events.settings,
-      createdAt: events.createdAt,
-    })
-    .from(events)
-    .where(eq(events.id, eventId))
-    .limit(1);
+  // The event row and its slots are independent reads; run them together.
+  const [[row], slots]: [any[], SourceSlot[]] = await Promise.all([
+    db
+      .select({
+        id: events.id,
+        type: events.type,
+        title: events.title,
+        description: events.description,
+        location: events.location,
+        eventDate: events.eventDate,
+        timezone: events.timezone,
+        durationMinutes: events.durationMinutes,
+        settings: events.settings,
+        createdAt: events.createdAt,
+      })
+      .from(events)
+      .where(eq(events.id, eventId))
+      .limit(1),
+    db
+      .select({
+        id: eventSlots.id,
+        title: eventSlots.title,
+        shiftName: eventSlots.shiftName,
+        capacity: eventSlots.capacity,
+        slotDate: eventSlots.slotDate,
+        startTime: eventSlots.startTime,
+        endTime: eventSlots.endTime,
+        displayOrder: eventSlots.displayOrder,
+      })
+      .from(eventSlots)
+      .where(eq(eventSlots.eventId, eventId)),
+  ]);
   if (!row) return null;
-
-  const slots: SourceSlot[] = await db
-    .select({
-      id: eventSlots.id,
-      title: eventSlots.title,
-      shiftName: eventSlots.shiftName,
-      capacity: eventSlots.capacity,
-      slotDate: eventSlots.slotDate,
-      startTime: eventSlots.startTime,
-      endTime: eventSlots.endTime,
-      displayOrder: eventSlots.displayOrder,
-    })
-    .from(eventSlots)
-    .where(eq(eventSlots.eventId, eventId));
 
   // Same rule as the event page: sheets live until their last date leaves the
   // window; polls expire by creation date only.

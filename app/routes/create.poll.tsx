@@ -50,7 +50,7 @@ import {
   isValidIsoDate,
   parseTimezoneInput,
 } from "~/utils/validation";
-import { pruneExpiredEvents, resolveRetentionDays } from "~/utils/retention";
+import { resolveRetentionDays, withConcurrentPrune } from "~/utils/retention";
 import { rebaseDatesToToday, todayInZone } from "~/utils/event-expiry";
 import { zonedWallTimeToUtc } from "~/utils/timezones";
 import { getSiteConfig } from "~/utils/site";
@@ -146,10 +146,8 @@ export async function action({ request, context }: ActionFunctionArgs) {
   };
   const site = getSiteConfig(env);
   const db = getDb(env.DB);
-  try {
-    await pruneExpiredEvents(db, new Date(), resolveRetentionDays(env));
-  } catch {}
-  const formData = await request.formData();
+  // Best-effort prune runs while the form body is parsed.
+  const formData = await withConcurrentPrune(db, resolveRetentionDays(env), request.formData());
 
   const title = cleanText(formData.get("title"), TITLE_MAX);
   const description = cleanText(formData.get("description"), DESCRIPTION_MAX) || null;
@@ -277,48 +275,60 @@ export async function action({ request, context }: ActionFunctionArgs) {
   const sortedDates = [...validSlots].map((s) => s.slotDate).sort();
   const firstDate = sortedDates[0];
 
-  const eventId = await generateUniquePublicId(async (candidate) => {
-    const existing = await db
-      .select({ id: events.id })
-      .from(events)
-      .where(eq(events.id, candidate))
-      .limit(1);
-    return existing.length > 0;
-  });
   const adminToken = generateSecretToken();
-  const adminTokenStored = await hashSecretForStorage(adminToken);
+  // The ID lookup (D1) and the token hash (crypto) are independent.
+  const [eventId, adminTokenStored] = await Promise.all([
+    generateUniquePublicId(async (candidate) => {
+      const existing = await db
+        .select({ id: events.id })
+        .from(events)
+        .where(eq(events.id, candidate))
+        .limit(1);
+      return existing.length > 0;
+    }),
+    hashSecretForStorage(adminToken),
+  ]);
   const now = new Date().toISOString();
 
-  await db.insert(events).values({
-    id: eventId,
-    type: "TIME_POLL",
-    title,
-    eventDate: firstDate,
-    description,
-    location,
-    organizerName,
-    organizerEmail,
-    adminToken: adminTokenStored,
-    status: "OPEN",
-    settings: JSON.stringify({}),
-    timezone,
-    durationMinutes,
-    createdAt: now,
-    updatedAt: now,
-  });
-
-  for (const slot of validSlots) {
-    await db.insert(eventSlots).values({
-      id: generateInternalId(),
-      eventId,
-      title: slot.title,
-      capacity: 999,
-      slotDate: slot.slotDate,
-      startTime: slot.startTime,
-      endTime: slot.endTime,
-      displayOrder: slot.displayOrder,
-    });
+  // D1 caps a statement at 100 bound variables; a slot row binds 8 columns,
+  // so 10 rows per INSERT stays well under it.
+  const slotValues = validSlots.map((slot) => ({
+    id: generateInternalId(),
+    eventId,
+    title: slot.title,
+    capacity: 999,
+    slotDate: slot.slotDate,
+    startTime: slot.startTime,
+    endTime: slot.endTime,
+    displayOrder: slot.displayOrder,
+  }));
+  const SLOT_INSERT_BATCH = 10;
+  const slotInserts = [];
+  for (let i = 0; i < slotValues.length; i += SLOT_INSERT_BATCH) {
+    slotInserts.push(db.insert(eventSlots).values(slotValues.slice(i, i + SLOT_INSERT_BATCH)));
   }
+  // Event + options in one batch: a single D1 round trip instead of one per
+  // option, applied atomically.
+  await db.batch([
+    db.insert(events).values({
+      id: eventId,
+      type: "TIME_POLL",
+      title,
+      eventDate: firstDate,
+      description,
+      location,
+      organizerName,
+      organizerEmail,
+      adminToken: adminTokenStored,
+      status: "OPEN",
+      settings: JSON.stringify({}),
+      timezone,
+      durationMinutes,
+      createdAt: now,
+      updatedAt: now,
+    }),
+    ...slotInserts,
+  ]);
 
   const url = new URL(request.url);
   const adminUrl = `${url.origin}/events/${eventId}?admin=${adminToken}`;
@@ -340,6 +350,13 @@ export async function action({ request, context }: ActionFunctionArgs) {
   const moreCount = validSlots.length > 8 ? `<p>…and ${validSlots.length - 8} more option(s).</p>` : "";
   const durationLabel = formatDurationLabel(durationMinutes);
 
+  // Advisory counters (never throw) are independent of the email: start
+  // them now so they overlap the send instead of queueing after it.
+  const advisoryCounters = Promise.all([
+    // SEO loop: count the conversion against the visit's landing page.
+    recordConversion(env.DB, "TIME_POLL", formData),
+    recordTemplateClone(env.DB, "TIME_POLL", formData),
+  ]);
   const emailResult = await sendEmail({
     ...getEmailSenderConfig(env),
     from: site.fromEmail,
@@ -376,9 +393,7 @@ export async function action({ request, context }: ActionFunctionArgs) {
     result: emailResult,
     limits: getEmailLimits(emailResult.provider, env),
   });
-  // SEO loop: count the conversion against the visit's landing page.
-  await recordConversion(env.DB, "TIME_POLL", formData);
-  await recordTemplateClone(env.DB, "TIME_POLL", formData);
+  await advisoryCounters;
 
   const headers = new Headers();
   headers.append("Set-Cookie", buildAdminCookie(eventId, adminToken));

@@ -69,29 +69,28 @@ export async function trackEventView(
 
     if (cookieId) {
       // Known browser identity: single-row invariant, refresh-safe.
-      const viewerKey = await sha256Hex(`event-view:${cookieId}`);
-      await d1
-        .prepare(
-          `INSERT OR IGNORE INTO event_views (event_id, viewer_key, first_seen, last_seen)
-           VALUES (?1, ?2, ?3, ?3)`
-        )
-        .bind(eventId, viewerKey, now)
-        .run();
+      const [viewerKey, ipKey] = await Promise.all([
+        sha256Hex(`event-view:${cookieId}`),
+        ipDayKey(eventId, ip, ua),
+      ]);
+      // One D1 round trip: insert, adopt, refresh and count run in order
+      // inside a single batch.
+      const statements = [insertView(d1, eventId, viewerKey, now)];
       // Adopt today's shared IP slot into this personal row. Runs on every
       // load (idempotent): if a previous adoption-delete was lost to a
       // transient D1 failure, a later load heals it instead of double
       // counting this browser forever. Scoped to today's IP key, and if the
       // slot belongs to another cookie-less browser behind the same NAT,
       // their next refresh simply re-creates it (self-healing, ±1 at most).
-      const ipKey = await ipDayKey(eventId, ip, ua);
       if (ipKey !== viewerKey) {
-        await d1
-          .prepare(`DELETE FROM event_views WHERE event_id = ?1 AND viewer_key = ?2`)
-          .bind(eventId, ipKey)
-          .run();
+        statements.push(
+          d1
+            .prepare(`DELETE FROM event_views WHERE event_id = ?1 AND viewer_key = ?2`)
+            .bind(eventId, ipKey)
+        );
       }
-      await refreshLastSeen(d1, eventId, viewerKey, now);
-      return { viewCount: await countEventViews(d1, eventId), setViewerCookie: null };
+      statements.push(refreshLastSeen(d1, eventId, viewerKey, now), countViews(d1, eventId));
+      return { viewCount: countFrom(await d1.batch(statements)), setViewerCookie: null };
     }
 
     // No usable cookie: count under today's shared IP+UA slot (one per day,
@@ -99,15 +98,12 @@ export async function trackEventView(
     // the next load upgrades to a personal row (see above).
     const viewerId = generateSecretToken();
     const ipKey = await ipDayKey(eventId, ip, ua);
-    await d1
-      .prepare(
-        `INSERT OR IGNORE INTO event_views (event_id, viewer_key, first_seen, last_seen)
-         VALUES (?1, ?2, ?3, ?3)`
-      )
-      .bind(eventId, ipKey, now)
-      .run();
-    await refreshLastSeen(d1, eventId, ipKey, now);
-    return { viewCount: await countEventViews(d1, eventId), setViewerCookie: buildViewerCookie(viewerId) };
+    const results = await d1.batch([
+      insertView(d1, eventId, ipKey, now),
+      refreshLastSeen(d1, eventId, ipKey, now),
+      countViews(d1, eventId),
+    ]);
+    return { viewCount: countFrom(results), setViewerCookie: buildViewerCookie(viewerId) };
   } catch {
     // Tracking must never break page loads (e.g. table missing before the
     // migration lands on an old DB): fall back to 0 rather than 500.
@@ -125,23 +121,38 @@ async function ipDayKey(eventId: string, ip: string, ua: string): Promise<string
   return sha256Hex(`event-view-ip:${eventId}:${ip}:${ua}:${day}`);
 }
 
-async function refreshLastSeen(d1: D1Database, eventId: string, viewerKey: string, now: string): Promise<void> {
+function insertView(d1: D1Database, eventId: string, viewerKey: string, now: string): D1PreparedStatement {
+  return d1
+    .prepare(
+      `INSERT OR IGNORE INTO event_views (event_id, viewer_key, first_seen, last_seen)
+       VALUES (?1, ?2, ?3, ?3)`
+    )
+    .bind(eventId, viewerKey, now);
+}
+
+function refreshLastSeen(d1: D1Database, eventId: string, viewerKey: string, now: string): D1PreparedStatement {
   // Refresh last_seen at most once a day (return-visit signal without a
   // write on every page load).
   const cutoff = new Date(Date.now() - LAST_SEEN_REFRESH_MS).toISOString();
-  await d1
+  return d1
     .prepare(
       `UPDATE event_views SET last_seen = ?1
        WHERE event_id = ?2 AND viewer_key = ?3 AND last_seen < ?4`
     )
-    .bind(now, eventId, viewerKey, cutoff)
-    .run();
+    .bind(now, eventId, viewerKey, cutoff);
+}
+
+function countViews(d1: D1Database, eventId: string): D1PreparedStatement {
+  return d1.prepare(`SELECT COUNT(*) AS n FROM event_views WHERE event_id = ?1`).bind(eventId);
+}
+
+/** The view count from a batch whose last statement is countViews(). */
+function countFrom(results: D1Result[]): number {
+  const n = (results[results.length - 1]?.results?.[0] as { n?: unknown } | undefined)?.n;
+  return typeof n === "number" ? n : 0;
 }
 
 export async function countEventViews(d1: D1Database, eventId: string): Promise<number> {
-  const row = await d1
-    .prepare(`SELECT COUNT(*) AS n FROM event_views WHERE event_id = ?1`)
-    .bind(eventId)
-    .first<{ n: number }>();
+  const row = await countViews(d1, eventId).first<{ n: number }>();
   return typeof row?.n === "number" ? row.n : 0;
 }

@@ -4,9 +4,8 @@
 // Read-only: never prunes or writes.
 
 import { isEventClosed } from "./event-expiry";
-import { isExpired, latestSlotDate } from "./retention";
+import { isExpired } from "./retention";
 import { MAX_SLOT_ROWS_PER_EVENT } from "./validation";
-import { getDb } from "~/db";
 
 export interface PublicSlotSummary {
   id: string;
@@ -66,30 +65,54 @@ export async function readPublicEvent(
   opts: { siteUrl: string; retentionDays: number; now?: Date }
 ): Promise<ReadResult> {
   const now = opts.now ?? new Date();
-  const event = await d1
-    .prepare(
-      `SELECT id, type, title, location, event_date, timezone, status, duration_minutes, winning_slot_id, created_at
-       FROM events WHERE id = ?1`
-    )
-    .bind(eventId)
-    .first<EventRow>();
+  // Everything this summary needs goes to D1 as one batch (one round trip)
+  // instead of four sequential reads. Both aggregates are cheap indexed
+  // lookups; the one that doesn't match the event's type comes back empty.
+  const [eventRes, slotRes, tallyRes, countRes] = await d1.batch<unknown>([
+    d1
+      .prepare(
+        `SELECT id, type, title, location, event_date, timezone, status, duration_minutes, winning_slot_id, created_at
+         FROM events WHERE id = ?1`
+      )
+      .bind(eventId),
+    d1
+      .prepare(
+        `SELECT id, title, slot_date, start_time, end_time, capacity, display_order
+         FROM event_slots WHERE event_id = ?1 ORDER BY display_order LIMIT ?2`
+      )
+      .bind(eventId, MAX_SLOT_ROWS_PER_EVENT + 1),
+    d1
+      .prepare(
+        `SELECT e.slot_id AS slot_id, e.response AS response, COUNT(*) AS n
+         FROM poll_vote_entries e JOIN poll_votes v ON v.id = e.poll_vote_id
+         WHERE v.event_id = ?1
+         GROUP BY e.slot_id, e.response`
+      )
+      .bind(eventId),
+    d1
+      .prepare(
+        `SELECT slot_id, COUNT(*) AS n FROM signups
+         WHERE event_id = ?1 AND status = 'CONFIRMED'
+         GROUP BY slot_id`
+      )
+      .bind(eventId),
+  ]);
+  const event = (eventRes.results?.[0] as EventRow | undefined) ?? null;
   if (!event) return { ok: false, error: NOT_FOUND };
 
-  const slotRows = await d1
-    .prepare(
-      `SELECT id, title, slot_date, start_time, end_time, capacity, display_order
-       FROM event_slots WHERE event_id = ?1 ORDER BY display_order LIMIT ?2`
-    )
-    .bind(eventId, MAX_SLOT_ROWS_PER_EVENT + 1)
-    .all<SlotRow>();
-  const slots = slotRows.results ?? [];
+  const slots = (slotRes.results ?? []) as SlotRow[];
   if (slots.length > MAX_SLOT_ROWS_PER_EVENT) {
     return { ok: false, error: "This event is too large to summarize here. Open its public link instead." };
   }
 
   // Same retention rule as the event page: sheets live until their last day.
+  // `slots` is complete here (the size check above), so the last date comes
+  // from it rather than another query.
   if (isExpired(event.created_at, now, opts.retentionDays)) {
-    const last = await latestSlotDate(getDb(d1), { id: event.id, type: event.type });
+    const last =
+      event.type === "SIGNUP_SHEET"
+        ? slots.reduce<string | null>((m, s) => (s.slot_date && (!m || s.slot_date > m) ? s.slot_date : m), null)
+        : null;
     if (isExpired(event.created_at, now, opts.retentionDays, last)) return { ok: false, error: NOT_FOUND };
   }
 
@@ -119,17 +142,9 @@ export async function readPublicEvent(
   };
 
   if (event.type === "TIME_POLL") {
-    const tallies = await d1
-      .prepare(
-        `SELECT e.slot_id AS slot_id, e.response AS response, COUNT(*) AS n
-         FROM poll_vote_entries e JOIN poll_votes v ON v.id = e.poll_vote_id
-         WHERE v.event_id = ?1
-         GROUP BY e.slot_id, e.response`
-      )
-      .bind(eventId)
-      .all<{ slot_id: string; response: string; n: number }>();
+    const tallies = (tallyRes.results ?? []) as Array<{ slot_id: string; response: string; n: number }>;
     const bySlot = new Map<string, { yes: number; maybe: number; no: number }>();
-    for (const t of tallies.results ?? []) {
+    for (const t of tallies) {
       const c = bySlot.get(t.slot_id) ?? { yes: 0, maybe: 0, no: 0 };
       if (t.response === "YES") c.yes += t.n;
       else if (t.response === "MAYBE") c.maybe += t.n;
@@ -147,15 +162,8 @@ export async function readPublicEvent(
     summary.winningOptionId = event.winning_slot_id;
     summary.options = ordered.map((s) => ({ ...base(s), ...(bySlot.get(s.id) ?? { yes: 0, maybe: 0, no: 0 }) }));
   } else {
-    const counts = await d1
-      .prepare(
-        `SELECT slot_id, COUNT(*) AS n FROM signups
-         WHERE event_id = ?1 AND status = 'CONFIRMED'
-         GROUP BY slot_id`
-      )
-      .bind(eventId)
-      .all<{ slot_id: string; n: number }>();
-    const filled = new Map((counts.results ?? []).map((c) => [c.slot_id, c.n]));
+    const counts = (countRes.results ?? []) as Array<{ slot_id: string; n: number }>;
+    const filled = new Map(counts.map((c) => [c.slot_id, c.n]));
     summary.slots = slots.map((s) => ({
       ...base(s),
       // capacity <= 0 means unlimited on web-made sheets.

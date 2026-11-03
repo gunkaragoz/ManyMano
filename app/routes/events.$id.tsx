@@ -4,6 +4,7 @@ import type { ActionFunctionArgs, HeadersFunction, LoaderFunctionArgs, MetaFunct
 import { data, redirect } from "react-router";
 import { useLoaderData, useActionData, useNavigation, useSearchParams, useFetcher, useSubmit, Form, Link, isRouteErrorResponse, useRouteError } from "react-router";
 import { eq, and, inArray, isNull } from "drizzle-orm";
+import type { BatchItem } from "drizzle-orm/batch";
 import { useState, useMemo, useEffect, useRef } from "react";
 import {
   ArrowRight,
@@ -31,7 +32,7 @@ import {
   User,
   X,
 } from "lucide-react";
-import { getDb, events, eventSlots, signups, pollVotes, pollVoteEntries } from "~/db";
+import { getDb, events, eventSlots, signups, pollVotes, pollVoteEntries, type AppDb } from "~/db";
 import { generateInternalId, generateSecretToken } from "~/utils/ids";
 import { sendEmail, emailFooter, getEmailSenderConfig, isEmailDeliveryConfigured, resolveEmailProvider } from "~/utils/email";
 import {
@@ -57,6 +58,7 @@ import {
   getPresentedAdminToken,
   hashSecretForStorage,
   isSameOriginRequest,
+  secretMatcher,
   secretMatches,
   verifyAdminToken,
 } from "~/utils/auth";
@@ -85,8 +87,8 @@ import {
   expiryDateFor,
   isExpired,
   latestSlotDate,
-  pruneExpiredEvents,
   resolveRetentionDays,
+  withConcurrentPrune,
 } from "~/utils/retention";
 import {
   CLOSING_SOON_MS,
@@ -289,6 +291,54 @@ export function ErrorBoundary() {
   throw error;
 }
 
+// D1 caps a statement at 100 bound variables; a vote entry binds 4 columns.
+const ENTRY_INSERT_BATCH = 20;
+
+/** Multi-row INSERTs for a vote's responses (slotId → YES/MAYBE). */
+function entryInserts(db: AppDb, pollVoteId: string, responses: Map<string, string>): BatchItem<"sqlite">[] {
+  const rows = [...responses].map(([slotId, response]) => ({
+    id: generateInternalId(),
+    pollVoteId,
+    slotId,
+    response,
+  }));
+  return chunked(rows, ENTRY_INSERT_BATCH).map((chunk) => db.insert(pollVoteEntries).values(chunk));
+}
+
+function chunked<T>(items: T[], size: number): T[][] {
+  const chunks: T[][] = [];
+  for (let i = 0; i < items.length; i += size) chunks.push(items.slice(i, i + size));
+  return chunks;
+}
+
+/**
+ * Run dependent writes as one D1 batch: a single round trip instead of one
+ * per statement, applied in order and atomically.
+ */
+async function runBatch(db: AppDb, statements: BatchItem<"sqlite">[]): Promise<void> {
+  if (statements.length === 0) return;
+  const [first, ...rest] = statements;
+  await db.batch([first, ...rest]);
+}
+
+/**
+ * Find the signup or poll vote an emailed cancel token belongs to. Both
+ * tables are read together and the token is hashed once, rather than
+ * awaiting one SHA-256 per row and a second query only after a miss.
+ */
+async function findByCancelToken(db: AppDb, eventId: string, token: string) {
+  const [matches, signupRows, voteRows] = await Promise.all([
+    secretMatcher(token),
+    db.select().from(signups).where(eq(signups.eventId, eventId)),
+    db.select().from(pollVotes).where(eq(pollVotes.eventId, eventId)),
+  ]);
+  const signup = signupRows.find((s) => matches(s.editToken));
+  if (signup) return { kind: "signup" as const, signup };
+  const vote = voteRows.find((v) => matches(v.editToken));
+  if (vote) return { kind: "vote" as const, vote };
+  return null;
+}
+
 export async function loader({ params, request, context, url }: LoaderFunctionArgs) {
   const env = getCloudflareEnv(context) as {
     DB: D1Database;
@@ -315,15 +365,13 @@ export async function loader({ params, request, context, url }: LoaderFunctionAr
     throw new Response("Event not found", { status: 404 });
   }
 
-  // Best-effort auto-prune of long-expired events.
-  try {
-    await pruneExpiredEvents(db, new Date(), retentionDays);
-  } catch {
-    // pruning must never break reads
-  }
-
-  // Fetch event
-  const [event] = await db.select().from(events).where(eq(events.id, eventId)).limit(1);
+  // Fetch event, with the best-effort auto-prune of long-expired events
+  // running alongside (pruning must never break reads).
+  const [event] = await withConcurrentPrune(
+    db,
+    retentionDays,
+    db.select().from(events).where(eq(events.id, eventId)).limit(1)
+  );
   if (!event) {
     throw new Response("Event not found", { status: 404 });
   }
@@ -345,6 +393,48 @@ export async function loader({ params, request, context, url }: LoaderFunctionAr
   // always hit the origin: private/no-store so neither the browser HTTP cache
   // (public max-age below) nor the CDN serves a stale roster/tallies snapshot.
   const isPoll = url.searchParams.get("poll") === "1";
+  // If a valid ?admin= token was presented via URL, (re)issue the cookie and
+  // redirect to the clean URL so the secret leaves history/logs (below).
+  const adminQuery = url.searchParams.get("admin");
+
+  // The page's rows depend only on the event, so start reading them now and
+  // let them overlap the token checks and view tracking below instead of
+  // queueing behind them. A ?admin= link normally ends in a redirect, so it
+  // reads them only once it's known to render.
+  // Slots: polls are re-sorted chronologically below; sheets keep author order.
+  // Poll entries are scoped to this event's votes through a subquery (never
+  // the whole poll_vote_entries table) so they needn't wait for the vote IDs.
+  const isSheet = event.type === "SIGNUP_SHEET";
+  const loadPageRows = () =>
+    Promise.all([
+      db.select().from(eventSlots).where(eq(eventSlots.eventId, eventId)).orderBy(eventSlots.displayOrder),
+      isSheet
+        ? db
+            .select()
+            .from(signups)
+            .where(and(eq(signups.eventId, eventId), eq(signups.status, "CONFIRMED")))
+        : [],
+      isSheet ? [] : db.select().from(pollVotes).where(eq(pollVotes.eventId, eventId)),
+      isSheet
+        ? []
+        : db
+            .select({
+              id: pollVoteEntries.id,
+              pollVoteId: pollVoteEntries.pollVoteId,
+              slotId: pollVoteEntries.slotId,
+              response: pollVoteEntries.response,
+            })
+            .from(pollVoteEntries)
+            .where(
+              inArray(
+                pollVoteEntries.pollVoteId,
+                db.select({ id: pollVotes.id }).from(pollVotes).where(eq(pollVotes.eventId, eventId))
+              )
+            ),
+    ]);
+  const pageRows = adminQuery ? null : loadPageRows();
+  // A redirect below returns without awaiting it; never leave it unhandled.
+  pageRows?.catch(() => {});
 
   // Self-serve cancellation via emailed ?cancel_token= (signup or poll vote).
   // Security: GET never mutates — it only validates the token and surfaces a
@@ -353,29 +443,15 @@ export async function loader({ params, request, context, url }: LoaderFunctionAr
   const cancelToken = url.searchParams.get("cancel_token");
   let pendingCancel: { kind: "signup" | "vote"; name: string; voteId?: string } | null = null;
   if (cancelToken) {
-    const candidates = await db.select().from(signups).where(eq(signups.eventId, eventId));
-    let matchedSignup: typeof candidates[number] | null = null;
-    for (const s of candidates) {
-      if (await secretMatches(cancelToken, s.editToken)) {
-        matchedSignup = s;
-        break;
-      }
+    const match = await findByCancelToken(db, eventId, cancelToken);
+    if (!match) {
+      return redirect(`/events/${eventId}?cancel_error=1`);
     }
-    if (matchedSignup) {
-      pendingCancel = { kind: "signup", name: matchedSignup.participantName };
-    } else {
-      const voteCandidates = await db.select().from(pollVotes).where(eq(pollVotes.eventId, eventId));
-      for (const v of voteCandidates) {
-        if (await secretMatches(cancelToken, v.editToken)) {
-          // voteId lets the page load this vote into the editor.
-          pendingCancel = { kind: "vote", name: v.participantName, voteId: v.id };
-          break;
-        }
-      }
-      if (!pendingCancel) {
-        return redirect(`/events/${eventId}?cancel_error=1`);
-      }
-    }
+    pendingCancel =
+      match.kind === "signup"
+        ? { kind: "signup", name: match.signup.participantName }
+        : // voteId lets the page load this vote into the editor.
+          { kind: "vote", name: match.vote.participantName, voteId: match.vote.id };
   }
 
   // Check admin access: HttpOnly cookie preferred, ?admin= supported for bookmarks.
@@ -383,9 +459,6 @@ export async function loader({ params, request, context, url }: LoaderFunctionAr
   const clientIp = request.headers.get("cf-connecting-ip") || "unknown";
   const isAdmin = await verifyAdminToken(presented, event.adminToken, `${clientIp}:${eventId}`);
 
-  // If a valid ?admin= token was presented via URL, (re)issue the cookie and
-  // redirect to the clean URL so the secret leaves history/logs.
-  const adminQuery = url.searchParams.get("admin");
   // Unique view tracking (best-effort, never breaks loads): one count per
   // browser (persistent viewer cookie), bots / live-sync polls / organizer
   // views excluded. Runs before the admin redirect so the viewer cookie can
@@ -405,12 +478,7 @@ export async function loader({ params, request, context, url }: LoaderFunctionAr
     return redirect(clean.toString(), { headers });
   }
 
-  // Fetch slots (polls: chronological by day then time; sheets keep author order)
-  const rawSlots = await db
-    .select()
-    .from(eventSlots)
-    .where(eq(eventSlots.eventId, eventId))
-    .orderBy(eventSlots.displayOrder);
+  const [rawSlots, eventSignups, votes, entries] = await (pageRows ?? loadPageRows());
   // Latest dated slot, for the retention banner (null on single-day sheets).
   // Sheets only — poll options are dated too but polls expire by creation.
   const lastSlotDateForEvent = event.type !== "SIGNUP_SHEET" ? null : rawSlots.reduce<string | null>((latest, s) => {
@@ -476,11 +544,6 @@ export async function loader({ params, request, context, url }: LoaderFunctionAr
     // organizer-only: included only for verified admins (rendered in the
     // private roster table below); everyone else gets null. The public
     // roster shows names (+ notes) only.
-    const eventSignups = await db
-      .select()
-      .from(signups)
-      .where(and(eq(signups.eventId, eventId), eq(signups.status, "CONFIRMED")));
-
     const safeSignups = eventSignups.map((s) => ({
       id: s.id,
       slotId: s.slotId,
@@ -532,23 +595,7 @@ export async function loader({ params, request, context, url }: LoaderFunctionAr
       }
     );
   } else {
-    // TIME_POLL: Fetch votes and entries (scoped to this event only —
-    // never load the whole poll_vote_entries table).
-    const votes = await db.select().from(pollVotes).where(eq(pollVotes.eventId, eventId));
-    const voteIds = votes.map((v) => v.id);
-    const entries =
-      voteIds.length > 0
-        ? await db
-            .select({
-              id: pollVoteEntries.id,
-              pollVoteId: pollVoteEntries.pollVoteId,
-              slotId: pollVoteEntries.slotId,
-              response: pollVoteEntries.response,
-            })
-            .from(pollVoteEntries)
-            .where(inArray(pollVoteEntries.pollVoteId, voteIds))
-        : [];
-
+    // TIME_POLL: votes and entries were read with the slots above.
     // Map votes with their entry responses — emails and edit tokens never
     // leave the server (organizers see emails only via the CSV export).
     const votesWithResponses = votes.map((v) => {
@@ -690,11 +737,15 @@ export async function action({ request, params, context }: ActionFunctionArgs) {
     return data({ error: "Missing event ID." }, { status: 400 });
   }
 
-  try {
-    await pruneExpiredEvents(db, new Date(), retentionDays);
-  } catch {}
-
-  const [event] = await db.select().from(events).where(eq(events.id, eventId)).limit(1);
+  // The form body parses while the event is read (and the best-effort prune
+  // runs); none of the three depends on another.
+  const formDataPending = request.formData();
+  formDataPending.catch(() => {}); // awaited below; early returns skip it
+  const [event] = await withConcurrentPrune(
+    db,
+    retentionDays,
+    db.select().from(events).where(eq(events.id, eventId)).limit(1)
+  );
   if (!event) {
     return data({ error: "Event not found." }, { status: 404 });
   }
@@ -705,7 +756,7 @@ export async function action({ request, params, context }: ActionFunctionArgs) {
     return data({ error: "This event expired and was auto-deleted." }, { status: 410 });
   }
 
-  const formData = await request.formData();
+  const formData = await formDataPending;
   const intent = formData.get("intent") as string;
   const now = new Date().toISOString();
   const url = new URL(request.url);
@@ -831,7 +882,13 @@ export async function action({ request, params, context }: ActionFunctionArgs) {
       }
     }
 
-    const [targetSlot] = await db.select().from(eventSlots).where(eq(eventSlots.id, slotId)).limit(1);
+    const signupId = generateInternalId();
+    const editTokenPlain = generateSecretToken();
+    // The slot read (D1) and the edit-token hash (crypto) are independent.
+    const [[targetSlot], editTokenStored] = await Promise.all([
+      db.select().from(eventSlots).where(eq(eventSlots.id, slotId)).limit(1),
+      hashSecretForStorage(editTokenPlain),
+    ]);
     if (!targetSlot || targetSlot.eventId !== eventId) {
       return data({ error: "Slot not found." }, { status: 404 });
     }
@@ -852,10 +909,6 @@ export async function action({ request, params, context }: ActionFunctionArgs) {
       });
       if (rejection) return data(rejection, { status: 410 });
     }
-
-    const signupId = generateInternalId();
-    const editTokenPlain = generateSecretToken();
-    const editTokenStored = await hashSecretForStorage(editTokenPlain);
 
     const safeName = participantName.slice(0, PARTICIPANT_NAME_MAX);
     const safeEmail = participantEmail?.slice(0, EMAIL_MAX) || null;
@@ -912,8 +965,12 @@ export async function action({ request, params, context }: ActionFunctionArgs) {
       });
     }
 
-    // Send confirmation email to participant if email provided
-    if (participantEmail && (await canEmailGuest())) {
+    // Sent before the organizer update, not alongside it: both draw on the
+    // same email quota, and the update's budget check must see this send
+    // already counted so the confirmation keeps priority near the limit.
+    const confirmParticipant = async () => {
+      // Send confirmation email to participant if email provided
+      if (!participantEmail || !(await canEmailGuest())) return;
       const cancelUrl = `${url.origin}/events/${eventId}?cancel_token=${encodeURIComponent(editTokenPlain)}`;
       const eventUrl = `${url.origin}/events/${eventId}`;
       const shiftPrefix = ((targetSlot as { shiftName?: string | null }).shiftName || "").trim();
@@ -973,8 +1030,8 @@ export async function action({ request, params, context }: ActionFunctionArgs) {
         result: emailResult,
         limits: getEmailLimits(emailResult.provider, env),
       });
-    }
-
+    };
+    await confirmParticipant();
     await notifyOrganizerOfSignup("signup", participantName, safeEmail, targetSlot, comment);
     return data({ success: true, signupAttemptId, message: `Thank you ${participantName}! Your spot has been confirmed.` });
   }
@@ -989,37 +1046,39 @@ export async function action({ request, params, context }: ActionFunctionArgs) {
       return data({ error: "Signup entry not found." }, { status: 404 });
     }
 
-    const adminOk = await requireAdmin();
-    const ownerOk = editToken ? await secretMatches(editToken, existing.editToken) : false;
+    // Both checks are pure hashing; neither waits on the other.
+    const [adminOk, ownerOk] = await Promise.all([
+      requireAdmin(),
+      editToken ? secretMatches(editToken, existing.editToken) : false,
+    ]);
 
     if (!adminOk && !ownerOk) {
       return data({ error: "Unauthorized to cancel this signup." }, { status: 403 });
     }
 
-    // History protection: guests can't rewrite a shift that already
-    // happened — dropping out mid-shift ("can't make it") stays allowed on
-    // purpose, organizers can always remove anyone. Policy unit-tested.
-    if (!adminOk) {
-      const [ownSlot] = existing.slotId
-        ? await db.select().from(eventSlots).where(eq(eventSlots.id, existing.slotId)).limit(1)
-        : [null];
-      if (ownerCancelBlocked(ownSlot ?? null, event, new Date())) {
-        return data(
-          { error: "That shift already happened — entries can't be removed.", closed: true },
-          { status: 410 }
-        );
-      }
-    }
-
+    // One slot read serves both the history check and the emails below.
     const [cancelledSlot] = existing.slotId
       ? await db.select().from(eventSlots).where(eq(eventSlots.id, existing.slotId)).limit(1)
       : [null];
+
+    // History protection: guests can't rewrite a shift that already
+    // happened — dropping out mid-shift ("can't make it") stays allowed on
+    // purpose, organizers can always remove anyone. Policy unit-tested.
+    if (!adminOk && ownerCancelBlocked(cancelledSlot ?? null, event, new Date())) {
+      return data(
+        { error: "That shift already happened — entries can't be removed.", closed: true },
+        { status: 410 }
+      );
+    }
+
     await db.delete(signups).where(eq(signups.id, signupId));
 
     // Organizer-initiated removal: notify the person by email (best-effort —
     // a failed send never fails the removal itself, sendEmail never throws).
     // Self-cancellations (owner via edit token / cancel link) stay silent.
-    if (adminOk) {
+    // Sent (and counted) before the organizer update, which shares its quota.
+    const notifyRemovedParticipant = async () => {
+      if (!adminOk) return;
       const removedEmail = (existing.participantEmail || "").trim();
       if (removedEmail && isValidEmail(removedEmail)) {
         const removedSlot = cancelledSlot;
@@ -1066,8 +1125,9 @@ export async function action({ request, params, context }: ActionFunctionArgs) {
           limits: getEmailLimits(removalResult.provider, env),
         });
       }
-    }
+    };
 
+    await notifyRemovedParticipant();
     await notifyOrganizerOfSignup("cancellation", existing.participantName, existing.participantEmail, cancelledSlot ?? null, signupComment(existing.customFields));
     return data({ success: true, message: "Signup cancelled." });
   }
@@ -1124,7 +1184,11 @@ export async function action({ request, params, context }: ActionFunctionArgs) {
       }
     }
 
-    const voteSlots = await db.select().from(eventSlots).where(eq(eventSlots.eventId, eventId));
+    // Options and existing votes are independent reads.
+    const [voteSlots, existingVotes] = await Promise.all([
+      db.select().from(eventSlots).where(eq(eventSlots.eventId, eventId)),
+      db.select().from(pollVotes).where(eq(pollVotes.eventId, eventId)),
+    ]);
     // Closed options are coerced to NO below (stale pages can't vote on
     // passed options); history rows are never rewritten.
     const { rejected: voteRejected, closedIds: closedVoteSlotIds } = voteCloseState({
@@ -1145,34 +1209,29 @@ export async function action({ request, params, context }: ActionFunctionArgs) {
     // storage, issuing a fresh token); otherwise a 409 asks for another name.
     const normName = participantName.trim().toLowerCase();
     const normEmail = (participantEmail || "").trim().toLowerCase();
-    const existingVotes = await db.select().from(pollVotes).where(eq(pollVotes.eventId, eventId));
 
-    const saveEntries = async (pollVoteId: string) => {
-      const submitted = new Map<string, string>();
-      for (const s of voteSlots) {
-        const resp = (formData.get(`slot_${s.id}`) as string) || "NO";
-        if (resp === "YES" || resp === "MAYBE") submitted.set(s.id, resp);
-      }
-      for (const [slotId, resp] of dropClosedResponses(submitted, closedVoteSlotIds)) {
-        await db.insert(pollVoteEntries).values({
-          id: generateInternalId(),
-          pollVoteId,
-          slotId,
-          response: resp,
-        });
-      }
-    };
+    const submitted = new Map<string, string>();
+    for (const s of voteSlots) {
+      const resp = (formData.get(`slot_${s.id}`) as string) || "NO";
+      if (resp === "YES" || resp === "MAYBE") submitted.set(s.id, resp);
+    }
+    const keptResponses = dropClosedResponses(submitted, closedVoteSlotIds);
+    // Statements, not awaited writes: each path below sends its update,
+    // delete and entry inserts to D1 as one batch.
+    const saveEntries = (pollVoteId: string) => entryInserts(db, pollVoteId, keptResponses);
 
     // Responses already recorded on now-closed options are history — an
     // update of the open options deletes and rewrites open entries only.
-    const deleteOpenEntries = async (pollVoteId: string) => {
+    const deleteOpenEntries = (pollVoteId: string): BatchItem<"sqlite">[] => {
       const openIds = voteSlots.filter((s) => !closedVoteSlotIds.has(s.id)).map((s) => s.id);
-      if (openIds.length === 0) return;
-      await db
-        .delete(pollVoteEntries)
-        .where(
-          and(eq(pollVoteEntries.pollVoteId, pollVoteId), inArray(pollVoteEntries.slotId, openIds))
-        );
+      if (openIds.length === 0) return [];
+      return [
+        db
+          .delete(pollVoteEntries)
+          .where(
+            and(eq(pollVoteEntries.pollVoteId, pollVoteId), inArray(pollVoteEntries.slotId, openIds))
+          ),
+      ];
     };
 
     const takenMessage = reclaimViaEmailMessage;
@@ -1188,12 +1247,14 @@ export async function action({ request, params, context }: ActionFunctionArgs) {
         if (renamedIntoTaken) {
           return data({ error: takenMessage }, { status: 409 });
         }
-        await db
-          .update(pollVotes)
-          .set({ participantName, participantEmail, updatedAt: now })
-          .where(eq(pollVotes.id, ownVote.id));
-        await deleteOpenEntries(ownVote.id);
-        await saveEntries(ownVote.id);
+        await runBatch(db, [
+          db
+            .update(pollVotes)
+            .set({ participantName, participantEmail, updatedAt: now })
+            .where(eq(pollVotes.id, ownVote.id)),
+          ...deleteOpenEntries(ownVote.id),
+          ...saveEntries(ownVote.id),
+        ]);
 
         return data({
           success: true,
@@ -1218,17 +1279,20 @@ export async function action({ request, params, context }: ActionFunctionArgs) {
       }
       if (reclaimable) {
         const reclaimToken = generateSecretToken();
-        await db
-          .update(pollVotes)
-          .set({
-            participantName,
-            participantEmail,
-            editToken: await hashSecretForStorage(reclaimToken),
-            updatedAt: now,
-          })
-          .where(eq(pollVotes.id, nameCollision.id));
-        await deleteOpenEntries(nameCollision.id);
-        await saveEntries(nameCollision.id);
+        const reclaimTokenStored = await hashSecretForStorage(reclaimToken);
+        await runBatch(db, [
+          db
+            .update(pollVotes)
+            .set({
+              participantName,
+              participantEmail,
+              editToken: reclaimTokenStored,
+              updatedAt: now,
+            })
+            .where(eq(pollVotes.id, nameCollision.id)),
+          ...deleteOpenEntries(nameCollision.id),
+          ...saveEntries(nameCollision.id),
+        ]);
 
         return data({
           success: true,
@@ -1246,28 +1310,38 @@ export async function action({ request, params, context }: ActionFunctionArgs) {
 
     const voteId = generateInternalId();
     const editTokenPlain = generateSecretToken();
+    const editTokenStored = await hashSecretForStorage(editTokenPlain);
 
-    await db.insert(pollVotes).values({
+    // The vote, its entries and the consensus read below go to D1 as one
+    // batch. The read runs last inside it, so it sees the vote just saved.
+    const voteInsert = db.insert(pollVotes).values({
       id: voteId,
       eventId,
       participantName,
       participantEmail,
-      editToken: await hashSecretForStorage(editTokenPlain),
+      editToken: editTokenStored,
       createdAt: now,
       updatedAt: now,
     });
-
-    await saveEntries(voteId);
+    const consensusRead =
+      voteSlots.length > 0
+        ? db
+            .select({ slotId: pollVoteEntries.slotId, response: pollVoteEntries.response })
+            .from(pollVoteEntries)
+            .where(inArray(pollVoteEntries.slotId, voteSlots.map((s) => s.id)))
+        : null;
+    let allEntries: Array<{ slotId: string; response: string }> = [];
+    if (consensusRead) {
+      const results = await db.batch([voteInsert, ...saveEntries(voteId), consensusRead]);
+      allEntries = results[results.length - 1] as typeof allEntries;
+    } else {
+      await runBatch(db, [voteInsert, ...saveEntries(voteId)]);
+    }
 
     // Current consensus: frontrunner option by YES count (MAYBE breaks ties),
     // computed over all votes including the one just saved.
     let consensusLine = "";
     if (voteSlots.length > 0) {
-      const slotIds = voteSlots.map((s) => s.id);
-      const allEntries = await db
-        .select({ slotId: pollVoteEntries.slotId, response: pollVoteEntries.response })
-        .from(pollVoteEntries)
-        .where(inArray(pollVoteEntries.slotId, slotIds));
       const yesCount = new Map<string, number>();
       const maybeCount = new Map<string, number>();
       for (const e of allEntries) {
@@ -1426,7 +1500,11 @@ export async function action({ request, params, context }: ActionFunctionArgs) {
       }
     }
 
-    const existingSlots = await db.select().from(eventSlots).where(eq(eventSlots.eventId, eventId));
+    // Options and (for a named proposer) existing votes are independent reads.
+    const [existingSlots, existingVotes] = await Promise.all([
+      db.select().from(eventSlots).where(eq(eventSlots.eventId, eventId)),
+      participantName ? db.select().from(pollVotes).where(eq(pollVotes.eventId, eventId)) : [],
+    ]);
     const proposeNow = new Date();
     // Server-side reopen gate (unit-tested): a manually closed poll stays
     // shut; a passed poll reopens through this action for organizers only —
@@ -1494,7 +1572,6 @@ export async function action({ request, params, context }: ActionFunctionArgs) {
     // otherwise a fresh vote. The new slot is always YES for the proposer.
     const normName = participantName.trim().toLowerCase();
     const normEmail = (participantEmail || "").trim().toLowerCase();
-    const existingVotes = await db.select().from(pollVotes).where(eq(pollVotes.eventId, eventId));
     const clientVoteId = cleanText(formData.get("clientVoteId"), 32) || null;
     const clientVoteToken = cleanText(formData.get("clientVoteToken"), 128) || null;
     const takenMessage = reclaimViaEmailMessage;
@@ -1512,38 +1589,30 @@ export async function action({ request, params, context }: ActionFunctionArgs) {
       }
     }
 
-    const saveAccompanying = async (pollVoteId: string) => {
-      for (const [slotId, resp] of dropClosedResponses(submittedResponses, closedProposeSlotIds)) {
-        await db.insert(pollVoteEntries).values({
-          id: generateInternalId(),
-          pollVoteId,
-          slotId,
-          response: resp,
-        });
-      }
-    };
-    const addYesForNewSlot = async (pollVoteId: string) => {
-      await db.insert(pollVoteEntries).values({
-        id: generateInternalId(),
-        pollVoteId,
-        slotId: newSlotId,
-        response: "YES",
-      });
-    };
+    // These build statements rather than awaiting writes: each path below
+    // sends its vote update and entry changes to D1 as one batch.
+    const keptAccompanying = dropClosedResponses(submittedResponses, closedProposeSlotIds);
+    const saveAccompanying = (pollVoteId: string) => entryInserts(db, pollVoteId, keptAccompanying);
+    const addYesForNewSlot = (pollVoteId: string) =>
+      entryInserts(db, pollVoteId, new Map([[newSlotId, "YES"]]));
     // Replace-all path used when the client sent its current matrix: keeps
     // the proposer's on-screen selections alongside the new YES. Entries on
     // now-closed options are history and survive the replace.
-    const replaceAllWithProposal = async (pollVoteId: string) => {
+    const replaceAllWithProposal = (pollVoteId: string): BatchItem<"sqlite">[] => {
       const openIds = existingSlots.filter((s) => !closedProposeSlotIds.has(s.id)).map((s) => s.id);
-      if (openIds.length > 0) {
-        await db
-          .delete(pollVoteEntries)
-          .where(
-            and(eq(pollVoteEntries.pollVoteId, pollVoteId), inArray(pollVoteEntries.slotId, openIds))
-          );
-      }
-      await saveAccompanying(pollVoteId);
-      await addYesForNewSlot(pollVoteId);
+      return [
+        ...(openIds.length > 0
+          ? [
+              db
+                .delete(pollVoteEntries)
+                .where(
+                  and(eq(pollVoteEntries.pollVoteId, pollVoteId), inArray(pollVoteEntries.slotId, openIds))
+                ),
+            ]
+          : []),
+        ...saveAccompanying(pollVoteId),
+        ...addYesForNewSlot(pollVoteId),
+      ];
     };
 
     const proposedWhen =
@@ -1587,15 +1656,13 @@ export async function action({ request, params, context }: ActionFunctionArgs) {
         if (renamedIntoTaken) {
           return data({ error: takenMessage }, { status: 409 });
         }
-        await db
-          .update(pollVotes)
-          .set({ participantName, participantEmail, updatedAt: now })
-          .where(eq(pollVotes.id, ownVote.id));
-        if (hasSubmittedMatrix) {
-          await replaceAllWithProposal(ownVote.id);
-        } else {
-          await addYesForNewSlot(ownVote.id);
-        }
+        await runBatch(db, [
+          db
+            .update(pollVotes)
+            .set({ participantName, participantEmail, updatedAt: now })
+            .where(eq(pollVotes.id, ownVote.id)),
+          ...(hasSubmittedMatrix ? replaceAllWithProposal(ownVote.id) : addYesForNewSlot(ownVote.id)),
+        ]);
         await notifyProposer();
         return data({
           success: true,
@@ -1620,20 +1687,21 @@ export async function action({ request, params, context }: ActionFunctionArgs) {
       }
       if (reclaimable) {
         const reclaimToken = generateSecretToken();
-        await db
-          .update(pollVotes)
-          .set({
-            participantName,
-            participantEmail,
-            editToken: await hashSecretForStorage(reclaimToken),
-            updatedAt: now,
-          })
-          .where(eq(pollVotes.id, nameCollision.id));
-        if (hasSubmittedMatrix) {
-          await replaceAllWithProposal(nameCollision.id);
-        } else {
-          await addYesForNewSlot(nameCollision.id);
-        }
+        const reclaimTokenStored = await hashSecretForStorage(reclaimToken);
+        await runBatch(db, [
+          db
+            .update(pollVotes)
+            .set({
+              participantName,
+              participantEmail,
+              editToken: reclaimTokenStored,
+              updatedAt: now,
+            })
+            .where(eq(pollVotes.id, nameCollision.id)),
+          ...(hasSubmittedMatrix
+            ? replaceAllWithProposal(nameCollision.id)
+            : addYesForNewSlot(nameCollision.id)),
+        ]);
         await notifyProposer();
         return data({
           success: true,
@@ -1652,17 +1720,20 @@ export async function action({ request, params, context }: ActionFunctionArgs) {
 
     const voteId = generateInternalId();
     const editTokenPlain = generateSecretToken();
-    await db.insert(pollVotes).values({
-      id: voteId,
-      eventId,
-      participantName,
-      participantEmail,
-      editToken: await hashSecretForStorage(editTokenPlain),
-      createdAt: now,
-      updatedAt: now,
-    });
-    await saveAccompanying(voteId);
-    await addYesForNewSlot(voteId);
+    const editTokenStored = await hashSecretForStorage(editTokenPlain);
+    await runBatch(db, [
+      db.insert(pollVotes).values({
+        id: voteId,
+        eventId,
+        participantName,
+        participantEmail,
+        editToken: editTokenStored,
+        createdAt: now,
+        updatedAt: now,
+      }),
+      ...saveAccompanying(voteId),
+      ...addYesForNewSlot(voteId),
+    ]);
     await notifyProposer();
 
     return data({
@@ -1682,8 +1753,11 @@ export async function action({ request, params, context }: ActionFunctionArgs) {
     if (!existing || existing.eventId !== eventId) {
       return data({ error: "Vote not found." }, { status: 404 });
     }
-    const adminOk = await requireAdmin();
-    const ownerOk = editToken ? await secretMatches(editToken, existing.editToken) : false;
+    // Both checks are pure hashing; neither waits on the other.
+    const [adminOk, ownerOk] = await Promise.all([
+      requireAdmin(),
+      editToken ? secretMatches(editToken, existing.editToken) : false,
+    ]);
     if (!adminOk && !ownerOk) {
       return data({ error: "Unauthorized." }, { status: 403 });
     }
@@ -1698,8 +1772,10 @@ export async function action({ request, params, context }: ActionFunctionArgs) {
         );
       }
     }
-    await db.delete(pollVoteEntries).where(eq(pollVoteEntries.pollVoteId, voteId));
-    await db.delete(pollVotes).where(eq(pollVotes.id, voteId));
+    await db.batch([
+      db.delete(pollVoteEntries).where(eq(pollVoteEntries.pollVoteId, voteId)),
+      db.delete(pollVotes).where(eq(pollVotes.id, voteId)),
+    ]);
 
     // Organizer-initiated removal: notify the voter by email (best-effort).
     // Self-removals (owner via edit token / cancel link) stay silent.
@@ -1801,6 +1877,9 @@ export async function action({ request, params, context }: ActionFunctionArgs) {
     });
     const voters = await db.select().from(pollVotes).where(eq(pollVotes.eventId, eventId));
     const notified = new Set<string>();
+    // Deliberately one send at a time: a poll can have hundreds of voters and
+    // the email provider rate-limits per second (sendEmail never throws, so a
+    // burst would silently drop notices instead of failing loudly).
     for (const v of voters) {
       const voterEmail = (v.participantEmail || "").trim();
       if (!voterEmail || !isValidEmail(voterEmail)) continue;
@@ -1889,6 +1968,9 @@ export async function action({ request, params, context }: ActionFunctionArgs) {
     // become multi-day (or stop being one) here. Slots are reconciled rather
     // than rebuilt, so days that survive keep their tasks and sign-ups.
     let dateMessage = "";
+    // Every write below waits until validation passes, then goes to D1 as one
+    // batch with the event update: one round trip, all or nothing.
+    const dateWrites: BatchItem<"sqlite">[] = [];
     if (event.type === "SIGNUP_SHEET" && formData.get("dateMode") !== null) {
       const specResult = parseDateSpec(
         (name) => formData.get(name) as string | null,
@@ -1940,6 +2022,13 @@ export async function action({ request, params, context }: ActionFunctionArgs) {
         const day = templateDayFor(currentDates, date);
         return day ? slotsByDay.get(day) ?? [] : [];
       };
+      // Confirmed sign-ups, read at most once for both booked-day checks.
+      let bookedRows: Promise<Array<{ slotId: string }>> | null = null;
+      const bookedSignups = () =>
+        (bookedRows ??= db
+          .select({ slotId: signups.slotId })
+          .from(signups)
+          .where(and(eq(signups.eventId, eventId), eq(signups.status, "CONFIRMED"))));
 
       // Collapsing a multi-day sheet to one day keeps the day the organizer
       // picked when it is one of the sheet's days. Otherwise the first day is
@@ -1952,12 +2041,7 @@ export async function action({ request, params, context }: ActionFunctionArgs) {
         singleDay = eventDate && currentDates.includes(eventDate) ? eventDate : currentDates[0];
         if (singleDay && singleDay !== eventDate) {
           const dayIds = (slotsByDay.get(singleDay) ?? []).map((s) => s.id);
-          const booked = (
-            await db
-              .select({ slotId: signups.slotId })
-              .from(signups)
-              .where(and(eq(signups.eventId, eventId), eq(signups.status, "CONFIRMED")))
-          ).some((b) => dayIds.includes(b.slotId));
+          const booked = (await bookedSignups()).some((b) => dayIds.includes(b.slotId));
           if (booked) {
             return data(
               {
@@ -1977,12 +2061,7 @@ export async function action({ request, params, context }: ActionFunctionArgs) {
         const droppedSlotIds = existing
           .filter((s) => droppedDates.includes(dayOf(s)))
           .map((s) => s.id);
-        const booked = droppedSlotIds.length
-          ? await db
-              .select({ slotId: signups.slotId })
-              .from(signups)
-              .where(and(eq(signups.eventId, eventId), eq(signups.status, "CONFIRMED")))
-          : [];
+        const booked = droppedSlotIds.length ? await bookedSignups() : [];
         const bookedDays = [
           ...new Set(
             booked
@@ -2045,7 +2124,7 @@ export async function action({ request, params, context }: ActionFunctionArgs) {
           .filter((s) => droppedDates.includes(dayOf(s)))
           .map((s) => s.id);
         for (let i = 0; i < ids.length; i += 20) {
-          await db.delete(eventSlots).where(inArray(eventSlots.id, ids.slice(i, i + 20)));
+          dateWrites.push(db.delete(eventSlots).where(inArray(eventSlots.id, ids.slice(i, i + 20))));
         }
       }
 
@@ -2053,20 +2132,24 @@ export async function action({ request, params, context }: ActionFunctionArgs) {
         // Back to a one-day sheet: the surviving slots lose their per-day date
         // and read from events.event_date again, exactly like a sheet that
         // never used this feature.
-        await db
-          .update(eventSlots)
-          .set({ slotDate: null })
-          .where(eq(eventSlots.eventId, eventId));
+        dateWrites.push(
+          db
+            .update(eventSlots)
+            .set({ slotDate: null })
+            .where(eq(eventSlots.eventId, eventId))
+        );
       } else {
         // A sheet that was single-day until now: its undated slots are the day
         // they were read as above, so write that day down (unless it was
         // dropped, in which case they are already gone).
         const undatedDay = event.eventDate || (eventDate as string);
         if (keptDates.has(undatedDay)) {
-          await db
-            .update(eventSlots)
-            .set({ slotDate: undatedDay })
-            .where(and(eq(eventSlots.eventId, eventId), isNull(eventSlots.slotDate)));
+          dateWrites.push(
+            db
+              .update(eventSlots)
+              .set({ slotDate: undatedDay })
+              .where(and(eq(eventSlots.eventId, eventId), isNull(eventSlots.slotDate)))
+          );
         }
         if (addedDates.length > 0) {
           let order = existing.reduce((m, s) => Math.max(m, s.displayOrder ?? 0), -1);
@@ -2085,7 +2168,7 @@ export async function action({ request, params, context }: ActionFunctionArgs) {
           );
           // D1 caps a statement at 100 bound variables; 9 columns per row.
           for (let i = 0; i < rows.length; i += 10) {
-            await db.insert(eventSlots).values(rows.slice(i, i + 10));
+            dateWrites.push(db.insert(eventSlots).values(rows.slice(i, i + 10)));
           }
         }
       }
@@ -2097,16 +2180,21 @@ export async function action({ request, params, context }: ActionFunctionArgs) {
           ? ` ${added ? `Added ${added} day${added === 1 ? "" : "s"}.` : ""}${removed ? ` Removed ${removed} day${removed === 1 ? "" : "s"}.` : ""}`
           : "";
 
-      await db
-        .update(events)
-        .set({ settings: writeDateSpec(event.settings, spec) })
-        .where(eq(events.id, eventId));
+      dateWrites.push(
+        db
+          .update(events)
+          .set({ settings: writeDateSpec(event.settings, spec) })
+          .where(eq(events.id, eventId))
+      );
     }
 
-    await db
-      .update(events)
-      .set({ title, description, eventDate, location, organizerName, timezone, updatedAt: now })
-      .where(eq(events.id, eventId));
+    await runBatch(db, [
+      ...dateWrites,
+      db
+        .update(events)
+        .set({ title, description, eventDate, location, organizerName, timezone, updatedAt: now })
+        .where(eq(events.id, eventId)),
+    ]);
 
     return data({ success: true, message: `Event details updated.${dateMessage}` });
   }
@@ -2250,10 +2338,9 @@ export async function action({ request, params, context }: ActionFunctionArgs) {
       endTime,
       displayOrder: ++order,
     }));
-    // D1 caps a statement at 100 bound variables; 9 columns per row.
-    for (let i = 0; i < rows.length; i += 10) {
-      await db.insert(eventSlots).values(rows.slice(i, i + 10));
-    }
+    // D1 caps a statement at 100 bound variables; 9 columns per row. All
+    // chunks go in one batch (one round trip).
+    await runBatch(db, chunked(rows, 10).map((chunk) => db.insert(eventSlots).values(chunk)));
 
     return data({
       success: true,
@@ -2373,9 +2460,7 @@ export async function action({ request, params, context }: ActionFunctionArgs) {
         endTime,
         displayOrder: ++order,
       }));
-      for (let i = 0; i < rows.length; i += 10) {
-        await db.insert(eventSlots).values(rows.slice(i, i + 10));
-      }
+      await runBatch(db, chunked(rows, 10).map((chunk) => db.insert(eventSlots).values(chunk)));
       return data({
         success: true,
         message: days.length > 1 ? `Shift added on ${days.length} days.` : "Shift added.",
@@ -2403,9 +2488,7 @@ export async function action({ request, params, context }: ActionFunctionArgs) {
         );
       }
       const ids = inShift.map((v) => v.id);
-      for (let i = 0; i < ids.length; i += 20) {
-        await db.delete(eventSlots).where(inArray(eventSlots.id, ids.slice(i, i + 20)));
-      }
+      await runBatch(db, chunked(ids, 20).map((chunk) => db.delete(eventSlots).where(inArray(eventSlots.id, chunk))));
       const days = daysOf(inShift).length;
       return data({
         success: true,
@@ -2436,9 +2519,7 @@ export async function action({ request, params, context }: ActionFunctionArgs) {
         );
       }
       const ids = victims.map((v) => v.id);
-      for (let i = 0; i < ids.length; i += 20) {
-        await db.delete(eventSlots).where(inArray(eventSlots.id, ids.slice(i, i + 20)));
-      }
+      await runBatch(db, chunked(ids, 20).map((chunk) => db.delete(eventSlots).where(inArray(eventSlots.id, chunk))));
       const days = daysOf(victims).length;
       return data({
         success: true,
@@ -2539,14 +2620,15 @@ export async function action({ request, params, context }: ActionFunctionArgs) {
       }
     }
 
-    for (const u of updates) {
-      for (let j = 0; j < u.ids.length; j += 20) {
-        await db
+    // Every task update and new-task insert goes to D1 as one batch.
+    const shiftWrites: BatchItem<"sqlite">[] = updates.flatMap((u) =>
+      chunked(u.ids, 20).map((chunk) =>
+        db
           .update(eventSlots)
           .set({ title: u.title, shiftName, startTime, endTime, capacity: u.capacity })
-          .where(inArray(eventSlots.id, u.ids.slice(j, j + 20)));
-      }
-    }
+          .where(inArray(eventSlots.id, chunk))
+      )
+    );
 
     if (added.length > 0) {
       let order = allSlots.reduce((m, s) => Math.max(m, s.displayOrder ?? 0), -1);
@@ -2564,10 +2646,9 @@ export async function action({ request, params, context }: ActionFunctionArgs) {
         }))
       );
       // D1 caps a statement at 100 bound variables; 9 columns per row.
-      for (let i = 0; i < rows.length; i += 10) {
-        await db.insert(eventSlots).values(rows.slice(i, i + 10));
-      }
+      shiftWrites.push(...chunked(rows, 10).map((chunk) => db.insert(eventSlots).values(chunk)));
     }
+    await runBatch(db, shiftWrites);
 
     const dayCount = days.length;
     const addedNote = added.length
@@ -2687,17 +2768,20 @@ export async function action({ request, params, context }: ActionFunctionArgs) {
     }
     if (isPoll && isFinalized) return finalizedError();
 
-    // Remove dependent rows first (D1/cascade safety)
-    await db.delete(signups).where(eq(signups.slotId, slotId));
-    await db.delete(pollVoteEntries).where(eq(pollVoteEntries.slotId, slotId));
-    await db.delete(eventSlots).where(eq(eventSlots.id, slotId));
-
-    if (event.winningSlotId === slotId) {
-      await db
-        .update(events)
-        .set({ winningSlotId: null, status: "OPEN", updatedAt: now })
-        .where(eq(events.id, eventId));
-    }
+    // Remove dependent rows first (D1/cascade safety); one batch, in order.
+    await runBatch(db, [
+      db.delete(signups).where(eq(signups.slotId, slotId)),
+      db.delete(pollVoteEntries).where(eq(pollVoteEntries.slotId, slotId)),
+      db.delete(eventSlots).where(eq(eventSlots.id, slotId)),
+      ...(event.winningSlotId === slotId
+        ? [
+            db
+              .update(events)
+              .set({ winningSlotId: null, status: "OPEN", updatedAt: now })
+              .where(eq(events.id, eventId)),
+          ]
+        : []),
+    ]);
 
     return data({ success: true, message: "Option deleted." });
   }
@@ -2712,13 +2796,16 @@ export async function action({ request, params, context }: ActionFunctionArgs) {
     // variable per ID would pass D1's 100-variable cap and fail the delete.
     const slotIdsOf = db.select({ id: eventSlots.id }).from(eventSlots).where(eq(eventSlots.eventId, eventId));
     const voteIdsOf = db.select({ id: pollVotes.id }).from(pollVotes).where(eq(pollVotes.eventId, eventId));
-    await db.delete(signups).where(inArray(signups.slotId, slotIdsOf));
-    await db.delete(pollVoteEntries).where(inArray(pollVoteEntries.slotId, slotIdsOf));
-    await db.delete(pollVoteEntries).where(inArray(pollVoteEntries.pollVoteId, voteIdsOf));
-    await db.delete(signups).where(eq(signups.eventId, eventId));
-    await db.delete(pollVotes).where(eq(pollVotes.eventId, eventId));
-    await db.delete(eventSlots).where(eq(eventSlots.eventId, eventId));
-    await db.delete(events).where(eq(events.id, eventId));
+    // One batch: a single round trip, children before parents, all or nothing.
+    await db.batch([
+      db.delete(signups).where(inArray(signups.slotId, slotIdsOf)),
+      db.delete(pollVoteEntries).where(inArray(pollVoteEntries.slotId, slotIdsOf)),
+      db.delete(pollVoteEntries).where(inArray(pollVoteEntries.pollVoteId, voteIdsOf)),
+      db.delete(signups).where(eq(signups.eventId, eventId)),
+      db.delete(pollVotes).where(eq(pollVotes.eventId, eventId)),
+      db.delete(eventSlots).where(eq(eventSlots.eventId, eventId)),
+      db.delete(events).where(eq(events.id, eventId)),
+    ]);
     const headers = new Headers();
     headers.append("Set-Cookie", buildExpiredAdminCookie(eventId));
     return redirect("/?deleted=1", { headers });
@@ -2730,33 +2817,32 @@ export async function action({ request, params, context }: ActionFunctionArgs) {
     if (!cancelToken) {
       return data({ error: "Missing cancellation token." }, { status: 400 });
     }
-    const candidates = await db.select().from(signups).where(eq(signups.eventId, eventId));
-    for (const s of candidates) {
-      if (await secretMatches(cancelToken, s.editToken)) {
-        // History protection, same as cancel_signup: a shift that already
-        // happened keeps its record.
-        const [cancelSlot] = s.slotId
-          ? await db.select().from(eventSlots).where(eq(eventSlots.id, s.slotId)).limit(1)
-          : [null];
-        if (cancelSlot && isSlotPast(cancelSlot, event.eventDate, event.timezone, new Date())) {
-          return redirect(`/events/${eventId}?cancel_closed=1`);
-        }
-        await db.delete(signups).where(eq(signups.id, s.id));
-        await notifyOrganizerOfSignup("cancellation", s.participantName, s.participantEmail, cancelSlot ?? null, signupComment(s.customFields));
-        return redirect(`/events/${eventId}?cancelled=1`);
+    const match = await findByCancelToken(db, eventId, cancelToken);
+    if (match?.kind === "signup") {
+      const s = match.signup;
+      // History protection, same as cancel_signup: a shift that already
+      // happened keeps its record.
+      const [cancelSlot] = s.slotId
+        ? await db.select().from(eventSlots).where(eq(eventSlots.id, s.slotId)).limit(1)
+        : [null];
+      if (cancelSlot && isSlotPast(cancelSlot, event.eventDate, event.timezone, new Date())) {
+        return redirect(`/events/${eventId}?cancel_closed=1`);
       }
+      await db.delete(signups).where(eq(signups.id, s.id));
+      await notifyOrganizerOfSignup("cancellation", s.participantName, s.participantEmail, cancelSlot ?? null, signupComment(s.customFields));
+      return redirect(`/events/${eventId}?cancelled=1`);
     }
-    const voteCandidates = await db.select().from(pollVotes).where(eq(pollVotes.eventId, eventId));
-    for (const v of voteCandidates) {
-      if (await secretMatches(cancelToken, v.editToken)) {
-        const voteSlots = await db.select().from(eventSlots).where(eq(eventSlots.eventId, eventId));
-        if (isEventClosed(event, voteSlots, new Date())) {
-          return redirect(`/events/${eventId}?cancel_closed=1`);
-        }
-        await db.delete(pollVoteEntries).where(eq(pollVoteEntries.pollVoteId, v.id));
-        await db.delete(pollVotes).where(eq(pollVotes.id, v.id));
-        return redirect(`/events/${eventId}?cancelled=1`);
+    if (match?.kind === "vote") {
+      const v = match.vote;
+      const voteSlots = await db.select().from(eventSlots).where(eq(eventSlots.eventId, eventId));
+      if (isEventClosed(event, voteSlots, new Date())) {
+        return redirect(`/events/${eventId}?cancel_closed=1`);
       }
+      await db.batch([
+        db.delete(pollVoteEntries).where(eq(pollVoteEntries.pollVoteId, v.id)),
+        db.delete(pollVotes).where(eq(pollVotes.id, v.id)),
+      ]);
+      return redirect(`/events/${eventId}?cancelled=1`);
     }
     return redirect(`/events/${eventId}?cancel_error=1`);
   }

@@ -136,13 +136,35 @@ export async function pruneExpiredEvents(
   // hundreds, well past D1's 100-variable cap.
   const slotIdsOf = db.select({ id: eventSlots.id }).from(eventSlots).where(inArray(eventSlots.eventId, ids));
   const voteIdsOf = db.select({ id: pollVotes.id }).from(pollVotes).where(inArray(pollVotes.eventId, ids));
-  await db.delete(signups).where(inArray(signups.slotId, slotIdsOf));
-  await db.delete(pollVoteEntries).where(inArray(pollVoteEntries.slotId, slotIdsOf));
-  // Signups/votes keyed only by event (defensive; slot deletes cover most).
-  await db.delete(signups).where(inArray(signups.eventId, ids));
-  await db.delete(pollVoteEntries).where(inArray(pollVoteEntries.pollVoteId, voteIdsOf));
-  await db.delete(pollVotes).where(inArray(pollVotes.eventId, ids));
-  await db.delete(eventSlots).where(inArray(eventSlots.eventId, ids));
-  await db.delete(events).where(inArray(events.id, ids));
+  // One batch: a single D1 round trip instead of seven, applied atomically
+  // and still in child-before-parent order.
+  await db.batch([
+    db.delete(signups).where(inArray(signups.slotId, slotIdsOf)),
+    db.delete(pollVoteEntries).where(inArray(pollVoteEntries.slotId, slotIdsOf)),
+    // Signups/votes keyed only by event (defensive; slot deletes cover most).
+    db.delete(signups).where(inArray(signups.eventId, ids)),
+    db.delete(pollVoteEntries).where(inArray(pollVoteEntries.pollVoteId, voteIdsOf)),
+    db.delete(pollVotes).where(inArray(pollVotes.eventId, ids)),
+    db.delete(eventSlots).where(inArray(eventSlots.eventId, ids)),
+    db.delete(events).where(inArray(events.id, ids)),
+  ]);
   return ids.length;
+}
+
+/**
+ * Run the best-effort prune alongside the caller's event read instead of
+ * before it. Pruning never fails the read, and an event the prune is about to
+ * delete is already past its retention window, so the caller's `isExpired`
+ * check rejects it either way — the two need no ordering.
+ */
+export async function withConcurrentPrune<T>(
+  db: any,
+  retentionDays: number,
+  read: Promise<T>
+): Promise<T> {
+  const [, result] = await Promise.all([
+    pruneExpiredEvents(db, new Date(), retentionDays).catch(() => 0),
+    read,
+  ]);
+  return result;
 }

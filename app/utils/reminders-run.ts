@@ -136,11 +136,8 @@ async function sendOrganizer(
   const { date, kind, legacyKinds = [] } = opts;
   const dryRun = opts.dryRun ?? false;
   if (dryRun) return "dry-run";
-  if (await isReminderSent(db, target.event.id, date, kind)) return "already-sent";
-  for (const legacy of legacyKinds) {
-    // eslint-disable-next-line no-await-in-loop
-    if (await isReminderSent(db, target.event.id, date, legacy)) return "already-sent";
-  }
+  // The current kind and its legacy names in one query, not one each.
+  if (await isReminderSent(db, target.event.id, date, [kind, ...legacyKinds])) return "already-sent";
   const to = (target.event.organizerEmail || "").trim();
   if (!to || !isValidEmail(to)) return "skipped";
   const result = await sendEmail({ ...ctx.emailBase, to, subject: built.subject, html: built.html });
@@ -282,11 +279,15 @@ export async function runScheduledReminders(
 
   const reports: EventReport[] = [];
   const seen = new Set<string>();
-  for (const offset of [0, 1, 2]) {
-    const date = addDaysIso(todayUtc, offset);
-    if (!date) continue;
-    // eslint-disable-next-line no-await-in-loop
-    const targets = await collectReminderTargets(db, date, retentionDays);
+  // The three scan dates are independent reads: collect them together, then
+  // send in date order so the dedupe below keeps the earliest occurrence.
+  const scanDates = [0, 1, 2]
+    .map((offset) => addDaysIso(todayUtc, offset))
+    .filter((d): d is string => Boolean(d));
+  const targetsByDate = await Promise.all(
+    scanDates.map((date) => collectReminderTargets(db, date, retentionDays))
+  );
+  for (const targets of targetsByDate) {
     for (const target of targets) {
       // A multi-day sheet matches several scan dates — one target per
       // occurrence — so dedupe on event + day, not the event alone.

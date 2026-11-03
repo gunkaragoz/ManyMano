@@ -5,8 +5,8 @@ import { getDb, events } from "~/db";
 import {
   isExpired,
   latestSlotDate,
-  pruneExpiredEvents,
   resolveRetentionDays,
+  withConcurrentPrune,
 } from "~/utils/retention";
 import { getSiteConfig } from "~/utils/site";
 import { escapeHtml } from "~/utils/sanitize";
@@ -28,15 +28,15 @@ export async function loader({ params, request, context }: LoaderFunctionArgs) {
   }
 
   const retentionDays = resolveRetentionDays(env);
-  try {
-    await pruneExpiredEvents(db, new Date(), retentionDays);
-  } catch {}
-
-  const [event] = await db
-    .select({ id: events.id, type: events.type, title: events.title, createdAt: events.createdAt })
-    .from(events)
-    .where(eq(events.id, eventId))
-    .limit(1);
+  const [event] = await withConcurrentPrune(
+    db,
+    retentionDays,
+    db
+      .select({ id: events.id, type: events.type, title: events.title, createdAt: events.createdAt })
+      .from(events)
+      .where(eq(events.id, eventId))
+      .limit(1)
+  );
   if (!event) {
     throw new Response("Event not found", { status: 404 });
   }

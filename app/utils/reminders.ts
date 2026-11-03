@@ -36,7 +36,7 @@ import {
 } from "~/db";
 import { buildGoogleCalendarUrl, effectiveDateForSlot, formatLongDateLabel, parseTimeString } from "./calendar";
 import { zonedWallTimeToUtc } from "./timezones";
-import { isExpired, latestSlotDate, RETENTION_DAYS } from "./retention";
+import { isExpired, RETENTION_DAYS } from "./retention";
 import { isValidEmail } from "./validation";
 import { escapeHtml, locationHtml } from "./sanitize";
 import { emailFooter } from "./email";
@@ -234,61 +234,102 @@ function toEventInfo(e: typeof events.$inferSelect): ReminderEventInfo {
  * Expired events are skipped. Never throws for a missing reminder_sends
  * table — dedupe is checked separately so a pre-migration DB still sends.
  */
+function groupBy<T>(items: T[], keyOf: (item: T) => string): Map<string, T[]> {
+  const groups = new Map<string, T[]>();
+  for (const item of items) {
+    const key = keyOf(item);
+    const list = groups.get(key);
+    if (list) list.push(item);
+    else groups.set(key, [item]);
+  }
+  return groups;
+}
+
+function chunk<T>(items: T[], size: number): T[][] {
+  const chunks: T[][] = [];
+  for (let i = 0; i < items.length; i += size) chunks.push(items.slice(i, i + size));
+  return chunks;
+}
+
+/** Latest "YYYY-MM-DD" slot date, or null — latestSlotDate() without the query. */
+function latestDateOf(slots: Array<{ slotDate: string | null }>): string | null {
+  let latest: string | null = null;
+  for (const s of slots) if (s.slotDate && (!latest || s.slotDate > latest)) latest = s.slotDate;
+  return latest;
+}
+
 export async function collectReminderTargets(
   db: AppDb,
   date: string,
   retentionDays: number = RETENTION_DAYS
 ): Promise<ReminderTarget[]> {
-  const targets: ReminderTarget[] = [];
-
   // 1. Sign-up sheets that have something on `date`: either the sheet's own
   // event_date (every sheet created before multi-day existed) or a slot dated
   // that day (multi-day / repeating sheets). Dateless sheets can't have a
   // day-before reminder.
   // One statement with two bound values, so no row limit can truncate the
   // list and no ID list can outgrow D1's 100-variable cap.
-  const sheets = await db
-    .select()
-    .from(events)
-    .where(
-      and(
-        eq(events.type, "SIGNUP_SHEET"),
-        or(
-          eq(events.eventDate, date),
-          inArray(
-            events.id,
-            db.select({ id: eventSlots.eventId }).from(eventSlots).where(eq(eventSlots.slotDate, date))
-          )
-        )
+  const sheetMatch = and(
+    eq(events.type, "SIGNUP_SHEET"),
+    or(
+      eq(events.eventDate, date),
+      inArray(
+        events.id,
+        db.select({ id: eventSlots.eventId }).from(eventSlots).where(eq(eventSlots.slotDate, date))
       )
-    );
-  for (const e of sheets) {
-    // A multi-day sheet is measured from its last date; only pay for that
-    // query once the sheet already looks expired by creation date.
-    if (
-      isExpired(e.createdAt, new Date(), retentionDays) &&
-      isExpired(e.createdAt, new Date(), retentionDays, await latestSlotDate(db, e))
     )
-      continue;
-    const allSlots = await db
+  );
+  const sheetIdsOf = db.select({ id: events.id }).from(events).where(sheetMatch);
+
+  // Every read is set-based and independent, so they run together: the
+  // matching sheets, all of their slots and confirmed sign-ups, and the
+  // finalized polls joined to their winning slot. (This used to issue two or
+  // three queries per event, one after another.)
+  const [sheets, sheetSlots, sheetSignups, finalized] = await Promise.all([
+    db.select().from(events).where(sheetMatch),
+    db
       .select()
       .from(eventSlots)
-      .where(eq(eventSlots.eventId, e.id))
-      .orderBy(eventSlots.displayOrder);
+      .where(inArray(eventSlots.eventId, sheetIdsOf))
+      .orderBy(eventSlots.displayOrder),
+    db
+      .select()
+      .from(signups)
+      .where(and(inArray(signups.eventId, sheetIdsOf), eq(signups.status, "CONFIRMED"))),
+    // 2. Finalized meeting polls with their winning option.
+    db
+      .select({ event: events, winning: eventSlots })
+      .from(events)
+      .innerJoin(
+        eventSlots,
+        and(eq(eventSlots.id, events.winningSlotId), eq(eventSlots.eventId, events.id))
+      )
+      .where(and(eq(events.type, "TIME_POLL"), eq(events.status, "FINALIZED")))
+      .limit(500),
+  ]);
+
+  const slotsByEvent = groupBy(sheetSlots, (s) => s.eventId);
+  const signupsBySlot = new Map<string, Array<{ name: string; email: string | null }>>();
+  for (const s of sheetSignups) {
+    const list = signupsBySlot.get(s.slotId) ?? [];
+    list.push({ name: s.participantName, email: s.participantEmail });
+    signupsBySlot.set(s.slotId, list);
+  }
+
+  const targets: ReminderTarget[] = [];
+  for (const e of sheets) {
+    const allSlots = slotsByEvent.get(e.id) ?? [];
+    // A multi-day sheet is measured from its last date (the same rule as
+    // latestSlotDate, computed from the slots already in hand).
+    if (
+      isExpired(e.createdAt, new Date(), retentionDays) &&
+      isExpired(e.createdAt, new Date(), retentionDays, latestDateOf(allSlots))
+    )
+      continue;
     // Only the slots that actually happen on `date`. On a single-day sheet
     // every slot resolves to the event date, so this keeps all of them.
     const slots = allSlots.filter((s) => effectiveDateForSlot(s, e.eventDate) === date);
     if (slots.length === 0) continue;
-    const eventSignups = await db
-      .select()
-      .from(signups)
-      .where(and(eq(signups.eventId, e.id), eq(signups.status, "CONFIRMED")));
-    const bySlot = new Map<string, Array<{ name: string; email: string | null }>>();
-    for (const s of eventSignups) {
-      const list = bySlot.get(s.slotId) ?? [];
-      list.push({ name: s.participantName, email: s.participantEmail });
-      bySlot.set(s.slotId, list);
-    }
     targets.push({
       kind: "signup_sheet",
       event: toEventInfo(e),
@@ -301,24 +342,24 @@ export async function collectReminderTargets(
         startTime: s.startTime,
         endTime: s.endTime,
         capacity: s.capacity ?? 1,
-        signups: bySlot.get(s.id) ?? [],
+        signups: signupsBySlot.get(s.id) ?? [],
       })),
     });
   }
 
-  // 2. Finalized meeting polls whose winning time falls on `date`.
-  const finalized = await db
-    .select()
-    .from(events)
-    .where(and(eq(events.type, "TIME_POLL"), eq(events.status, "FINALIZED")))
-    .limit(500);
-  for (const e of finalized) {
-    if (!e.winningSlotId || isExpired(e.createdAt, new Date(), retentionDays)) continue;
-    const slots = await db.select().from(eventSlots).where(eq(eventSlots.eventId, e.id));
-    const winning = slots.find((s) => s.id === e.winningSlotId);
-    if (!winning) continue;
-    if (effectiveDateForSlot(winning, e.eventDate) !== date) continue;
-    const votes = await db.select().from(pollVotes).where(eq(pollVotes.eventId, e.id));
+  const meetings = finalized.filter(
+    ({ event: e, winning }) =>
+      !isExpired(e.createdAt, new Date(), retentionDays) &&
+      effectiveDateForSlot(winning, e.eventDate) === date
+  );
+  // Voters only for the polls that are actually due (usually a handful),
+  // read in parallel chunks under D1's 100-variable cap.
+  const meetingIds = meetings.map((m) => m.event.id);
+  const voteChunks = await Promise.all(
+    chunk(meetingIds, 90).map((ids) => db.select().from(pollVotes).where(inArray(pollVotes.eventId, ids)))
+  );
+  const votesByEvent = groupBy(voteChunks.flat(), (v) => v.eventId);
+  for (const { event: e, winning } of meetings) {
     targets.push({
       kind: "finalized_meeting",
       event: toEventInfo(e),
@@ -329,7 +370,7 @@ export async function collectReminderTargets(
         startTime: winning.startTime,
         endTime: winning.endTime,
       },
-      voters: votes.map((v) => ({ name: v.participantName, email: v.participantEmail })),
+      voters: (votesByEvent.get(e.id) ?? []).map((v) => ({ name: v.participantName, email: v.participantEmail })),
     });
   }
 
@@ -346,8 +387,9 @@ export async function isReminderSent(
   db: AppDb,
   eventId: string,
   key: string,
-  kind: ReminderKind
+  kind: ReminderKind | ReminderKind[]
 ): Promise<boolean> {
+  const kinds = Array.isArray(kind) ? kind : [kind];
   try {
     const rows = await db
       .select({ eventId: reminderSends.eventId })
@@ -356,7 +398,7 @@ export async function isReminderSent(
         and(
           eq(reminderSends.eventId, eventId),
           eq(reminderSends.reminderKey, key),
-          eq(reminderSends.kind, kind)
+          inArray(reminderSends.kind, kinds)
         )
       )
       .limit(1);
