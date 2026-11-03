@@ -54,6 +54,9 @@ export async function loader({ context }: LoaderFunctionArgs) {
   const provider = resolveEmailProvider(env);
   const limits = getEmailLimits(provider, env);
 
+  // Email and MCP usage are independent reads; run them together
+  // (getMcpUsage never rejects).
+  const mcpUsagePending = getMcpUsage(env.DB);
   let email = null;
   try {
     email = await getEmailUsage(env.DB, new Date(), limits);
@@ -69,7 +72,7 @@ export async function loader({ context }: LoaderFunctionArgs) {
   } catch {
     // Misconfigured limits keep MCP closed; report that instead of failing.
   }
-  const mcpUsage = await getMcpUsage(env.DB);
+  const mcpUsage = await mcpUsagePending;
 
   return data(
     {

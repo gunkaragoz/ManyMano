@@ -6,8 +6,8 @@ import { getPresentedAdminToken, verifyAdminToken } from "~/utils/auth";
 import {
   isExpired,
   latestSlotDate,
-  pruneExpiredEvents,
   resolveRetentionDays,
+  withConcurrentPrune,
 } from "~/utils/retention";
 import { effectiveDateForSlot } from "~/utils/calendar";
 
@@ -21,11 +21,11 @@ export async function loader({ params, request, context }: LoaderFunctionArgs) {
   }
 
   const retentionDays = resolveRetentionDays(env);
-  try {
-    await pruneExpiredEvents(db, new Date(), retentionDays);
-  } catch {}
-
-  const [event] = await db.select().from(events).where(eq(events.id, eventId)).limit(1);
+  const [event] = await withConcurrentPrune(
+    db,
+    retentionDays,
+    db.select().from(events).where(eq(events.id, eventId)).limit(1)
+  );
   if (!event) {
     throw new Response("Event not found", { status: 404 });
   }
@@ -48,11 +48,30 @@ export async function loader({ params, request, context }: LoaderFunctionArgs) {
     });
   }
 
-  const rawSlots = await db
-    .select()
-    .from(eventSlots)
-    .where(eq(eventSlots.eventId, eventId))
-    .orderBy(eventSlots.displayOrder);
+  // Slots and responses are independent reads: fetch them together. Poll
+  // entries are scoped to this event's votes through a subquery, so they
+  // needn't wait for the vote IDs (and never load the whole table).
+  const [rawSlots, eventSignups, votes, entries] = await Promise.all([
+    db.select().from(eventSlots).where(eq(eventSlots.eventId, eventId)).orderBy(eventSlots.displayOrder),
+    event.type === "SIGNUP_SHEET"
+      ? db
+          .select()
+          .from(signups)
+          .where(and(eq(signups.eventId, eventId), eq(signups.status, "CONFIRMED")))
+      : [],
+    event.type === "SIGNUP_SHEET" ? [] : db.select().from(pollVotes).where(eq(pollVotes.eventId, eventId)),
+    event.type === "SIGNUP_SHEET"
+      ? []
+      : db
+          .select()
+          .from(pollVoteEntries)
+          .where(
+            inArray(
+              pollVoteEntries.pollVoteId,
+              db.select({ id: pollVotes.id }).from(pollVotes).where(eq(pollVotes.eventId, eventId))
+            )
+          ),
+  ]);
   // Match the voting grid: polls sort chronologically by day then time.
   const hasSlotDates = rawSlots.some((s) => (s as { slotDate?: string | null }).slotDate);
   const slots =
@@ -74,11 +93,6 @@ export async function loader({ params, request, context }: LoaderFunctionArgs) {
 
   if (event.type === "SIGNUP_SHEET") {
     csvRows.push(["Date", "Shift", "Task", "Name", "Email", "Notes/Comments", "Status", "Date Signed Up"]);
-    const eventSignups = await db
-      .select()
-      .from(signups)
-      .where(and(eq(signups.eventId, eventId), eq(signups.status, "CONFIRMED")));
-
     for (const s of eventSignups) {
       let comment = "";
       try {
@@ -109,17 +123,6 @@ export async function loader({ params, request, context }: LoaderFunctionArgs) {
     // Poll export
     const header = ["Participant Name", "Email", ...slots.map((s) => s.title), "Submitted At"];
     csvRows.push(header);
-
-    const votes = await db.select().from(pollVotes).where(eq(pollVotes.eventId, eventId));
-    const voteIds = votes.map((v) => v.id);
-    // Scope entries to this event's votes only — never load the whole table.
-    const entries =
-      voteIds.length > 0
-        ? await db
-            .select()
-            .from(pollVoteEntries)
-            .where(inArray(pollVoteEntries.pollVoteId, voteIds))
-        : [];
 
     for (const v of votes) {
       const vEntries = entries.filter((e) => e.pollVoteId === v.id);

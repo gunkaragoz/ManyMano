@@ -33,11 +33,24 @@ export async function secretMatches(
   stored: string | null | undefined
 ): Promise<boolean> {
   if (!presented || !stored) return false;
-  if (isHex64(stored)) {
-    const hashed = await sha256Hex(presented);
-    return timingSafeEqualString(hashed, stored.toLowerCase());
-  }
-  return timingSafeEqualString(presented, stored);
+  return (await secretMatcher(presented))(stored);
+}
+
+/**
+ * Hash `presented` once and return a synchronous matcher, for checking one
+ * token against many stored values (e.g. every signup of an event) without
+ * awaiting a fresh SHA-256 per row.
+ */
+export async function secretMatcher(
+  presented: string | null | undefined
+): Promise<(stored: string | null | undefined) => boolean> {
+  if (!presented) return () => false;
+  const hashed = await sha256Hex(presented);
+  return (stored) => {
+    if (!stored) return false;
+    if (isHex64(stored)) return timingSafeEqualString(hashed, stored.toLowerCase());
+    return timingSafeEqualString(presented, stored);
+  };
 }
 
 export function safeEqual(a: string, b: string): boolean {

@@ -181,16 +181,16 @@ export async function recordEmailSent(
     bumps.push({ key: month, to: result.providerMonthlyUsed });
     monthly = result.providerMonthlyUsed;
   }
-  for (const b of bumps) {
-    try {
-      await d1
+  await Promise.all(
+    bumps.map((b) =>
+      d1
         .prepare("UPDATE usage_counters SET count = ?1, updated_at = ?2 WHERE key = ?3")
         .bind(b.to, nowIso, b.key)
-        .run();
-    } catch {
-      // Reconciliation is advisory — the local count is already recorded.
-    }
-  }
+        .run()
+        // Reconciliation is advisory — the local count is already recorded.
+        .catch(() => {})
+    )
+  );
 
   return {
     daily,
@@ -245,21 +245,24 @@ export async function emailBudgetAvailable(
   now = new Date()
 ): Promise<boolean> {
   try {
-    const read = async (key: string) => {
-      const row = await d1
-        .prepare("SELECT count FROM usage_counters WHERE key = ?1")
-        .bind(key)
-        .first<{ count: number }>();
-      return row?.count ?? 0;
-    };
-    const [daily, monthly] = await Promise.all([
-      read(dailyKey(utcDayString(now))),
-      read(monthlyKey(utcMonthString(now))),
-    ]);
+    const { daily, monthly } = await readEmailCounters(d1, now);
     return daily < limits.dailyLimit && monthly < limits.monthlyLimit;
   } catch {
     return false;
   }
+}
+
+/** Both email counters in one round trip. Storage errors throw (fail closed). */
+async function readEmailCounters(d1: D1Database, now: Date): Promise<{ daily: number; monthly: number }> {
+  const { results } = await d1
+    .prepare("SELECT key, count FROM usage_counters WHERE key IN (?1, ?2)")
+    .bind(dailyKey(utcDayString(now)), monthlyKey(utcMonthString(now)))
+    .all<{ key: string; count: number }>();
+  const byKey = new Map(results.map((r) => [r.key, r.count]));
+  return {
+    daily: byKey.get(dailyKey(utcDayString(now))) ?? 0,
+    monthly: byKey.get(monthlyKey(utcMonthString(now))) ?? 0,
+  };
 }
 
 export async function claimAlert(d1: D1Database, alertKey: string, nowIso: string): Promise<boolean> {
@@ -438,9 +441,11 @@ export async function organizerUpdateAllowed(
   now = new Date()
 ): Promise<boolean> {
   try {
-    if (!(await emailBudgetAvailable(d1, limits, now))) return false;
-    const usage = await getEmailUsage(d1, now, limits);
-    if (usage.dailyPct >= GUEST_EMAIL_DAILY_HEADROOM_PCT) return false;
+    // One read covers both checks (budget left + daily headroom); it used to
+    // fetch the same two counters twice, back to back.
+    const { daily, monthly } = await readEmailCounters(d1, now);
+    if (daily >= limits.dailyLimit || monthly >= limits.monthlyLimit) return false;
+    if (pct(daily, limits.dailyLimit) >= GUEST_EMAIL_DAILY_HEADROOM_PCT) return false;
     return await reserveCounterBelowLimit(
       d1,
       `email:organizer-update:${eventId}:${utcDayString(now)}`,
@@ -460,19 +465,22 @@ export async function guestEmailAllowed(
 ): Promise<boolean> {
   try {
     const since = new Date(now.getTime() - 24 * 60 * 60 * 1000).toISOString();
-    const row = await d1
-      .prepare(
-        `SELECT
-           (SELECT COUNT(*) FROM signups
-              WHERE event_id = ?1 AND participant_email IS NOT NULL AND participant_email != '' AND created_at >= ?2)
-         + (SELECT COUNT(*) FROM poll_votes
-              WHERE event_id = ?1 AND participant_email IS NOT NULL AND participant_email != '' AND updated_at >= ?2)
-           AS n`
-      )
-      .bind(eventId, since)
-      .first<{ n: number }>();
+    // The per-event count and the global usage are independent reads.
+    const [row, usage] = await Promise.all([
+      d1
+        .prepare(
+          `SELECT
+             (SELECT COUNT(*) FROM signups
+                WHERE event_id = ?1 AND participant_email IS NOT NULL AND participant_email != '' AND created_at >= ?2)
+           + (SELECT COUNT(*) FROM poll_votes
+                WHERE event_id = ?1 AND participant_email IS NOT NULL AND participant_email != '' AND updated_at >= ?2)
+             AS n`
+        )
+        .bind(eventId, since)
+        .first<{ n: number }>(),
+      getEmailUsage(d1, now, limits),
+    ]);
     if ((row?.n ?? 0) > GUEST_EMAILS_PER_EVENT_PER_DAY) return false;
-    const usage = await getEmailUsage(d1, now, limits);
     return usage.dailyPct < GUEST_EMAIL_DAILY_HEADROOM_PCT;
   } catch {
     // Confirmation emails are optional; the write itself already succeeded.

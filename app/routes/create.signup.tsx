@@ -57,7 +57,7 @@ import {
 } from "~/utils/validation";
 import { todayInZone } from "~/utils/event-expiry";
 import { zonedWallTimeToUtc } from "~/utils/timezones";
-import { pruneExpiredEvents, resolveRetentionDays } from "~/utils/retention";
+import { resolveRetentionDays, withConcurrentPrune } from "~/utils/retention";
 import {
   MAX_SERIES_DAYS,
   dayFilterMatches,
@@ -172,10 +172,8 @@ export async function action({ request, context }: ActionFunctionArgs) {
   };
   const site = getSiteConfig(env);
   const db = getDb(env.DB);
-  try {
-    await pruneExpiredEvents(db, new Date(), resolveRetentionDays(env));
-  } catch {}
-  const formData = await request.formData();
+  // Best-effort prune runs while the form body is parsed.
+  const formData = await withConcurrentPrune(db, resolveRetentionDays(env), request.formData());
 
   const title = cleanText(formData.get("title"), TITLE_MAX);
   const eventDate = cleanText(formData.get("eventDate"), 32) || null;
@@ -364,35 +362,20 @@ export async function action({ request, context }: ActionFunctionArgs) {
     }
   }
 
-  const eventId = await generateUniquePublicId(async (candidate) => {
-    const existing = await db
-      .select({ id: events.id })
-      .from(events)
-      .where(eq(events.id, candidate))
-      .limit(1);
-    return existing.length > 0;
-  });
   const adminToken = generateSecretToken();
-  const adminTokenStored = await hashSecretForStorage(adminToken);
+  // The ID lookup (D1) and the token hash (crypto) are independent.
+  const [eventId, adminTokenStored] = await Promise.all([
+    generateUniquePublicId(async (candidate) => {
+      const existing = await db
+        .select({ id: events.id })
+        .from(events)
+        .where(eq(events.id, candidate))
+        .limit(1);
+      return existing.length > 0;
+    }),
+    hashSecretForStorage(adminToken),
+  ]);
   const now = new Date().toISOString();
-
-  // Insert into D1
-  await db.insert(events).values({
-    id: eventId,
-    type: "SIGNUP_SHEET",
-    title,
-    eventDate,
-    description,
-    location,
-    organizerName,
-    organizerEmail,
-    adminToken: adminTokenStored,
-    status: "OPEN",
-    settings: writeDateSpec(null, dateSpec),
-    timezone,
-    createdAt: now,
-    updatedAt: now,
-  });
 
   // D1 rejects transactions, so rows go in batches — a repeating sheet can be
   // a few hundred rows and one INSERT each would be far too many round trips.
@@ -410,9 +393,31 @@ export async function action({ request, context }: ActionFunctionArgs) {
     displayOrder: row.displayOrder,
   }));
   const SLOT_INSERT_BATCH = 10;
+  const slotInserts = [];
   for (let i = 0; i < slotValues.length; i += SLOT_INSERT_BATCH) {
-    await db.insert(eventSlots).values(slotValues.slice(i, i + SLOT_INSERT_BATCH));
+    slotInserts.push(db.insert(eventSlots).values(slotValues.slice(i, i + SLOT_INSERT_BATCH)));
   }
+  // The event and all its slot INSERTs go to D1 as one batch: a single round
+  // trip, applied atomically (no half-created sheet if a chunk fails).
+  await db.batch([
+    db.insert(events).values({
+      id: eventId,
+      type: "SIGNUP_SHEET",
+      title,
+      eventDate,
+      description,
+      location,
+      organizerName,
+      organizerEmail,
+      adminToken: adminTokenStored,
+      status: "OPEN",
+      settings: writeDateSpec(null, dateSpec),
+      timezone,
+      createdAt: now,
+      updatedAt: now,
+    }),
+    ...slotInserts,
+  ]);
 
   const url = new URL(request.url);
   const adminUrl = `${url.origin}/events/${eventId}?admin=${adminToken}`;
@@ -433,6 +438,13 @@ export async function action({ request, context }: ActionFunctionArgs) {
         ? `<p><strong>Date:</strong> ${escapeHtml(formatLongDateLabel(eventDate))}</p>`
         : "";
 
+  // Advisory counters (never throw) are independent of the email: start
+  // them now so they overlap the send instead of queueing after it.
+  const advisoryCounters = Promise.all([
+    // SEO loop: count the conversion against the visit's landing page.
+    recordConversion(env.DB, "SIGNUP_SHEET", formData),
+    recordTemplateClone(env.DB, "SIGNUP_SHEET", formData),
+  ]);
   const emailResult = await sendEmail({
     ...getEmailSenderConfig(env),
     from: site.fromEmail,
@@ -467,9 +479,7 @@ export async function action({ request, context }: ActionFunctionArgs) {
     result: emailResult,
     limits: getEmailLimits(emailResult.provider, env),
   });
-  // SEO loop: count the conversion against the visit's landing page.
-  await recordConversion(env.DB, "SIGNUP_SHEET", formData);
-  await recordTemplateClone(env.DB, "SIGNUP_SHEET", formData);
+  await advisoryCounters;
 
   const headers = new Headers();
   headers.append("Set-Cookie", buildAdminCookie(eventId, adminToken));
