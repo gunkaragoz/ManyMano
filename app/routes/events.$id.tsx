@@ -965,8 +965,9 @@ export async function action({ request, params, context }: ActionFunctionArgs) {
       });
     }
 
-    // The participant confirmation and the organizer update go to different
-    // people and share nothing, so they're sent concurrently.
+    // Sent before the organizer update, not alongside it: both draw on the
+    // same email quota, and the update's budget check must see this send
+    // already counted so the confirmation keeps priority near the limit.
     const confirmParticipant = async () => {
       // Send confirmation email to participant if email provided
       if (!participantEmail || !(await canEmailGuest())) return;
@@ -1030,10 +1031,8 @@ export async function action({ request, params, context }: ActionFunctionArgs) {
         limits: getEmailLimits(emailResult.provider, env),
       });
     };
-    await Promise.all([
-      confirmParticipant(),
-      notifyOrganizerOfSignup("signup", participantName, safeEmail, targetSlot, comment),
-    ]);
+    await confirmParticipant();
+    await notifyOrganizerOfSignup("signup", participantName, safeEmail, targetSlot, comment);
     return data({ success: true, signupAttemptId, message: `Thank you ${participantName}! Your spot has been confirmed.` });
   }
 
@@ -1077,7 +1076,7 @@ export async function action({ request, params, context }: ActionFunctionArgs) {
     // Organizer-initiated removal: notify the person by email (best-effort —
     // a failed send never fails the removal itself, sendEmail never throws).
     // Self-cancellations (owner via edit token / cancel link) stay silent.
-    // Sent concurrently with the organizer update (different recipients).
+    // Sent (and counted) before the organizer update, which shares its quota.
     const notifyRemovedParticipant = async () => {
       if (!adminOk) return;
       const removedEmail = (existing.participantEmail || "").trim();
@@ -1128,10 +1127,8 @@ export async function action({ request, params, context }: ActionFunctionArgs) {
       }
     };
 
-    await Promise.all([
-      notifyRemovedParticipant(),
-      notifyOrganizerOfSignup("cancellation", existing.participantName, existing.participantEmail, cancelledSlot ?? null, signupComment(existing.customFields)),
-    ]);
+    await notifyRemovedParticipant();
+    await notifyOrganizerOfSignup("cancellation", existing.participantName, existing.participantEmail, cancelledSlot ?? null, signupComment(existing.customFields));
     return data({ success: true, message: "Signup cancelled." });
   }
 
