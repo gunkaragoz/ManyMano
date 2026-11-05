@@ -176,28 +176,33 @@ export const TEMPLATES: EventTemplate[] = [
     slug: "book-fair",
     type: "SIGNUP_SHEET",
     name: "Book fair",
-    tagline: "Setup, daily sales shifts and teardown",
+    tagline: "Friday setup, then cashier and floor shifts all week",
     category: "school",
     icon: "book",
     seo: {
       title: "Book Fair Volunteer Sign-Up Sheet — Free Template",
       description:
-        "Staff a week-long book fair: setup on day one, cashier and helper shifts every day, and teardown on the last day. Free, no accounts.",
+        "Staff a week-long book fair: two setup shifts the Friday before, then cashier and floor-helper shifts Monday to Friday, with a family night. Free, no accounts.",
       h1: "Book fair volunteer sign-up sheet",
       intro: [
-        "A book fair needs a burst of help at the start and end, and a steady crew in between. This template covers a five-day fair: setup before the doors open on the first day, cashier and floor-helper shifts every day, and teardown after the last sale.",
-        "Setup and teardown only appear on their own days, so volunteers see a clean list for each day of the fair.",
+        "A book fair needs a setup crew before the doors open and a steady crew all week. This template sets up two setup shifts on the Friday before the fair, then Monday-to-Friday shifts from 9:15 AM to 3:45 PM — each with one floor helper and two cashiers — plus two evening shifts on Tuesday for a family night.",
+        "Every shift only shows on the days it runs, so the Friday setup and the Tuesday evening shifts never clutter the other days. Change the times to match your school day before you share the link.",
       ],
       tips: [
-        "Ask cashiers to arrive ten minutes early for a quick walkthrough of the register.",
-        "Two floor helpers per shift is usually enough for browsing classes; add more for family night.",
-        "Mention in the description whether younger siblings can come along to shifts.",
+        "Ask cashiers to arrive a few minutes early for a quick walkthrough of the register.",
+        "Floor helpers do the most good during class browsing times; one per shift is usually enough outside them.",
+        "Hold your family night on the evening most families can make it, and add a floor helper if you expect a crowd.",
       ],
       faqs: [
         {
           question: "Our fair runs three days, not five. Can I change it?",
           answer:
-            "Yes. Change the last day before creating the sheet. If teardown should move to the new last day, adjust which days that shift runs on.",
+            "Yes. Change the last day before creating the sheet, and adjust which days each shift runs on. Shifts on days you remove simply drop off.",
+        },
+        {
+          question: "Why are there no shifts on Saturday and Sunday?",
+          answer:
+            "The sheet runs from the Friday setup to the last day of the fair, and no shift is set for the weekend, so volunteers only see the days with shifts.",
         },
         {
           question: "Can volunteers cancel their own shift?",
@@ -209,17 +214,23 @@ export const TEMPLATES: EventTemplate[] = [
       details: {
         title: "Book Fair Volunteers",
         description:
-          "Help our readers find their next favorite book! Please check in at the library desk when you arrive. Cashiers, come 10 minutes early for a quick register walkthrough.",
+          "The book fair is coming to our library, and we can't run it without our amazing volunteers! Please pick a shift below.\n\nFloor helpers assist children and families in choosing books. Cashiers: please arrive a few minutes early for a quick tutorial on the register. Thank you!",
         location: "[Your school] library",
         timezone: null,
       },
-      anchor: nextWeekday(MON),
-      dates: { mode: "range", spanDays: 5 },
+      // Setup on the Friday before; the fair runs Monday (offset 3) to Friday (offset 7).
+      anchor: nextWeekday(FRI),
+      dates: { mode: "range", spanDays: 8 },
       shifts: [
-        { name: "Setup", startTime: "07:00", endTime: "08:00", days: { kind: "dateOffsets", values: [0] }, tasks: [task("Unpack cases and set up tables", 4), task("Signs and price labels", 2)] },
-        { name: "Morning sales", startTime: "08:00", endTime: "11:30", days: { kind: "all" }, tasks: [task("Cashier", 2), task("Floor helper", 2)] },
-        { name: "Afternoon sales", startTime: "11:30", endTime: "15:00", days: { kind: "all" }, tasks: [task("Cashier", 2), task("Floor helper", 2)] },
-        { name: "Teardown", startTime: "15:00", endTime: "16:30", days: { kind: "dateOffsets", values: [4] }, tasks: [task("Pack cases and fold tables", 4)] },
+        { name: "Book fair setup", startTime: "14:00", endTime: "16:00", days: { kind: "dateOffsets", values: [0] }, tasks: [task("Help set up for the book fair", 3)] },
+        { name: "Book fair setup", startTime: "16:30", endTime: "18:30", days: { kind: "dateOffsets", values: [0] }, tasks: [task("Help set up for the book fair", 3)] },
+        { name: "Morning", startTime: "09:15", endTime: "11:00", days: { kind: "dateOffsets", values: [3, 4, 5, 6, 7] }, tasks: [task("Floor help", 1), task("Cashier", 2)] },
+        { name: "Late morning", startTime: "11:00", endTime: "12:30", days: { kind: "dateOffsets", values: [3, 4, 5, 6] }, tasks: [task("Floor help", 1), task("Cashier", 2)] },
+        { name: "Midday", startTime: "12:30", endTime: "14:00", days: { kind: "dateOffsets", values: [3, 4, 5, 6, 7] }, tasks: [task("Floor help", 1), task("Cashier", 2)] },
+        { name: "Afternoon", startTime: "14:00", endTime: "15:45", days: { kind: "dateOffsets", values: [3, 4, 5, 6] }, tasks: [task("Floor help", 1), task("Cashier", 2)] },
+        { name: "Last afternoon", startTime: "14:00", endTime: "15:45", days: { kind: "dateOffsets", values: [7] }, tasks: [task("Floor help", 1), task("Cashier", 1)] },
+        { name: "Family night", startTime: "15:45", endTime: "17:15", days: { kind: "dateOffsets", values: [4] }, tasks: [task("Floor help", 1), task("Cashier", 2)] },
+        { name: "Family night", startTime: "17:15", endTime: "18:45", days: { kind: "dateOffsets", values: [4] }, tasks: [task("Floor help", 1), task("Cashier", 2)] },
       ],
     },
   },
@@ -877,49 +888,50 @@ export const TEMPLATES: EventTemplate[] = [
     slug: "thanksgiving-lunch",
     type: "SIGNUP_SHEET",
     name: "Thanksgiving lunch",
-    tagline: "Servers, setup and pies for a school feast",
+    tagline: "Setup, servers, check-in and hosts for a family lunch",
     category: "school",
     icon: "drumstick",
     seo: {
       title: "Thanksgiving Lunch Volunteer Sign-Up — Free Template",
       description:
-        "Staff a school Thanksgiving lunch or family feast: setup, servers, line helpers and cleanup, plus pies and rolls to bring. Free, no accounts.",
+        "Staff a school family Thanksgiving lunch: setup, then serving and kitchen, guest check-in and host shifts across every lunch period. Free, no accounts.",
       h1: "Thanksgiving lunch volunteer sign-up sheet",
       intro: [
-        "A school Thanksgiving lunch means a lot of families in the cafeteria at once. This template sets up table setup before lunch, servers and line helpers during the lunch periods, a cleanup crew, and a list of pies, rolls and supplies to bring.",
-        "It works for a class feast or a whole-school family lunch — change the times to match your lunch schedule.",
+        "A family Thanksgiving lunch brings a lot of guests into the cafeteria at once. This template sets up a 10:00 AM setup crew, then four lunch shifts from 10:50 AM to 2:00 PM, each with serving and kitchen volunteers, guest check-in and hosts who seat guests and watch the room.",
+        "Shifts overlap by a few minutes so the next crew arrives before the last one leaves. Check-in stops after the last lunch period starts; serving and hosting run to the end. Change the times to match your lunch schedule.",
       ],
       tips: [
-        "Match serving shifts to your lunch periods so each grade has helpers.",
-        "Ask for store-bought desserts if your school requires them.",
-        "Share where families should park and sign in, since many will visit at once.",
+        "Put each grade's lunch time in the description, and ask families to volunteer before or after their own student's lunch.",
+        "Have check-in volunteers keep a guest list at the entrance so the cafeteria doesn't overflow.",
+        "Share where families should park and sign in, since many will arrive at once.",
       ],
       faqs: [
         {
           question: "Can I use this for a different holiday lunch?",
-          answer: "Yes. Rename the title and change the food list for any holiday or end-of-year lunch.",
+          answer: "Yes. Rename the title and change the shifts for any holiday or end-of-year lunch.",
         },
         {
-          question: "Can volunteers see which pies are already coming?",
-          answer: "Yes. Everyone with the link can see who signed up for what, including their notes.",
+          question: "Can volunteers see which shifts still need help?",
+          answer: "Yes. Everyone with the link sees how many spots are left in each shift before they sign up.",
         },
       ],
     },
     prefill: {
       details: {
-        title: "Thanksgiving Lunch",
+        title: "Family Thanksgiving Luncheon",
         description:
-          "Help us serve our school Thanksgiving lunch! Volunteers, please sign in at the office. Desserts should be store-bought and labeled.",
+          "Please check the time your student has lunch, then consider picking a slot before or after it to volunteer. The family Thanksgiving luncheon is a popular event and we can't make it happen without our volunteers. Thank you in advance for your help!\n\nLunch schedule:\n[Time] – [Grade and teachers]\n[Time] – [Grade and teachers]",
         location: "[Your school] cafeteria",
         timezone: null,
       },
       anchor: nextWeekday(THU),
       dates: { mode: "single" },
       shifts: [
-        { name: "Setup", startTime: "10:00", endTime: "10:45", days: { kind: "all" }, tasks: [task("Set tables", 3)] },
-        { name: "Serving", startTime: "10:45", endTime: "12:45", days: { kind: "all" }, tasks: [task("Server", 4), task("Line helper", 2)] },
-        { name: "Cleanup", startTime: "12:45", endTime: "13:30", days: { kind: "all" }, tasks: [task("Cleanup crew", 3)] },
-        { name: "Things to bring", startTime: "", endTime: "", days: { kind: "all" }, tasks: [task("Pie or dessert", 6), task("Dinner rolls", 2), task("Plates and napkins", 1)] },
+        { name: "Setup (cafeteria and foyer)", startTime: "10:00", endTime: "11:00", days: { kind: "all" }, tasks: [task("Set up", 4)] },
+        { name: "Lunch shift 1", startTime: "10:50", endTime: "11:45", days: { kind: "all" }, tasks: [task("Serving and kitchen", 9), task("Guest check-in", 4), task("Host and entry", 4)] },
+        { name: "Lunch shift 2", startTime: "11:45", endTime: "12:30", days: { kind: "all" }, tasks: [task("Serving and kitchen", 9), task("Guest check-in", 4), task("Host and entry", 4)] },
+        { name: "Lunch shift 3", startTime: "12:30", endTime: "13:15", days: { kind: "all" }, tasks: [task("Serving and kitchen", 9), task("Guest check-in", 4), task("Host and entry", 4)] },
+        { name: "Lunch shift 4", startTime: "13:10", endTime: "14:00", days: { kind: "all" }, tasks: [task("Serving and kitchen", 9), task("Host and entry", 4)] },
       ],
     },
   },
