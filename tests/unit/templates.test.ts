@@ -149,8 +149,7 @@ describe("template catalog", () => {
       list.push(`${row.startTime}-${row.endTime} ${row.title} x${row.capacity}`);
       byDate.set(row.date, list);
     }
-    const day = (times: string[], lastCashiers = 2) =>
-      times.flatMap((tm, i) => [`${tm} Floor help x1`, `${tm} Cashier x${i === times.length - 1 ? lastCashiers : 2}`]);
+    const day = (times: string[]) => times.flatMap((tm) => [`${tm} Floor help x1`, `${tm} Cashier x2`]);
     const weekday = ["09:15-11:00", "11:00-12:30", "12:30-14:00", "14:00-15:45"];
     expect(Object.fromEntries(byDate)).toEqual({
       "2026-11-06": ["14:00-16:00 Help set up for the book fair x3", "16:30-18:30 Help set up for the book fair x3"],
@@ -158,7 +157,7 @@ describe("template catalog", () => {
       "2026-11-10": day([...weekday, "15:45-17:15", "17:15-18:45"]),
       "2026-11-11": day(weekday),
       "2026-11-12": day(weekday),
-      "2026-11-13": day(["09:15-11:00", "12:30-14:00", "14:00-15:45"], 1),
+      "2026-11-13": day(weekday),
     });
   });
 

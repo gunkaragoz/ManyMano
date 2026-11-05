@@ -185,7 +185,7 @@ export const TEMPLATES: EventTemplate[] = [
         "Staff a week-long book fair: two setup shifts the Friday before, then cashier and floor-helper shifts Monday to Friday, with a family night. Free, no accounts.",
       h1: "Book fair volunteer sign-up sheet",
       intro: [
-        "A book fair needs a setup crew before the doors open and a steady crew all week. This template sets up two setup shifts on the Friday before the fair, then Monday-to-Friday shifts from 9:15 AM to 3:45 PM — each with one floor helper and two cashiers — plus two evening shifts on Tuesday for a family night.",
+        "A book fair needs a setup crew before the doors open and a steady crew all week. This template sets up two setup shifts on the Friday before the fair, then four shifts every day Monday to Friday from 9:15 AM to 3:45 PM — each with one floor helper and two cashiers — plus two evening shifts on Tuesday for a family night.",
         "Every shift only shows on the days it runs, so the Friday setup and the Tuesday evening shifts never clutter the other days. Change the times to match your school day before you share the link.",
       ],
       tips: [
@@ -214,7 +214,7 @@ export const TEMPLATES: EventTemplate[] = [
       details: {
         title: "Book Fair Volunteers",
         description:
-          "The book fair is coming to our library, and we can't run it without our amazing volunteers! Please pick a shift below.\n\nFloor helpers assist children and families in choosing books. Cashiers: please arrive a few minutes early for a quick tutorial on the register. Thank you!",
+          "The book fair is returning to the [Your school] library [dates]! We cannot run this large event without our amazing volunteers. Please review the available slots below and pick one to sign up.\n\nSetup: help set up for the book fair the Friday before it opens.\nFloor helpers assist children and families in choosing books.\nCashiers: please arrive a few minutes early for a quick tutorial on using the register.\n\nThank you! Questions? Please contact [Organizer name] at [email] or text [phone].",
         location: "[Your school] library",
         timezone: null,
       },
@@ -225,10 +225,9 @@ export const TEMPLATES: EventTemplate[] = [
         { name: "Book fair setup", startTime: "14:00", endTime: "16:00", days: { kind: "dateOffsets", values: [0] }, tasks: [task("Help set up for the book fair", 3)] },
         { name: "Book fair setup", startTime: "16:30", endTime: "18:30", days: { kind: "dateOffsets", values: [0] }, tasks: [task("Help set up for the book fair", 3)] },
         { name: "Morning", startTime: "09:15", endTime: "11:00", days: { kind: "dateOffsets", values: [3, 4, 5, 6, 7] }, tasks: [task("Floor help", 1), task("Cashier", 2)] },
-        { name: "Late morning", startTime: "11:00", endTime: "12:30", days: { kind: "dateOffsets", values: [3, 4, 5, 6] }, tasks: [task("Floor help", 1), task("Cashier", 2)] },
+        { name: "Late morning", startTime: "11:00", endTime: "12:30", days: { kind: "dateOffsets", values: [3, 4, 5, 6, 7] }, tasks: [task("Floor help", 1), task("Cashier", 2)] },
         { name: "Midday", startTime: "12:30", endTime: "14:00", days: { kind: "dateOffsets", values: [3, 4, 5, 6, 7] }, tasks: [task("Floor help", 1), task("Cashier", 2)] },
-        { name: "Afternoon", startTime: "14:00", endTime: "15:45", days: { kind: "dateOffsets", values: [3, 4, 5, 6] }, tasks: [task("Floor help", 1), task("Cashier", 2)] },
-        { name: "Last afternoon", startTime: "14:00", endTime: "15:45", days: { kind: "dateOffsets", values: [7] }, tasks: [task("Floor help", 1), task("Cashier", 1)] },
+        { name: "Afternoon", startTime: "14:00", endTime: "15:45", days: { kind: "dateOffsets", values: [3, 4, 5, 6, 7] }, tasks: [task("Floor help", 1), task("Cashier", 2)] },
         { name: "Family night", startTime: "15:45", endTime: "17:15", days: { kind: "dateOffsets", values: [4] }, tasks: [task("Floor help", 1), task("Cashier", 2)] },
         { name: "Family night", startTime: "17:15", endTime: "18:45", days: { kind: "dateOffsets", values: [4] }, tasks: [task("Floor help", 1), task("Cashier", 2)] },
       ],
@@ -898,10 +897,10 @@ export const TEMPLATES: EventTemplate[] = [
       h1: "Thanksgiving lunch volunteer sign-up sheet",
       intro: [
         "A family Thanksgiving lunch brings a lot of guests into the cafeteria at once. This template sets up a 10:00 AM setup crew, then four lunch shifts from 10:50 AM to 2:00 PM, each with serving and kitchen volunteers, guest check-in and hosts who seat guests and watch the room.",
-        "Shifts overlap by a few minutes so the next crew arrives before the last one leaves. Check-in stops after the last lunch period starts; serving and hosting run to the end. Change the times to match your lunch schedule.",
+        "Shifts overlap by a few minutes so the next crew arrives before the last one leaves. Check-in stops after the last lunch period starts; serving and hosting run to the end. The description explains each role and includes a lunch schedule by grade to replace with your own.",
       ],
       tips: [
-        "Put each grade's lunch time in the description, and ask families to volunteer before or after their own student's lunch.",
+        "The description comes with a sample lunch schedule by grade — swap in your own times so families can volunteer before or after their student's lunch.",
         "Have check-in volunteers keep a guest list at the entrance so the cafeteria doesn't overflow.",
         "Share where families should park and sign in, since many will arrive at once.",
       ],
@@ -920,7 +919,7 @@ export const TEMPLATES: EventTemplate[] = [
       details: {
         title: "Family Thanksgiving Luncheon",
         description:
-          "Please check the time your student has lunch, then consider picking a slot before or after it to volunteer. The family Thanksgiving luncheon is a popular event and we can't make it happen without our volunteers. Thank you in advance for your help!\n\nLunch schedule:\n[Time] – [Grade and teachers]\n[Time] – [Grade and teachers]",
+          "Please check the time your student is having lunch below, then consider picking a time slot before or after your student's lunch time in which you can volunteer. The family Thanksgiving luncheon is a popular event at [Your school], and we cannot make it happen without the help of our volunteers. Thank you in advance for your help! Questions? Please contact [Organizer name] at [email].\n\nThanksgiving lunch schedule:\n11:00 AM – 11:40 AM  Kindergarten\n11:10 AM – 11:50 AM  1st grade\n11:45 AM – 12:25 PM  2nd grade\n11:50 AM – 12:30 PM  2nd grade (additional classes)\n12:00 PM – 12:40 PM  3rd grade\n12:30 PM – 1:10 PM  5th grade\nRecess: 12:00 PM – 12:30 PM\n12:50 PM – 1:30 PM  6th grade\n1:15 PM – 1:55 PM  4th grade\n\nVolunteer roles:\nSet up: help set up the cafeteria and foyer for the event.\nServing and kitchen: help serve food and help in the kitchen.\nGuest check-in: help check in guests as they arrive.\nHost and entry: help seat guests and monitor the cafeteria.",
         location: "[Your school] cafeteria",
         timezone: null,
       },
