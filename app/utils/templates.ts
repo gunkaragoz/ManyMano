@@ -896,7 +896,7 @@ export const TEMPLATES: EventTemplate[] = [
         "Staff a school family Thanksgiving lunch: setup, then serving and kitchen, guest check-in and host shifts across every lunch period. Free, no accounts.",
       h1: "Thanksgiving lunch volunteer sign-up sheet",
       intro: [
-        "A family Thanksgiving lunch brings a lot of guests into the cafeteria at once. This template sets up a 10:00 AM setup crew, then four lunch shifts from 10:50 AM to 2:00 PM, each with serving and kitchen volunteers, guest check-in and hosts who seat guests and watch the room.",
+        "A family Thanksgiving lunch brings a lot of guests into the cafeteria at once. This template sets up a 10:00 AM setup crew, then four lunch shifts from 10:50 AM to 2:00 PM, each with serving and kitchen volunteers and hosts who seat guests and watch the room, plus guest check-in for the first three.",
         "Shifts overlap by a few minutes so the next crew arrives before the last one leaves. Check-in stops after the last lunch period starts; serving and hosting run to the end. The description explains each role and includes a lunch schedule by grade to replace with your own.",
       ],
       tips: [
