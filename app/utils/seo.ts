@@ -246,7 +246,7 @@ export type PageMetaTemplate = { title: string; description: string; path: strin
 /** Page titles/descriptions templated on the configured brand. No hardcoded fallback. */
 export function getPageMeta(
   siteName: string
-): Record<"createChooser" | "createSignup" | "createPoll" | "templates", PageMetaTemplate> {
+): Record<"createChooser" | "createSignup" | "createPoll" | "templates" | "signupgeniusAlternative", PageMetaTemplate> {
   if (!siteName) throw new Error("[config] getPageMeta requires siteName (SITE_NAME).");
   return {
     createChooser: {
@@ -272,6 +272,12 @@ export function getPageMeta(
       description:
         "Ready-made sign-up sheets and meeting polls for schools, fundraisers, teams and friends. Pick one, edit anything, share the link. Free, no accounts.",
       path: "/templates",
+    },
+    signupgeniusAlternative: {
+      title: `Free SignUpGenius Alternative — No Ads, No Accounts | ${siteName}`,
+      description:
+        "A free SignUpGenius alternative with no ads and no accounts. Pick a template, edit it, and share one link with your group.",
+      path: "/signupgenius-alternative",
     },
   };
 }

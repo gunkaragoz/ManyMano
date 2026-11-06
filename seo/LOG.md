@@ -68,3 +68,24 @@ Entry format:
 - Judge after: at least 28 days after confirmed deployment, plus Search Console
   reporting lag. Include this page in the existing weekly report; sparse data
   remains inconclusive.
+
+## 2026-11-05 — /signupgenius-alternative — comparison page prepared
+
+- Why: "signupgenius alternative" is a target query in `seo/BRIEF.md` and no
+  page served it. The page compares the two tools honestly, says when
+  SignUpGenius is the better fit, and links six school/sports templates.
+- Page: `/signupgenius-alternative` (new). Added to the sitemap, llms.txt,
+  the footer (so it isn't an orphan) and the fixed landing list, so
+  conversions from it count under its own path instead of "other".
+- SignUpGenius claims: checked November 5, 2026 against its plan guide
+  (signupgenius.com/resources/how-to-choose-plan). Its free plan allows a
+  limited number of custom questions, so the table says "more on paid
+  plans", not "paid only". Its pricing page and help-center articles could
+  not be fetched by script (JS / 403); re-check those by hand before deploy
+  and whenever `LAST_CHECKED` in `app/utils/signupgenius-comparison.ts`
+  is bumped.
+- Baseline (28d before): new page; no prior search or conversion data.
+- Shipped: pending review and deployment.
+- Judge after: at least 28 days after confirmed deployment, plus Search
+  Console reporting lag. Judge on organizer creations landing on this path;
+  sparse data is inconclusive.

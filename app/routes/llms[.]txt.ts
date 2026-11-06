@@ -23,6 +23,7 @@ export async function loader({ request, context }: LoaderFunctionArgs) {
     link("Create a meeting poll", "/create/poll"),
     link("How it works", "/create"),
     link("Templates", "/templates"),
+    link("Compared with SignUpGenius", "/signupgenius-alternative"),
     ...(githubRepoUrl ? [`- [GitHub](${githubRepoUrl})`] : []),
     "",
   ];

@@ -80,7 +80,15 @@ export function classifyChannel(referrer: string | null | undefined, siteHost: s
   return "referral";
 }
 
-const FIXED_LANDINGS = new Set(["/", "/create", "/create/signup", "/create/poll", "/templates", "/pulse"]);
+const FIXED_LANDINGS = new Set([
+  "/",
+  "/create",
+  "/create/signup",
+  "/create/poll",
+  "/templates",
+  "/pulse",
+  "/signupgenius-alternative",
+]);
 const TEMPLATE_LANDING = /^\/(signup-sheet|meeting-poll)\/[a-z0-9-]{1,80}$/;
 
 /**

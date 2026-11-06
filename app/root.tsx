@@ -317,6 +317,9 @@ export default function App() {
               <Link to="/templates" className="hover:text-slate-900 transition-colors">
                 Templates
               </Link>
+              <Link to="/signupgenius-alternative" className="hover:text-slate-900 transition-colors">
+                SignUpGenius alternative
+              </Link>
               <Link to="/pulse" className="hover:text-slate-900 transition-colors">
                 Pulse
               </Link>
