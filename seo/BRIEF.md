@@ -34,6 +34,7 @@ usage, and it's shown on `/pulse`), and template views.
 | Create | `/create`, `/create/signup`, `/create/poll` | The form itself |
 | Template hub | `/templates` | Pick a template |
 | Template pages | `/signup-sheet/<slug>`, `/meeting-poll/<slug>` | "Use this template" → prefilled create form |
+| Comparison pages | `/signupgenius-alternative` | Create a sign-up sheet / pick a template |
 
 Event pages (`/events/*`) are unlisted and `noindex`. They're never an SEO
 target, but "Make a copy" from an event is a real (viral) conversion path and

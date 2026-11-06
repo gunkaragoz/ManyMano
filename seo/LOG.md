@@ -68,3 +68,25 @@ Entry format:
 - Judge after: at least 28 days after confirmed deployment, plus Search Console
   reporting lag. Include this page in the existing weekly report; sparse data
   remains inconclusive.
+
+## 2026-11-05 — /signupgenius-alternative — comparison page prepared
+
+- Why: "signupgenius alternative" is a target query in `seo/BRIEF.md` and no
+  page served it. The page compares the two tools honestly, says when
+  SignUpGenius is the better fit, and links six school/sports templates.
+- Page: `/signupgenius-alternative` (new). Added to the sitemap, llms.txt,
+  the footer (so it isn't an orphan) and the fixed landing list, so
+  conversions from it count under its own path instead of "other".
+- SignUpGenius claims: checked November 5, 2026 in a browser against its
+  pricing page and help-center articles (custom questions, waitlists,
+  calendar subscriptions). Custom questions start on the Silver plan,
+  waitlists on Gold, full calendar feeds on paid plans; reminder emails and
+  payments are on the free plan. Its plan guide says the free plan has
+  "limited" custom questions, which the pricing page contradicts. Re-check
+  whenever `LAST_CHECKED` in `app/utils/signupgenius-comparison.ts` is
+  bumped.
+- Baseline (28d before): new page; no prior search or conversion data.
+- Shipped: pending review and deployment.
+- Judge after: at least 28 days after confirmed deployment, plus Search
+  Console reporting lag. Judge on organizer creations landing on this path;
+  sparse data is inconclusive.
