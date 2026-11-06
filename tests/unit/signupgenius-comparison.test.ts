@@ -21,6 +21,8 @@ describe("signupgenius comparison page", () => {
     const text = JSON.stringify([meta, comparisonRows(), signupGeniusFaq(BRAND)]);
     expect(text).not.toMatch(/manymano/i);
     expect(signupGeniusFaq(BRAND).some((f) => f.question.includes(BRAND))).toBe(true);
+    // The FAQ is about switching to us, not about selling the competitor.
+    expect(signupGeniusFaq(BRAND).map((f) => f.question)).not.toContain("Is SignUpGenius free?");
   });
 
   it("links only to real templates", () => {

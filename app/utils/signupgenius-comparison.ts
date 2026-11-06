@@ -74,14 +74,6 @@ export function signupGeniusFaq(siteName: string): FaqItem[] {
   if (!siteName) throw new Error("[config] signupGeniusFaq requires siteName (SITE_NAME).");
   return [
     {
-      question: `Is ${COMPETITOR} free?`,
-      answer: `Yes. ${COMPETITOR} has a free plan with core sign-up features, including automated email reminders. Paid plans add features such as ad removal, more custom questions, and additional administrators.`,
-    },
-    {
-      question: `Do ${COMPETITOR} participants need an account?`,
-      answer: `Generally, no. Participants don't need an account on either tool. ${siteName} also lets the organizer create and manage a sheet without one.`,
-    },
-    {
       question: `Can I move an existing ${COMPETITOR} sheet to ${siteName}?`,
       answer: `There's no automatic import, so existing participants and responses won't transfer. Recreate the dates, shifts, and tasks in ${siteName}, or start from a template, then share your new link when you're ready for people to sign up.`,
     },
