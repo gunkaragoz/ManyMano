@@ -3,6 +3,7 @@ import type { LoaderFunctionArgs, MetaFunction } from "react-router";
 import { Link, data, useLoaderData } from "react-router";
 import { ArrowRight, Check } from "lucide-react";
 import TemplateIcon from "~/components/TemplateIcon";
+import BrandName from "~/components/BrandName";
 import {
   breadcrumbJsonLd,
   faqPageJsonLd,
@@ -110,7 +111,9 @@ export default function SignupGeniusAlternative() {
             <thead>
               <tr className="grid grid-cols-2 gap-x-4 px-5 sm:table-row sm:px-0 text-[10px] uppercase tracking-wide text-slate-400 border-b border-slate-100">
                 <th scope="col" className="hidden sm:table-cell py-3 pl-6 pr-3 font-bold">Feature</th>
-                <th scope="col" className="py-3 sm:pr-3 font-bold text-blue-700">{siteName}</th>
+                <th scope="col" className="py-3 sm:pr-3 font-bold text-slate-700">
+                  <BrandName name={siteName} />
+                </th>
                 <th scope="col" className="py-3 sm:pr-6 font-bold">{COMPETITOR}</th>
               </tr>
             </thead>

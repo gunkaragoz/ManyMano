@@ -17,6 +17,7 @@ const ENTRIES: SitemapEntry[] = [
   { path: "/create/poll", changefreq: "monthly", priority: "0.9" },
   { path: "/templates", changefreq: "monthly", priority: "0.8" },
   { path: "/signupgenius-alternative", changefreq: "monthly", priority: "0.7" },
+  { path: "/doodle-alternative", changefreq: "monthly", priority: "0.7" },
   ...TEMPLATES.map((t) => ({ path: templatePath(t), changefreq: "monthly", priority: "0.7" })),
 ];
 

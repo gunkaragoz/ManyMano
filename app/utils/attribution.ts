@@ -88,6 +88,7 @@ const FIXED_LANDINGS = new Set([
   "/templates",
   "/pulse",
   "/signupgenius-alternative",
+  "/doodle-alternative",
 ]);
 const TEMPLATE_LANDING = /^\/(signup-sheet|meeting-poll)\/[a-z0-9-]{1,80}$/;
 

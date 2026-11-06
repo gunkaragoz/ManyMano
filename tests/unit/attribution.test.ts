@@ -41,6 +41,7 @@ describe("normalizeLandingPath", () => {
     ["/", "/"],
     ["/templates/", "/templates"],
     ["/signupgenius-alternative?utm_source=x", "/signupgenius-alternative"],
+    ["/doodle-alternative/", "/doodle-alternative"],
     ["/create/signup?template=potluck", "/create/signup"],
     ["/signup-sheet/book-fair", "/signup-sheet/book-fair"],
     ["/meeting-poll/Team-Lunch", "/meeting-poll/team-lunch"],

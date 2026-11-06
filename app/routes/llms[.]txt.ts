@@ -24,6 +24,7 @@ export async function loader({ request, context }: LoaderFunctionArgs) {
     link("How it works", "/create"),
     link("Templates", "/templates"),
     link("Compared with SignUpGenius", "/signupgenius-alternative"),
+    link("Compared with Doodle", "/doodle-alternative"),
     ...(githubRepoUrl ? [`- [GitHub](${githubRepoUrl})`] : []),
     "",
   ];
