@@ -77,13 +77,14 @@ Entry format:
 - Page: `/signupgenius-alternative` (new). Added to the sitemap, llms.txt,
   the footer (so it isn't an orphan) and the fixed landing list, so
   conversions from it count under its own path instead of "other".
-- SignUpGenius claims: checked November 5, 2026 against its plan guide
-  (signupgenius.com/resources/how-to-choose-plan). Its free plan allows a
-  limited number of custom questions, so the table says "more on paid
-  plans", not "paid only". Its pricing page and help-center articles could
-  not be fetched by script (JS / 403); re-check those by hand before deploy
-  and whenever `LAST_CHECKED` in `app/utils/signupgenius-comparison.ts`
-  is bumped.
+- SignUpGenius claims: checked November 5, 2026 in a browser against its
+  pricing page and help-center articles (custom questions, waitlists,
+  calendar subscriptions). Custom questions start on the Silver plan,
+  waitlists on Gold, full calendar feeds on paid plans; reminder emails and
+  payments are on the free plan. Its plan guide says the free plan has
+  "limited" custom questions, which the pricing page contradicts. Re-check
+  whenever `LAST_CHECKED` in `app/utils/signupgenius-comparison.ts` is
+  bumped.
 - Baseline (28d before): new page; no prior search or conversion data.
 - Shipped: pending review and deployment.
 - Judge after: at least 28 days after confirmed deployment, plus Search

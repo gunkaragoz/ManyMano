@@ -47,7 +47,7 @@ export function comparisonRows(): ComparisonRow[] {
       ours: "Editable templates for school, volunteer, sports, and community events",
       theirs: "Sign-up formats and design themes",
     },
-    { feature: "Email reminders", ours: "Automatic day-before email reminders", theirs: "Automatic reminders" },
+    { feature: "Email reminders", ours: "Automatic email reminders", theirs: "Automatic reminders" },
     {
       feature: "Calendar options",
       ours: "Add to Google Calendar or download a calendar invite",
@@ -56,7 +56,7 @@ export function comparisonRows(): ComparisonRow[] {
     {
       feature: "Participant details",
       ours: "Name, optional email, and a note",
-      theirs: "Participant details and a limited number of custom questions; more on paid plans",
+      theirs: "Participant details, with custom questions on paid plans",
     },
     { feature: "Export", ours: "Organizer CSV export", theirs: "Reporting and export tools" },
     {
