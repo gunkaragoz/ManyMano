@@ -90,3 +90,26 @@ Entry format:
 - Judge after: at least 28 days after confirmed deployment, plus Search
   Console reporting lag. Judge on organizer creations landing on this path;
   sparse data is inconclusive.
+
+## 2026-11-05 — /doodle-alternative — comparison page prepared
+
+- Why: "doodle alternative" is a target query in `seo/BRIEF.md` and no page
+  served it. Same layout as `/signupgenius-alternative`: an honest feature
+  table, when Doodle is the better fit, six linked meeting-poll templates and
+  a switching FAQ.
+- Page: `/doodle-alternative` (new). Added to the sitemap, llms.txt, the
+  footer and the fixed landing list, so conversions from it count under its
+  own path instead of "other".
+- Doodle claims: checked November 5, 2026 in a browser against its pricing
+  page (doodle.com/en/premium) and help-center articles (free vs. paid
+  comparison, account requirement, if-need-be). Free plan: one group poll,
+  ads for organizers and participants, no
+  deadlines/reminders, no hiding participants; organizers need an account,
+  participants don't. Doodle's "if need be" answer is always on, so Yes /
+  Maybe / No is not presented as a difference. Re-check whenever
+  `LAST_CHECKED` in `app/utils/doodle-comparison.ts` is bumped.
+- Baseline (28d before): new page; no prior search or conversion data.
+- Shipped: pending review and deployment.
+- Judge after: at least 28 days after confirmed deployment, plus Search
+  Console reporting lag. Judge on organizer creations landing on this path;
+  sparse data is inconclusive.

@@ -19,6 +19,7 @@ const CRITICAL_ROUTES = [
   "signup-sheet.$slug.tsx",
   "meeting-poll.$slug.tsx",
   "signupgenius-alternative.tsx",
+  "doodle-alternative.tsx",
   "events.$id.tsx",
   "events.$id.ics.ts",
   "events.$id.export.ts",
@@ -31,9 +32,9 @@ function routeSource(file: string): string {
 }
 
 describe("route files present", () => {
-  it("ships all 24 expected route modules", () => {
+  it("ships all 25 expected route modules", () => {
     const files = readdirSync(ROUTES_DIR).sort();
-    expect(files).toHaveLength(24);
+    expect(files).toHaveLength(25);
     for (const f of CRITICAL_ROUTES) {
       expect(files, `missing critical route ${f}`).toContain(f);
     }

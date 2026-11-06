@@ -246,7 +246,7 @@ export type PageMetaTemplate = { title: string; description: string; path: strin
 /** Page titles/descriptions templated on the configured brand. No hardcoded fallback. */
 export function getPageMeta(
   siteName: string
-): Record<"createChooser" | "createSignup" | "createPoll" | "templates" | "signupgeniusAlternative", PageMetaTemplate> {
+): Record<"createChooser" | "createSignup" | "createPoll" | "templates" | "signupgeniusAlternative" | "doodleAlternative", PageMetaTemplate> {
   if (!siteName) throw new Error("[config] getPageMeta requires siteName (SITE_NAME).");
   return {
     createChooser: {
@@ -278,6 +278,12 @@ export function getPageMeta(
       description:
         "A free SignUpGenius alternative with no ads and no accounts. Pick a template, edit it, and share one link with your group.",
       path: "/signupgenius-alternative",
+    },
+    doodleAlternative: {
+      title: `Free Doodle Alternative — No Ads, No Accounts | ${siteName}`,
+      description:
+        "A free Doodle alternative for scheduling polls: no ads, no accounts, no one-poll limit. Everyone votes Yes, Maybe or No, and you lock the best time.",
+      path: "/doodle-alternative",
     },
   };
 }

@@ -18,6 +18,7 @@ import { useEffect, useState } from "react";
 import { HeartHandshake } from "lucide-react";
 import NotFound from "~/components/NotFound";
 import { POPULAR_TEMPLATE_LINKS } from "~/utils/templates";
+import BrandName from "~/components/BrandName";
 import CreateMenu from "~/components/CreateMenu";
 import { LANDING_CAPTURE_SCRIPT, rememberLanding } from "~/utils/attribution";
 
@@ -34,17 +35,6 @@ function GithubIcon({ className }: { className?: string }) {
   );
 }
 
-function BrandName({ name }: { name: string }) {
-  if (name.toLowerCase() === "manymano") {
-    return (
-      <>
-        <span className="text-blue-600">{name.slice(0, 4)}</span>
-        <span className="text-green-600">{name.slice(4)}</span>
-      </>
-    );
-  }
-  return <>{name}</>;
-}
 import stylesheet from "~/tailwind.css?url";
 import {
   CREATE_STICKY_HEADER_EVENT,
@@ -319,6 +309,9 @@ export default function App() {
               </Link>
               <Link to="/signupgenius-alternative" className="hover:text-slate-900 transition-colors">
                 SignUpGenius alternative
+              </Link>
+              <Link to="/doodle-alternative" className="hover:text-slate-900 transition-colors">
+                Doodle alternative
               </Link>
               <Link to="/pulse" className="hover:text-slate-900 transition-colors">
                 Pulse
