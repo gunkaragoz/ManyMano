@@ -5,7 +5,7 @@ import { data, redirect } from "react-router";
 import { useLoaderData, useActionData, useNavigation, useSearchParams, useFetcher, useSubmit, Form, Link, isRouteErrorResponse, useRouteError } from "react-router";
 import { eq, and, inArray, isNull } from "drizzle-orm";
 import type { BatchItem } from "drizzle-orm/batch";
-import { useState, useMemo, useEffect, useRef } from "react";
+import { useState, useMemo, useEffect, useRef, type FormEvent, type RefObject } from "react";
 import {
   ArrowRight,
   CalendarDays,
@@ -4162,6 +4162,60 @@ export default function EventView() {
   const [proposeDate, setProposeDate] = useState("");
   const [proposeStart, setProposeStart] = useState("10:00");
   const [proposeLabel, setProposeLabel] = useState("");
+  // On-demand human check for the vote / propose forms. When the server asks
+  // for verification (e.g. an email is attached), the Turnstile widget mounts
+  // and — once it yields a token — the same form is re-submitted
+  // automatically, so the guest never has to click Save twice.
+  const voteFormRef = useRef<HTMLFormElement>(null);
+  const proposeFormRef = useRef<HTMLFormElement>(null);
+  const lastSubmitIntentRef = useRef<string | null>(null);
+  const pollAutoRetryRef = useRef(false);
+  const [pollCheckFailed, setPollCheckFailed] = useState(false);
+  const [pollWidgetRetryKey, setPollWidgetRetryKey] = useState(0);
+  useEffect(() => {
+    const intent = navigation.formData?.get("intent");
+    if (typeof intent === "string") lastSubmitIntentRef.current = intent;
+  }, [navigation.formData]);
+  useEffect(() => {
+    if (pollAutoRetryRef.current && actionData?.needsVerification) setPollCheckFailed(true);
+  }, [actionData]);
+  // Which poll form (if any) the current challenge belongs to.
+  const pollChallengeIntent =
+    needsHumanCheck && (lastSubmitIntentRef.current === "vote_poll" || lastSubmitIntentRef.current === "propose_slot")
+      ? lastSubmitIntentRef.current
+      : null;
+  const pollAwaitingCheck = Boolean(pollChallengeIntent && turnstileSiteKey && !pollCheckFailed);
+  // Shared onSubmit guard: a failed auto-retry turns the button into
+  // "Try verification again", which remounts the widget instead of posting
+  // a token-less form that would just be challenged again.
+  const handlePollFormSubmit = (e: FormEvent<HTMLFormElement>, intent: "vote_poll" | "propose_slot") => {
+    if (pollChallengeIntent === intent && pollCheckFailed && turnstileSiteKey) {
+      e.preventDefault();
+      pollAutoRetryRef.current = false;
+      setPollCheckFailed(false);
+      setPollWidgetRetryKey((k) => k + 1);
+      return;
+    }
+    pollAutoRetryRef.current = false;
+    setPollCheckFailed(false);
+  };
+  const renderPollTurnstile = (intent: "vote_poll" | "propose_slot", formRef: RefObject<HTMLFormElement | null>) =>
+    pollChallengeIntent === intent && turnstileSiteKey ? (
+      <Turnstile
+        key={pollWidgetRetryKey}
+        siteKey={turnstileSiteKey}
+        action="poll-vote"
+        resetKey={navigation.state}
+        onError={() => setPollCheckFailed(true)}
+        onSuccess={(token) => {
+          if (!formRef.current || pollAutoRetryRef.current) return;
+          pollAutoRetryRef.current = true;
+          const formData = new FormData(formRef.current);
+          formData.set("cf-turnstile-response", token);
+          submit(formData, { method: "post", preventScrollReset: true });
+        }}
+      />
+    ) : null;
 
   // The browser remembers its own vote id + private vote token so repeat saves
   // update it instead of creating duplicates. Stored as JSON {id, token}; a
@@ -6657,6 +6711,7 @@ export default function EventView() {
                 </div>
 
                 <Form
+                  ref={voteFormRef}
                   method="post"
                   className="flex flex-col gap-3 sm:items-end"
                   onSubmit={(e) => {
@@ -6664,7 +6719,9 @@ export default function EventView() {
                       e.preventDefault();
                       document.getElementById("voter-name")?.focus();
                       alert("Please enter your name first!");
+                      return;
                     }
+                    handlePollFormSubmit(e, "vote_poll");
                   }}
                 >
                   <input type="hidden" name="intent" value="vote_poll" />
@@ -6690,12 +6747,12 @@ export default function EventView() {
                     />
                   ))}
 
-                  {needsHumanCheck && (
-                    <p className="text-xs font-medium text-amber-700 bg-amber-50 border border-amber-200 rounded-xl px-3 py-2 text-right">
-                      Lots of activity from your network — one quick check, then you&apos;re through.
+                  {pollChallengeIntent === "vote_poll" && turnstileSiteKey && (
+                    <p role="status" className="text-xs text-slate-600 sm:text-right">
+                      {pollCheckFailed ? "Verification didn't finish. Please try again." : "Quick human check…"}
                     </p>
                   )}
-                  {actionData?.error && (
+                  {actionData?.error && !actionData?.needsVerification && (
                     <p
                       role="alert"
                       className="text-xs font-semibold text-rose-700 bg-rose-50 border border-rose-200 rounded-xl px-3 py-2 sm:max-w-sm sm:text-right"
@@ -6705,18 +6762,22 @@ export default function EventView() {
                   )}
                   {/* Success confirmations surface via the floating toast (always visible). */}
                   <div className="flex flex-col sm:flex-row sm:items-center justify-end gap-3">
-                    {needsHumanCheck && turnstileSiteKey && (
+                    {pollChallengeIntent === "vote_poll" && turnstileSiteKey && (
                       <div className="flex justify-end sm:items-center [&:empty]:hidden [&:has(.cf-turnstile:empty)]:hidden">
-                        <Turnstile siteKey={turnstileSiteKey} action="poll-vote" resetKey={navigation.state} />
+                        {renderPollTurnstile("vote_poll", voteFormRef)}
                       </div>
                     )}
 
                     <button
                       type="submit"
-                      disabled={isSubmitting}
+                      disabled={isSubmitting || (pollAwaitingCheck && pollChallengeIntent === "vote_poll")}
                       className="w-full sm:w-auto min-h-[52px] px-7 py-3.5 bg-blue-600 hover:bg-blue-700 text-white rounded-2xl text-sm font-bold shadow-sm transition-all hover:scale-[1.02] active:scale-[0.98] disabled:opacity-50 inline-flex items-center justify-center gap-2"
                     >
-                      {isSubmitting ? "Saving..." : <>{ownVote ? "Update My Availability" : "Save My Availability"} <ArrowRight className="w-4 h-4" /></>}
+                      {isSubmitting || (pollAwaitingCheck && pollChallengeIntent === "vote_poll")
+                        ? "Saving..."
+                        : pollChallengeIntent === "vote_poll" && pollCheckFailed
+                          ? "Try verification again"
+                          : <>{ownVote ? "Update My Availability" : "Save My Availability"} <ArrowRight className="w-4 h-4" /></>}
                     </button>
                   </div>
                 </Form>
@@ -6761,6 +6822,7 @@ export default function EventView() {
 
               {showPropose && (
                 <Form
+                  ref={proposeFormRef}
                   method="post"
                   className="p-5 sm:p-6 pt-0 space-y-4"
                   onSubmit={(e) => {
@@ -6775,7 +6837,9 @@ export default function EventView() {
                     if (!proposeDate) {
                       e.preventDefault();
                       alert("Please pick a day for your proposed time.");
+                      return;
                     }
+                    handlePollFormSubmit(e, "propose_slot");
                   }}
                 >
                   <input type="hidden" name="intent" value="propose_slot" />
@@ -6863,11 +6927,13 @@ export default function EventView() {
                         />
                         <button
                           type="submit"
-                          disabled={isSubmitting}
+                          disabled={isSubmitting || (pollAwaitingCheck && pollChallengeIntent === "propose_slot")}
                           className="h-10 px-5 rounded-xl bg-green-600 hover:bg-green-700 text-white text-xs font-bold shadow-sm transition-all hover:scale-[1.02] active:scale-[0.98] disabled:opacity-50 whitespace-nowrap w-full sm:w-auto"
                         >
-                          {isSubmitting
+                          {isSubmitting || (pollAwaitingCheck && pollChallengeIntent === "propose_slot")
                             ? "Adding…"
+                            : pollChallengeIntent === "propose_slot" && pollCheckFailed
+                              ? "Try again"
                             : !voterName.trim() && isAdmin
                               ? "+ Add time"
                               : "+ Add & vote Yes"}
@@ -6886,10 +6952,15 @@ export default function EventView() {
                       Proposing without a name adds the time without counting you as a voter.
                     </p>
                   )}
-                  {needsHumanCheck && turnstileSiteKey && (
-                    <div className="flex justify-end [&:empty]:hidden [&:has(.cf-turnstile:empty)]:hidden">
-                      <Turnstile siteKey={turnstileSiteKey} action="poll-vote" resetKey={navigation.state} />
-                    </div>
+                  {pollChallengeIntent === "propose_slot" && turnstileSiteKey && (
+                    <>
+                      <p role="status" className="text-xs text-slate-600 text-right">
+                        {pollCheckFailed ? "Verification didn't finish. Please try again." : "Quick human check…"}
+                      </p>
+                      <div className="flex justify-end [&:empty]:hidden [&:has(.cf-turnstile:empty)]:hidden">
+                        {renderPollTurnstile("propose_slot", proposeFormRef)}
+                      </div>
+                    </>
                   )}
                 </Form>
               )}
