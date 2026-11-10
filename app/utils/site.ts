@@ -139,8 +139,3 @@ export function getSiteConfig(env: SiteEnv): SiteConfig {
     icsProdid,
   };
 }
-
-/** FROM_EMAIL is required — no DEFAULT_FROM fallback (see email.ts). */
-export function requireFromEmail(env: SiteEnv): string {
-  return required(env, "FROM_EMAIL");
-}

@@ -43,6 +43,7 @@ import {
 } from "~/utils/useCreateStickyHeader";
 import {
   OG_IMAGE_HEIGHT,
+  OG_IMAGE_PATH,
   OG_IMAGE_WIDTH,
   absoluteUrl,
   organizationJsonLd,
@@ -73,7 +74,7 @@ export const meta: MetaFunction<typeof loader> = ({ loaderData }) => {
   const siteName = site.siteName;
   const tagline = site.siteTagline;
   const ogTitle = `${siteName} - ${tagline}`;
-  const ogImage = absoluteUrl("/og-cover.png", siteUrl);
+  const ogImage = absoluteUrl(OG_IMAGE_PATH, siteUrl);
   return [
     { charset: "utf-8" },
     { name: "viewport", content: "width=device-width, initial-scale=1" },

@@ -12,15 +12,6 @@ export const OG_IMAGE_PATH = "/og-cover.png";
 export const OG_IMAGE_WIDTH = 1200;
 export const OG_IMAGE_HEIGHT = 630;
 
-/** Resolve the canonical site origin from the request (preview-safe). No fallback. */
-export function getSiteUrl(request: Request): string {
-  const origin = new URL(request.url).origin;
-  if (!origin || !origin.startsWith("http")) {
-    throw new Error("[config] Unable to resolve site origin from request.");
-  }
-  return origin.replace(/\/$/, "");
-}
-
 export function absoluteUrl(path: string, siteUrl: string): string {
   if (!siteUrl) throw new Error("[config] absoluteUrl requires siteUrl (SITE_URL).");
   const base = siteUrl.replace(/\/$/, "");

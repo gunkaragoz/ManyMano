@@ -196,7 +196,6 @@ export async function action({ request, context }: ActionFunctionArgs) {
 
   const slotDates = formData.getAll("slotDate") as string[];
   const slotStartTimes = formData.getAll("slotStartTime") as string[];
-  const slotEndTimes = formData.getAll("slotEndTime") as string[];
   const slotLabels = formData.getAll("slotTitle") as string[];
 
   const validSlots: Array<{

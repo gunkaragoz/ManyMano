@@ -63,7 +63,7 @@ export async function loader({ request, context }: LoaderFunctionArgs) {
   );
 }
 
-export const meta: MetaFunction<typeof loader> = ({ loaderData, matches }) => {
+export const meta: MetaFunction<typeof loader> = ({ matches }) => {
   const site = rootSiteFromMatches(matches);
   const title = `Pulse — live activity | ${site.siteName}`;
   const description =

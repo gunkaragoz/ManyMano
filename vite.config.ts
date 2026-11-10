@@ -87,8 +87,6 @@ export default defineConfig(({ command }) => ({
       "react-router",
       "react-router/dom",
       "lucide-react",
-      "clsx",
-      "tailwind-merge",
       "drizzle-orm",
     ],
   },
