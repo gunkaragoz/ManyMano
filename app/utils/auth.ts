@@ -82,20 +82,21 @@ function cookieName(eventId: string): string {
 
 /** Prefer HttpOnly cookie, fall back to ?admin= query param (legacy/bookmark). */
 export function getPresentedAdminToken(request: Request, eventId: string): string | null {
-  const cookieHeader = request.headers.get("cookie") || "";
-  const cookies = Object.fromEntries(
-    cookieHeader
-      .split(";")
-      .map((p) => p.trim())
-      .filter(Boolean)
-      .map((p) => {
-        const idx = p.indexOf("=");
-        if (idx === -1) return [p, ""];
-        return [p.slice(0, idx).trim(), decodeURIComponent(p.slice(idx + 1).trim())];
-      })
-  );
-  const fromCookie = cookies[cookieName(eventId)];
-  if (fromCookie) return fromCookie;
+  const wanted = cookieName(eventId);
+  for (const part of (request.headers.get("cookie") || "").split(";")) {
+    const idx = part.indexOf("=");
+    if (idx === -1 || part.slice(0, idx).trim() !== wanted) continue;
+    // Only this cookie is decoded: a malformed value in an unrelated cookie
+    // (or in this one) must not turn the page load into a 500.
+    let fromCookie = "";
+    try {
+      fromCookie = decodeURIComponent(part.slice(idx + 1).trim());
+    } catch {
+      // Not ours, or damaged: fall through to the query parameter.
+    }
+    if (fromCookie) return fromCookie;
+    break;
+  }
   const url = new URL(request.url);
   return url.searchParams.get("admin");
 }

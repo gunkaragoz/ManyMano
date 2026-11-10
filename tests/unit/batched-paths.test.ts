@@ -191,13 +191,31 @@ describe("poll votes", () => {
       slot_pollH_s1: "NO",
     });
     expect(res.body.success).toBe(true);
+    // The new option's ID is random, so both lists are sorted the same way
+    // here; SQLite's byte order and localeCompare disagree on mixed case.
+    const bySlotId = (a: { slot_id: string }, b: { slot_id: string }) =>
+      a.slot_id < b.slot_id ? -1 : a.slot_id > b.slot_id ? 1 : 0;
     const entries = db.sqlite
-      .prepare("SELECT slot_id, response FROM poll_vote_entries WHERE poll_vote_id = ? ORDER BY slot_id")
-      .all(res.body.voteId);
-    expect(entries).toEqual([
+      .prepare("SELECT slot_id, response FROM poll_vote_entries WHERE poll_vote_id = ?")
+      .all(res.body.voteId) as Array<{ slot_id: string; response: string }>;
+    expect(entries.sort(bySlotId)).toEqual([
       { slot_id: "pollH_s0", response: "YES" },
       { slot_id: res.body.proposedSlotId, response: "YES" },
-    ].sort((a, b) => a.slot_id.localeCompare(b.slot_id)));
+    ].sort(bySlotId));
+  });
+
+  it("a proposal under a taken name adds no option", async () => {
+    await seedPoll("pollP", 1);
+    await addVote("vp1", "pollP", "Pat", "p", { pollP_s0: "YES" });
+    const res = await runAction("pollP", {
+      intent: "propose_slot",
+      participantName: "pat",
+      slotDate: "2099-07-01",
+      slotStartTime: "10:00",
+    });
+    expect(res.status).toBe(409);
+    expect(count("SELECT COUNT(*) AS n FROM event_slots WHERE event_id = 'pollP'")).toBe(1);
+    expect(count("SELECT COUNT(*) AS n FROM poll_vote_entries")).toBe(1);
   });
 
   it("deletes a vote and its entries with the owner token", async () => {
