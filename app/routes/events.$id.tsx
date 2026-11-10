@@ -44,6 +44,7 @@ import {
   reserveCounterBelowLimit,
 } from "~/utils/quota";
 import { buildSignupUpdateEmail, signupComment } from "~/utils/signup-update-email";
+import { buildPollVoteUpdateEmail, type PollVoteUpdateKind } from "~/utils/poll-vote-email";
 import {
   ORGANIZER_EMAIL_CHANGES_PER_HOUR,
   buildOrganizerLinkEmail,
@@ -772,6 +773,28 @@ export async function action({ request, params, context }: ActionFunctionArgs) {
   // Guest confirmation emails respect the daily email budget.
   const canEmailGuest = () =>
     guestEmailAllowed(env.DB, eventId, getEmailLimits(resolveEmailProvider(env), env));
+  // Organizer update emails (sign-ups and poll votes) share one guard: a valid
+  // organizer address, configured delivery and the per-event daily cap.
+  const organizerUpdateRecipient = async (): Promise<string | null> => {
+    const recipient = (event.organizerEmail || "").trim();
+    if (!recipient || !isValidEmail(recipient) || !isEmailDeliveryConfigured(env)) return null;
+    const limits = getEmailLimits(resolveEmailProvider(env), env);
+    return (await organizerUpdateAllowed(env.DB, eventId, limits)) ? recipient : null;
+  };
+  const sendOrganizerUpdate = async (recipient: string, message: { subject: string; html: string }) => {
+    const result = await sendEmail({
+      ...getEmailSenderConfig(env),
+      from: site.fromEmail,
+      to: recipient,
+      ...message,
+    });
+    await trackEmailUsage(env.DB, {
+      webhookUrl: env.ALERT_WEBHOOK_URL,
+      appName: site.siteName,
+      result,
+      limits: getEmailLimits(result.provider, env),
+    });
+  };
   const notifyOrganizerOfSignup = async (
     kind: "signup" | "cancellation",
     participantName: string,
@@ -779,10 +802,8 @@ export async function action({ request, params, context }: ActionFunctionArgs) {
     slot: typeof eventSlots.$inferSelect | null,
     comment: string
   ) => {
-    const recipient = (event.organizerEmail || "").trim();
-    if (!recipient || !isValidEmail(recipient) || !isEmailDeliveryConfigured(env)) return;
-    const limits = getEmailLimits(resolveEmailProvider(env), env);
-    if (!(await organizerUpdateAllowed(env.DB, eventId, limits))) return;
+    const recipient = await organizerUpdateRecipient();
+    if (!recipient) return;
     const shiftPrefix = (slot?.shiftName || "").trim();
     const slotTitle = (slot?.title || "").trim();
     const taskLabel = slotTitle
@@ -807,18 +828,96 @@ export async function action({ request, params, context }: ActionFunctionArgs) {
       eventUrl: `${site.siteUrl}/events/${eventId}`,
       site,
     });
-    const result = await sendEmail({
-      ...getEmailSenderConfig(env),
-      from: site.fromEmail,
-      to: recipient,
-      ...message,
+    await sendOrganizerUpdate(recipient, message);
+  };
+  // Poll option label: date + time, falling back to the option title.
+  const pollOptionLabel = (s: typeof eventSlots.$inferSelect) => {
+    const date = s.slotDate ?? event.eventDate;
+    const time = s.startTime
+      ? `${formatTime(s.startTime)}${s.endTime ? ` – ${formatTime(s.endTime)}` : ""}`
+      : s.endTime
+        ? formatTime(s.endTime)
+        : "";
+    return [date ? formatLongDateLabel(date) : "", time].filter(Boolean).join(" · ") || s.title;
+  };
+  // Frontrunner option by YES count (MAYBE breaks ties) over all votes.
+  const leadingOptionLine = (
+    slots: Array<typeof eventSlots.$inferSelect>,
+    entries: Array<{ slotId: string; response: string }>
+  ) => {
+    if (slots.length === 0) return "";
+    const yesCount = new Map<string, number>();
+    const maybeCount = new Map<string, number>();
+    for (const e of entries) {
+      if (e.response === "YES") yesCount.set(e.slotId, (yesCount.get(e.slotId) ?? 0) + 1);
+      else if (e.response === "MAYBE") maybeCount.set(e.slotId, (maybeCount.get(e.slotId) ?? 0) + 1);
+    }
+    const ranked = [...slots].sort(
+      (a, b) =>
+        (yesCount.get(b.id) ?? 0) - (yesCount.get(a.id) ?? 0) ||
+        (maybeCount.get(b.id) ?? 0) - (maybeCount.get(a.id) ?? 0)
+    );
+    const top = ranked[0];
+    const topYes = yesCount.get(top.id) ?? 0;
+    const topMaybe = maybeCount.get(top.id) ?? 0;
+    if (topYes === 0 && topMaybe === 0) return "";
+    return `${pollOptionLabel(top)} (${topYes} yes${topMaybe ? `, ${topMaybe} maybe` : ""})`;
+  };
+  const readPollEntries = async (slots: Array<typeof eventSlots.$inferSelect>) =>
+    slots.length === 0
+      ? []
+      : db
+          .select({ slotId: pollVoteEntries.slotId, response: pollVoteEntries.response })
+          .from(pollVoteEntries)
+          .where(inArray(pollVoteEntries.slotId, slots.map((s) => s.id)));
+  const notifyOrganizerOfVote = async (args: {
+    kind: PollVoteUpdateKind;
+    participantName: string;
+    participantEmail: string | null;
+    /** The poll's options; read here when omitted. */
+    slots?: Array<typeof eventSlots.$inferSelect>;
+    /** The voter's own YES/MAYBE answers (empty for removals)… */
+    responses?: Map<string, string>;
+    /** …or the vote to read them from, after the write. */
+    voteId?: string;
+    /** All entries after the change, when already read; otherwise read here. */
+    entries?: Array<{ slotId: string; response: string }>;
+  }) => {
+    // Reads happen only after the guard, so polls without an organizer
+    // email cost nothing extra.
+    const recipient = await organizerUpdateRecipient();
+    if (!recipient) return;
+    const slots =
+      args.slots ?? (await db.select().from(eventSlots).where(eq(eventSlots.eventId, eventId)));
+    const responses =
+      args.responses ??
+      new Map(
+        args.voteId
+          ? (
+              await db
+                .select({ slotId: pollVoteEntries.slotId, response: pollVoteEntries.response })
+                .from(pollVoteEntries)
+                .where(eq(pollVoteEntries.pollVoteId, args.voteId))
+            ).map((e) => [e.slotId, e.response] as const)
+          : []
+      );
+    const ordered = [...slots].sort((a, b) => (a.displayOrder ?? 0) - (b.displayOrder ?? 0));
+    const answered = (r: string) =>
+      ordered.filter((s) => responses.get(s.id) === r).map(pollOptionLabel);
+    const entries = args.entries ?? (await readPollEntries(slots));
+    const message = buildPollVoteUpdateEmail({
+      kind: args.kind,
+      eventTitle: event.title,
+      participantName: args.participantName,
+      participantEmail:
+        args.participantEmail && isValidEmail(args.participantEmail) ? args.participantEmail : null,
+      yes: answered("YES"),
+      maybe: answered("MAYBE"),
+      leadingLine: leadingOptionLine(slots, entries),
+      eventUrl: `${site.siteUrl}/events/${eventId}`,
+      site,
     });
-    await trackEmailUsage(env.DB, {
-      webhookUrl: env.ALERT_WEBHOOK_URL,
-      appName: site.siteName,
-      result,
-      limits: getEmailLimits(result.provider, env),
-    });
+    await sendOrganizerUpdate(recipient, message);
   };
   const reclaimViaEmailMessage =
     "That name already voted. If that's you, vote from your original browser or device, or open the link in your vote confirmation email. Otherwise pick a different name, e.g. \"John S.\"";
@@ -1235,6 +1334,18 @@ export async function action({ request, params, context }: ActionFunctionArgs) {
     };
 
     const takenMessage = reclaimViaEmailMessage;
+    // Organizer update email; skipped when the organizer votes from admin mode.
+    const notifyVote = async (kind: PollVoteUpdateKind, entries?: Array<{ slotId: string; response: string }>) => {
+      if (await requireAdmin()) return;
+      await notifyOrganizerOfVote({
+        kind,
+        participantName,
+        participantEmail,
+        slots: voteSlots,
+        responses: keptResponses,
+        entries,
+      });
+    };
 
     if (clientVoteId && clientVoteToken) {
       const candidate = existingVotes.find((v) => v.id === clientVoteId);
@@ -1255,6 +1366,7 @@ export async function action({ request, params, context }: ActionFunctionArgs) {
           ...deleteOpenEntries(ownVote.id),
           ...saveEntries(ownVote.id),
         ]);
+        await notifyVote("update");
 
         return data({
           success: true,
@@ -1338,37 +1450,8 @@ export async function action({ request, params, context }: ActionFunctionArgs) {
       await runBatch(db, [voteInsert, ...saveEntries(voteId)]);
     }
 
-    // Current consensus: frontrunner option by YES count (MAYBE breaks ties),
-    // computed over all votes including the one just saved.
-    let consensusLine = "";
-    if (voteSlots.length > 0) {
-      const yesCount = new Map<string, number>();
-      const maybeCount = new Map<string, number>();
-      for (const e of allEntries) {
-        if (e.response === "YES") yesCount.set(e.slotId, (yesCount.get(e.slotId) ?? 0) + 1);
-        else if (e.response === "MAYBE") maybeCount.set(e.slotId, (maybeCount.get(e.slotId) ?? 0) + 1);
-      }
-      const ranked = [...voteSlots].sort(
-        (a, b) =>
-          (yesCount.get(b.id) ?? 0) - (yesCount.get(a.id) ?? 0) ||
-          (maybeCount.get(b.id) ?? 0) - (maybeCount.get(a.id) ?? 0)
-      );
-      const top = ranked[0];
-      const topYes = yesCount.get(top.id) ?? 0;
-      const topMaybe = maybeCount.get(top.id) ?? 0;
-      if (topYes > 0 || topMaybe > 0) {
-        const topDate = top.slotDate ?? event.eventDate;
-        const topTime = top.startTime
-          ? `${formatTime(top.startTime)}${top.endTime ? ` – ${formatTime(top.endTime)}` : ""}`
-          : top.endTime
-            ? formatTime(top.endTime)
-            : "";
-        const topWhen = [topDate ? formatLongDateLabel(topDate) : "", topTime]
-          .filter(Boolean)
-          .join(" · ");
-        consensusLine = `${topWhen || top.title} (${topYes} yes${topMaybe ? `, ${topMaybe} maybe` : ""})`;
-      }
-    }
+    // Current consensus over all votes, including the one just saved.
+    const consensusLine = leadingOptionLine(voteSlots, allEntries);
 
     if (participantEmail && (await canEmailGuest())) {
       const manageUrl = `${url.origin}/events/${eventId}?cancel_token=${encodeURIComponent(editTokenPlain)}`;
@@ -1397,6 +1480,7 @@ export async function action({ request, params, context }: ActionFunctionArgs) {
         limits: getEmailLimits(voteEmailResult.provider, env),
       });
     }
+    await notifyVote("vote", allEntries);
 
     return data({
       success: true,
@@ -1624,6 +1708,12 @@ export async function action({ request, params, context }: ActionFunctionArgs) {
         .filter(Boolean)
         .join(" · ") || title;
 
+    // Organizer update; skipped when the organizer proposes from admin mode.
+    const notifyOrganizerOfProposal = (kind: PollVoteUpdateKind, pollVoteId: string) =>
+      isAdminProposing
+        ? Promise.resolve()
+        : notifyOrganizerOfVote({ kind, participantName, participantEmail, voteId: pollVoteId });
+
     const notifyProposer = async () => {
       if (!participantEmail || !(await canEmailGuest())) return;
       const eventUrl = `${url.origin}/events/${eventId}`;
@@ -1669,6 +1759,7 @@ export async function action({ request, params, context }: ActionFunctionArgs) {
           ...(hasSubmittedMatrix ? replaceAllWithProposal(ownVote.id) : addYesForNewSlot(ownVote.id)),
         ]);
         await notifyProposer();
+        await notifyOrganizerOfProposal("update", ownVote.id);
         return data({
           success: true,
           message: `Thanks ${participantName}! Your proposed time was added and counted as Yes.`,
@@ -1742,6 +1833,7 @@ export async function action({ request, params, context }: ActionFunctionArgs) {
       ...addYesForNewSlot(voteId),
     ]);
     await notifyProposer();
+    await notifyOrganizerOfProposal("vote", voteId);
 
     return data({
       success: true,
@@ -1770,9 +1862,11 @@ export async function action({ request, params, context }: ActionFunctionArgs) {
     }
     // History protection: guests can't delete votes once voting closed
     // (organizers still can). Policy unit-tested.
+    const ownerVoteSlots = adminOk
+      ? []
+      : await db.select().from(eventSlots).where(eq(eventSlots.eventId, eventId));
     if (!adminOk) {
-      const voteSlots = await db.select().from(eventSlots).where(eq(eventSlots.eventId, eventId));
-      if (ownerDeleteVoteBlocked(event, voteSlots, new Date())) {
+      if (ownerDeleteVoteBlocked(event, ownerVoteSlots, new Date())) {
         return data(
           { error: "Voting is closed — votes can't be removed.", closed: true },
           { status: 410 }
@@ -1784,8 +1878,17 @@ export async function action({ request, params, context }: ActionFunctionArgs) {
       db.delete(pollVotes).where(eq(pollVotes.id, voteId)),
     ]);
 
+    // Self-removal tells the organizer; organizer removal tells the voter.
+    if (!adminOk) {
+      await notifyOrganizerOfVote({
+        kind: "removal",
+        participantName: existing.participantName,
+        participantEmail: existing.participantEmail,
+        slots: ownerVoteSlots,
+        responses: new Map(),
+      });
+    }
     // Organizer-initiated removal: notify the voter by email (best-effort).
-    // Self-removals (owner via edit token / cancel link) stay silent.
     if (adminOk) {
       const removedEmail = (existing.participantEmail || "").trim();
       if (removedEmail && isValidEmail(removedEmail)) {
@@ -2849,6 +2952,13 @@ export async function action({ request, params, context }: ActionFunctionArgs) {
         db.delete(pollVoteEntries).where(eq(pollVoteEntries.pollVoteId, v.id)),
         db.delete(pollVotes).where(eq(pollVotes.id, v.id)),
       ]);
+      await notifyOrganizerOfVote({
+        kind: "removal",
+        participantName: v.participantName,
+        participantEmail: v.participantEmail,
+        slots: voteSlots,
+        responses: new Map(),
+      });
       return redirect(`/events/${eventId}?cancelled=1`);
     }
     return redirect(`/events/${eventId}?cancel_error=1`);
