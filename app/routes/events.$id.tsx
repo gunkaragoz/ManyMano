@@ -1545,7 +1545,10 @@ export async function action({ request, params, context }: ActionFunctionArgs) {
       slotDateRaw
     ).slice(0, SLOT_TITLE_MAX);
     const newSlotId = generateInternalId();
-    await db.insert(eventSlots).values({
+    // A statement, not an awaited write: the option is saved in the same
+    // batch as the proposer's vote, so a proposal that is turned away below
+    // (name already taken, poll full) leaves no stray option behind.
+    const slotInsert = db.insert(eventSlots).values({
       id: newSlotId,
       eventId,
       title,
@@ -1560,6 +1563,7 @@ export async function action({ request, params, context }: ActionFunctionArgs) {
     // Organizer proposing without a name (reopening a passed poll): the
     // slot alone, with no vote counted under it.
     if (!participantName) {
+      await slotInsert;
       return data({
         success: true,
         message: "Your proposed time was added.",
@@ -1657,6 +1661,7 @@ export async function action({ request, params, context }: ActionFunctionArgs) {
           return data({ error: takenMessage }, { status: 409 });
         }
         await runBatch(db, [
+          slotInsert,
           db
             .update(pollVotes)
             .set({ participantName, participantEmail, updatedAt: now })
@@ -1689,6 +1694,7 @@ export async function action({ request, params, context }: ActionFunctionArgs) {
         const reclaimToken = generateSecretToken();
         const reclaimTokenStored = await hashSecretForStorage(reclaimToken);
         await runBatch(db, [
+          slotInsert,
           db
             .update(pollVotes)
             .set({
@@ -1722,6 +1728,7 @@ export async function action({ request, params, context }: ActionFunctionArgs) {
     const editTokenPlain = generateSecretToken();
     const editTokenStored = await hashSecretForStorage(editTokenPlain);
     await runBatch(db, [
+      slotInsert,
       db.insert(pollVotes).values({
         id: voteId,
         eventId,
@@ -2981,14 +2988,17 @@ export async function action({ request, params, context }: ActionFunctionArgs) {
 
     const matches =
       emailRaw.trim().toLowerCase() === (event.organizerEmail || "").trim().toLowerCase();
-    if (!matches) {
+    // The new link only exists in the email. With no mail provider it could
+    // never arrive, so the current link must keep working.
+    if (!matches || !isEmailDeliveryConfigured(env)) {
       return data({ success: true, message: genericOk });
     }
 
     const freshToken = generateSecretToken();
+    const freshTokenStored = await hashSecretForStorage(freshToken);
     await db
       .update(events)
-      .set({ adminToken: await hashSecretForStorage(freshToken), updatedAt: now })
+      .set({ adminToken: freshTokenStored, updatedAt: now })
       .where(eq(events.id, eventId));
 
     const freshAdminUrl = `${url.origin}/events/${eventId}?admin=${encodeURIComponent(freshToken)}`;
@@ -3018,6 +3028,15 @@ export async function action({ request, params, context }: ActionFunctionArgs) {
       result: resendResult,
       limits: getEmailLimits(resendResult.provider, env),
     });
+    if (!resendResult.success) {
+      // The email never went out (provider error, quota spent): put the old
+      // link back rather than lock the organizer out with a link nobody has.
+      // Guarded on the token just written, so a newer rotation is left alone.
+      await db
+        .update(events)
+        .set({ adminToken: event.adminToken })
+        .where(and(eq(events.id, eventId), eq(events.adminToken, freshTokenStored)));
+    }
 
     return data({ success: true, message: genericOk });
   }
@@ -3896,7 +3915,6 @@ export default function EventView() {
     eventPast: serverEventPast,
     eventHappening: serverEventHappening,
     winningPast: serverWinningPast,
-    lastCloseAt: serverLastCloseAt,
     lastEndAt: serverLastEndAt,
     turnstileSiteKey,
     origin,
@@ -3962,7 +3980,6 @@ export default function EventView() {
     eventPast?: boolean;
     eventHappening?: boolean;
     winningPast?: boolean;
-    lastCloseAt?: string | null;
     lastEndAt?: string | null;
   };
   const liveClose = (live ?? null) as LiveClose | null;
@@ -3973,7 +3990,6 @@ export default function EventView() {
   const eventPast = liveClose?.eventPast ?? serverEventPast ?? false;
   const eventHappening = liveClose?.eventHappening ?? serverEventHappening ?? false;
   const winningPast = liveClose?.winningPast ?? serverWinningPast ?? false;
-  const lastCloseAt = liveClose?.lastCloseAt ?? serverLastCloseAt ?? null;
   const lastEndAt = liveClose?.lastEndAt ?? serverLastEndAt ?? null;
   const isFinalized = event.status === "FINALIZED";
   const organizerTzForLabels = organizerTzOf(event as { timezone?: string | null });

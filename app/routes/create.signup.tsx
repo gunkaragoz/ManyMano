@@ -37,12 +37,10 @@ import { formatLongDateLabel } from "~/utils/calendar";
 import { escapeHtml } from "~/utils/sanitize";
 import { buildAdminCookie, hashSecretForStorage } from "~/utils/auth";
 import {
-  COMMENT_MAX,
   DESCRIPTION_MAX,
   EMAIL_MAX,
   LOCATION_MAX,
   MAX_SLOTS_PER_EVENT,
-  MAX_SLOT_ROWS_PER_EVENT,
   MAX_TASKS_PER_DATE,
   ORGANIZER_NAME_MAX,
   SHIFT_NAME_MAX,

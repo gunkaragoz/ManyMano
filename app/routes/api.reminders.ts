@@ -15,7 +15,7 @@ import { runReminderFanout } from "~/utils/reminders-run";
 // GET /api/reminders — day-before reminder fan-out (manual entry point).
 //
 // Production sends run on the Workers Cron Trigger (see workers/app.ts
-// `scheduled` + [triggers] in wrangler.toml) — no HTTP, no secret needed.
+// `scheduled` + [env.production.triggers] in wrangler.toml) — no HTTP, no secret needed.
 // This endpoint remains for manual runs, backfills (?date=) and dry-runs:
 //
 //   GET /api/reminders?dry-run=1  (Authorization: Bearer <REMINDER_SECRET>)

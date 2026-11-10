@@ -5,7 +5,6 @@ import { getPopularTemplates, type PopularTemplate } from "~/utils/template-popu
 
 export const PULSE_DAY_OPTIONS = [7, 30, 90] as const;
 export const PULSE_DEFAULT_DAYS = 30;
-export const PULSE_MAX_DAYS = 90; // capped well within the retention window
 
 export function clampPulseDays(raw: unknown): number {
   const n = typeof raw === "string" ? parseInt(raw, 10) : typeof raw === "number" ? raw : NaN;

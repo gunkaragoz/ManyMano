@@ -50,7 +50,7 @@ export default {
     return negotiateMarkdown(request, await requestHandler(request, loadContext));
   },
 
-  // Hourly reminder scan (see [triggers] in wrangler.toml). Each run sends
+  // Hourly reminder scan (see [env.production.triggers] in wrangler.toml). Each run sends
   // only what's due — 12 hours before the event starts (organizers +
   // participants) plus a 48h understaffed alert (organizers). Dedupe via
   // reminder_sends rows makes overlapping runs safe. Staging has no cron

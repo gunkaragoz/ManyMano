@@ -212,6 +212,33 @@ describe("events with no organizer email", () => {
     expect(calledHosts().filter((h) => h === RESEND_HOST)).toHaveLength(1);
   });
 
+  it("recovery keeps the current link when no mail provider is set up", async () => {
+    const { id, adminToken } = await seedEvent(db, { id: "e_recover_nomail", organizerEmail: "sam@example.com" });
+    const r = await runAction(
+      testEnv(db),
+      id,
+      { intent: "resend_admin_link", organizerEmail: "sam@example.com" },
+      headers()
+    );
+    expect(r.body.success).toBe(true);
+    expect(eventRow(db, id).admin_token).toBe(await sha256Hex(adminToken));
+    expect(calledHosts()).not.toContain(RESEND_HOST);
+  });
+
+  it("recovery puts the old link back when the email could not be sent", async () => {
+    const { id, adminToken } = await seedEvent(db, { id: "e_recover_fail", organizerEmail: "sam@example.com" });
+    fetchMock.mockImplementation(async () => new Response("quota", { status: 429 }));
+    const r = await runAction(
+      testEnv(db, { RESEND_API_KEY: "re_test" }),
+      id,
+      { intent: "resend_admin_link", organizerEmail: "sam@example.com" },
+      headers()
+    );
+    expect(r.body.success).toBe(true);
+    expect(calledHosts().filter((h) => h === RESEND_HOST)).toHaveLength(1);
+    expect(eventRow(db, id).admin_token).toBe(await sha256Hex(adminToken));
+  });
+
   it("reminders skip the organizer without trying to send", async () => {
     await seedEvent(db, { id: "e_remind", eventDate: "2030-01-15", slot: { id: "s1", startTime: "09:00" } });
     const env = testEnv(db, { RESEND_API_KEY: "re_test" });

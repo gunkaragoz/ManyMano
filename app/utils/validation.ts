@@ -28,23 +28,6 @@ export const MAX_VOTES_PER_EVENT = 1000;
 
 import { isValidTimezone } from "./timezones";
 
-/** Historical preset list (kept for backwards compat — not a restriction). */
-export const ALLOWED_TIMEZONES = [
-  "UTC",
-  "Europe/Istanbul",
-  "Europe/London",
-  "Europe/Berlin",
-  "Europe/Paris",
-  "America/New_York",
-  "America/Chicago",
-  "America/Denver",
-  "America/Los_Angeles",
-  "Asia/Dubai",
-  "Asia/Kolkata",
-  "Asia/Singapore",
-  "Australia/Sydney",
-] as const;
-
 const EMAIL_RE = /^[^\s@]{1,64}@[^\s@]{1,253}\.[^\s@]{2,}$/;
 
 export function isValidEmail(email: string): boolean {

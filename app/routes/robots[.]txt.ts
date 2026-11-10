@@ -3,18 +3,10 @@ import type { LoaderFunctionArgs } from "react-router";
 import { absoluteUrl } from "~/utils/seo";
 import { getSiteConfig } from "~/utils/site";
 
-export async function loader({ request, context }: LoaderFunctionArgs) {
-  const origin = (() => {
-    try {
-      return new URL(request.url).origin;
-    } catch {
-      throw new Error("[config] robots.txt requires a valid request origin.");
-    }
-  })();
+export async function loader({ context }: LoaderFunctionArgs) {
   // Canonical sitemap URL always points at production (SITE_URL). No fallback.
   const { siteUrl } = getSiteConfig(getCloudflareEnv(context));
   const sitemapUrl = absoluteUrl("/sitemap.xml", siteUrl);
-  void origin;
   // Content Signals (https://contentsignals.org/): allow search indexing and
   // AI answers that cite us, opt out of model training.
   const body = [

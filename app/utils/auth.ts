@@ -82,19 +82,22 @@ function cookieName(eventId: string): string {
 
 /** Prefer HttpOnly cookie, fall back to ?admin= query param (legacy/bookmark). */
 export function getPresentedAdminToken(request: Request, eventId: string): string | null {
-  const cookieHeader = request.headers.get("cookie") || "";
-  const cookies = Object.fromEntries(
-    cookieHeader
-      .split(";")
-      .map((p) => p.trim())
-      .filter(Boolean)
-      .map((p) => {
-        const idx = p.indexOf("=");
-        if (idx === -1) return [p, ""];
-        return [p.slice(0, idx).trim(), decodeURIComponent(p.slice(idx + 1).trim())];
-      })
-  );
-  const fromCookie = cookies[cookieName(eventId)];
+  const wanted = cookieName(eventId);
+  // The last matching cookie wins. Browsers send the most specific path
+  // first, so a leftover cookie from when these were scoped to
+  // /events/<id> comes before the current /events one and must not shadow it.
+  let fromCookie = "";
+  for (const part of (request.headers.get("cookie") || "").split(";")) {
+    const idx = part.indexOf("=");
+    if (idx === -1 || part.slice(0, idx).trim() !== wanted) continue;
+    // Only this cookie is decoded: a malformed value in an unrelated cookie
+    // (or in this one) must not turn the page load into a 500.
+    try {
+      fromCookie = decodeURIComponent(part.slice(idx + 1).trim()) || fromCookie;
+    } catch {
+      // Damaged: keep any earlier value, else fall through to the query.
+    }
+  }
   if (fromCookie) return fromCookie;
   const url = new URL(request.url);
   return url.searchParams.get("admin");

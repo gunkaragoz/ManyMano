@@ -21,10 +21,13 @@
 // (build/server/index.js) is workerd-only and cannot be imported in node,
 // so this gate asserts its presence + shape instead of executing it.
 //
-// Env source: `wrangler deploy` exposes dashboard vars at runtime, not at
-// build time; locally the Cloudflare Vite plugin reads .dev.vars. Mirror
-// that here: start from .dev.vars (if present) and let real process.env
-// values win, so the same script validates both environments.
+// Env source: deployed vars live in wrangler.toml (one copy per
+// environment — Wrangler does not inherit them); locally the Cloudflare Vite
+// plugin reads .dev.vars. So every wrangler.toml vars section must carry the
+// required vars on its own, and the effective env starts from the selected
+// section (CLOUDFLARE_ENV, else top-level [vars]), then .dev.vars (if
+// present), then real process.env values. A clean checkout with a complete
+// wrangler.toml passes without a .dev.vars file.
 
 import { existsSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
@@ -62,12 +65,24 @@ function parseDotenvFile(path) {
   return out;
 }
 
-/** Effective env: .dev.vars base, real process.env wins (dashboard vars). */
-function loadEffectiveEnv() {
+/** `KEY = "value"` pairs of one wrangler.toml section (null when absent). */
+function wranglerVars(src, header) {
+  const body = tomlSection(src, header);
+  if (body === null) return null;
+  const out = {};
+  for (const m of body.matchAll(/^\s*([A-Z0-9_]+)\s*=\s*"([^"]*)"\s*$/gm)) out[m[1]] = m[2];
+  return out;
+}
+
+/** Effective env: wrangler.toml vars, then .dev.vars, real process.env wins. */
+function loadEffectiveEnv(wranglerSrc) {
+  const target = (process.env.CLOUDFLARE_ENV ?? "").trim();
+  const header = target ? `[env.${target}.vars]` : "[vars]";
+  const deployed = wranglerVars(wranglerSrc, header) ?? {};
   const devVarsPath = resolve(ROOT, ".dev.vars");
   const base = existsSync(devVarsPath) ? parseDotenvFile(devVarsPath) : {};
-  const fromFile = existsSync(devVarsPath) ? ".dev.vars" : "(no .dev.vars file)";
-  const env = { ...base };
+  const fromFile = `wrangler.toml ${header} + ${existsSync(devVarsPath) ? ".dev.vars" : "(no .dev.vars file)"}`;
+  const env = { ...deployed, ...base };
   for (const [k, v] of Object.entries(process.env)) {
     if (v !== undefined && v !== "") env[k] = v;
   }
@@ -143,13 +158,28 @@ for (const key of ["SITE_NAME", "SITE_TAGLINE", "SITE_DESCRIPTION"]) {
 
 // --- 3. Effective env must satisfy getSiteConfig ------------------------------
 console.log("\n[3/6] Effective env satisfies getSiteConfig");
-const { env, fromFile } = loadEffectiveEnv();
+// Each environment deploys with its own copy of the vars, so each copy has
+// to be complete: a missing one is a 500 on that environment only.
+for (const header of [
+  "[vars]",
+  "[env.production.vars]",
+  "[env.staging.vars]",
+  "[previews.vars]",
+  "[env.staging.previews.vars]",
+]) {
+  const vars = wranglerVars(wranglerSource, header);
+  if (vars === null) continue;
+  const missing = requiredKeys.filter((key) => !(vars[key] ?? "").trim());
+  if (missing.length > 0) fail(`wrangler.toml ${header} is missing ${missing.join(", ")}`);
+  else ok(`wrangler.toml ${header} sets every required var`);
+}
+const { env, fromFile } = loadEffectiveEnv(wranglerSource);
 console.log(`  source: ${fromFile} + process.env overrides`);
 for (const key of requiredKeys) {
   if (!((env[key] ?? "").trim())) {
     fail(
       `Missing required env var ${key}. ` +
-        `Set it via wrangler secret/vars (production) or .dev.vars (local). See .env.sample.`
+        `Set it in wrangler.toml vars (deploys) or .dev.vars (local). See .env.sample.`
     );
   } else ok(`${key} is set`);
 }

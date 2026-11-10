@@ -179,17 +179,6 @@ export function formatUtcOffsetMinutes(minutes: number | null): string | null {
   return `GMT${sign}${hh}:${mm}`;
 }
 
-/** Short offset form, e.g. "GMT-4" or "GMT+5:30". Null when unknown. */
-export function formatUtcOffsetShort(timeZone: string, at: Date = new Date()): string | null {
-  const minutes = getOffsetMinutes(timeZone, at);
-  if (minutes === null) return null;
-  const sign = minutes < 0 ? "-" : "+";
-  const abs = Math.abs(minutes);
-  const h = Math.floor(abs / 60);
-  const m = abs % 60;
-  return m === 0 ? `GMT${sign}${h}` : `GMT${sign}${h}:${String(m).padStart(2, "0")}`;
-}
-
 /** "Europe/Berlin" -> "Berlin". "America/Argentina/Buenos_Aires" -> "Buenos Aires". */
 export function timezoneCity(timeZone: string): string {
   if (timeZone === "UTC") return "UTC";
@@ -203,13 +192,6 @@ export function timezoneRegion(timeZone: string): string {
   return parts.length > 1 ? parts[0].replace(/_/g, " ") : "UTC";
 }
 
-/** "Berlin (GMT+02:00)" — used for <option>-style and aria labels. */
-export function formatTimezoneLabel(timeZone: string, at: Date = new Date()): string {
-  const offset = formatUtcOffsetLabel(timeZone, at);
-  const name = timeZone === "UTC" ? "UTC" : `${timezoneCity(timeZone)} (${timezoneRegion(timeZone)})`;
-  return offset ? `${name} — ${offset}` : name;
-}
-
 /** Current wall-clock time in a zone, e.g. "04:54". Null when unknown. */
 export function formatTimeInTimezone(timeZone: string, at: Date = new Date()): string | null {
   try {
@@ -219,20 +201,6 @@ export function formatTimeInTimezone(timeZone: string, at: Date = new Date()): s
       hourCycle: "h23",
       timeZone,
     }).format(at);
-  } catch {
-    return null;
-  }
-}
-
-/** Short zone name at an instant, e.g. "EDT", "CEST", "GMT+5:30". Null when unknown. */
-export function formatTimezoneShortName(timeZone: string, at: Date = new Date()): string | null {
-  try {
-    const parts = new Intl.DateTimeFormat("en-US", {
-      timeZone,
-      timeZoneName: "short",
-    }).formatToParts(at);
-    const tzPart = parts.find((p) => p.type === "timeZoneName")?.value;
-    return tzPart || null;
   } catch {
     return null;
   }

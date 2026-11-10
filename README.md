@@ -86,13 +86,15 @@ npx wrangler d1 migrations apply manymano-db --remote
 ### Step 4 (Required): Configure branding, domain & email
 Plaintext vars live in `wrangler.toml` (`[vars]` for production,
 `[env.staging.vars]` for staging); secrets via `wrangler secret put`
-(see `.env.sample` for which keys are which). Set **every** variable from
-`.env.sample` — the app throws at request time
-when any is missing (no hardcoded fallbacks, so a fork can never silently
-serve the old defaults):
+(see `.env.sample` for which keys are which). These five are required — the
+app throws at request time when any is missing (no hardcoded fallbacks, so a
+fork can never silently serve the old defaults):
 - `SITE_URL`, `SITE_NAME`, `SITE_TAGLINE`, `SITE_DESCRIPTION`
 - `FROM_EMAIL` (e.g. `YourName <no-reply@mail.yourdomain.com>`)
-- `SECURITY_CONTACT`, `ICS_UID_DOMAIN`, `ICS_PRODID`
+
+Optional, derived from the values above when empty/unset (no throw):
+- `SECURITY_CONTACT` (defaults to `GITHUB_REPO_URL` + `/issues`, else `mailto:` the `FROM_EMAIL` address)
+- `ICS_UID_DOMAIN` (defaults to the `SITE_URL` hostname), `ICS_PRODID` (defaults to one built from `SITE_NAME`)
 
 Optional branding (leave empty/unset to hide — no throw):
 - `GITHUB_REPO_URL` (footer GitHub icon, Organization JSON-LD `sameAs`, llms.txt)
@@ -106,7 +108,7 @@ Optional branding (leave empty/unset to hide — no throw):
 - `EMAIL_DAILY_LIMIT` / `EMAIL_MONTHLY_LIMIT`: override the quota-alert baselines for your SMTP/SES limits (defaults: Resend 100/day + 3,000/month; SMTP 50,000/day + 1,500,000/month).
 - `TURNSTILE_SITE_KEY` / `TURNSTILE_SECRET_KEY` / `TURNSTILE_HOSTNAMES`: Cloudflare Turnstile bot protection. If the secret is omitted, verification is skipped (handy for local dev).
 - `ALERT_WEBHOOK_URL`: Discord or Slack incoming webhook for quota alerts. Every sent email is counted in D1 (UTC day/month); one webhook fires at 80/90/100% of the active provider quota (see above) and on Resend 429 exhaustion. `GET /api/usage` always shows the live counters. Cloudflare itself emails the account owner at ~90% of Workers/D1 daily limits — no setup needed.
-- Reminder emails run on the Worker's Cron Trigger (hourly scan, `[triggers]` in `wrangler.toml` — production only). Sends fire 12 hours before the event starts in the event's timezone (earliest slot start; 9:00 AM assumed when slots carry no times): organizers + participants, plus a 48h understaffed alert for organizers of sheets with open spots. `GET /api/reminders` remains for manual dry-runs/backfills (`?dry-run=1`, `?date=YYYY-MM-DD`) authenticated by `REMINDER_SECRET`; re-runs are deduped per event+date so retries never double-email.
+- Reminder emails run on the Worker's Cron Trigger (hourly scan, `[env.production.triggers]` in `wrangler.toml` — production only). Sends fire 12 hours before the event starts in the event's timezone (earliest slot start; 9:00 AM assumed when slots carry no times): organizers + participants, plus a 48h understaffed alert for organizers of sheets with open spots. `GET /api/reminders` remains for manual dry-runs/backfills (`?dry-run=1`, `?date=YYYY-MM-DD`) authenticated by `REMINDER_SECRET`; re-runs are deduped per event+date so retries never double-email.
 
 ### Step 6: Apply migrations after pulling
 ```bash
