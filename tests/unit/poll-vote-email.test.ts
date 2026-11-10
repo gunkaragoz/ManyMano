@@ -134,6 +134,46 @@ describe("organizer poll vote updates", () => {
     expect(mails[0].html).toContain("<strong>Yes:</strong><br>Tuesday, June 2nd, 2099");
   });
 
+  it("keeps answers on closed options in the update email", async () => {
+    await seedPoll("pv_closed");
+    db.sqlite
+      .prepare(
+        `INSERT INTO event_slots (id, event_id, title, slot_date, start_time, capacity, display_order) VALUES ('pv_closed_old', 'pv_closed', 'Old', '2000-01-03', NULL, 999, 2)`
+      )
+      .run();
+    await addVote("v5", "pv_closed", "Ola", "own-token");
+    db.sqlite
+      .prepare(`INSERT INTO poll_vote_entries (id, poll_vote_id, slot_id, response) VALUES ('v5_old', 'v5', 'pv_closed_old', 'MAYBE')`)
+      .run();
+    await post("pv_closed", {
+      intent: "vote_poll",
+      participantName: "Ola",
+      clientVoteId: "v5",
+      clientVoteToken: "own-token",
+      slot_pv_closed_b: "YES",
+      "cf-turnstile-response": "solved",
+    });
+    const [mail] = toOrganizer();
+    expect(mail.subject).toContain("Vote updated: Ola");
+    expect(mail.html).toContain("<strong>Yes:</strong><br>Tuesday, June 2nd, 2099");
+    expect(mail.html).toContain("<strong>Maybe:</strong><br>Monday, January 3rd, 2000");
+  });
+
+  it("asks for the human check before a vote that would email the organizer", async () => {
+    await seedPoll("pv_check");
+    for (const intent of ["vote_poll", "propose_slot"]) {
+      const res = (await post("pv_check", {
+        intent,
+        participantName: `Bot ${intent}`,
+        slotDate: "2099-07-01",
+        slot_pv_check_a: "YES",
+      })) as { data: { needsVerification?: boolean } };
+      expect(res.data.needsVerification).toBe(true);
+    }
+    expect(db.sqlite.prepare("SELECT COUNT(*) AS n FROM poll_votes").get()).toMatchObject({ n: 0 });
+    expect(sent).toHaveLength(0);
+  });
+
   it("emails the organizer when a voter proposes a new time", async () => {
     await seedPoll("pv_prop");
     await post("pv_prop", {

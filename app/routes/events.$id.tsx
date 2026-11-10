@@ -1254,7 +1254,8 @@ export async function action({ request, params, context }: ActionFunctionArgs) {
     const guestVoteCheck = assessGuestRequest(formData, {
       ip: request.headers.get("cf-connecting-ip") || "unknown",
       eventId,
-      sendsEmail: Boolean(participantEmail),
+      // The organizer update email counts too, as for sign-ups.
+      sendsEmail: Boolean(participantEmail || (event.organizerEmail && isEmailDeliveryConfigured(env))),
     });
     if (guestVoteCheck.verdict === "bot") {
       return data({ success: true, message: `Availability recorded for ${participantName}!` });
@@ -1335,14 +1336,20 @@ export async function action({ request, params, context }: ActionFunctionArgs) {
 
     const takenMessage = reclaimViaEmailMessage;
     // Organizer update email; skipped when the organizer votes from admin mode.
-    const notifyVote = async (kind: PollVoteUpdateKind, entries?: Array<{ slotId: string; response: string }>) => {
+    // A new vote's answers are exactly what was submitted; an edit keeps
+    // answers on closed options, so it reads the stored vote back instead.
+    const notifyVote = async (
+      kind: PollVoteUpdateKind,
+      pollVoteId: string,
+      entries?: Array<{ slotId: string; response: string }>
+    ) => {
       if (await requireAdmin()) return;
       await notifyOrganizerOfVote({
         kind,
         participantName,
         participantEmail,
         slots: voteSlots,
-        responses: keptResponses,
+        ...(kind === "vote" ? { responses: keptResponses } : { voteId: pollVoteId }),
         entries,
       });
     };
@@ -1366,7 +1373,7 @@ export async function action({ request, params, context }: ActionFunctionArgs) {
           ...deleteOpenEntries(ownVote.id),
           ...saveEntries(ownVote.id),
         ]);
-        await notifyVote("update");
+        await notifyVote("update", ownVote.id);
 
         return data({
           success: true,
@@ -1480,7 +1487,7 @@ export async function action({ request, params, context }: ActionFunctionArgs) {
         limits: getEmailLimits(voteEmailResult.provider, env),
       });
     }
-    await notifyVote("vote", allEntries);
+    await notifyVote("vote", voteId, allEntries);
 
     return data({
       success: true,
@@ -1519,7 +1526,8 @@ export async function action({ request, params, context }: ActionFunctionArgs) {
     const guestProposeCheck = assessGuestRequest(formData, {
       ip: request.headers.get("cf-connecting-ip") || "unknown",
       eventId,
-      sendsEmail: Boolean(participantEmail),
+      // The organizer update email counts too, as for sign-ups.
+      sendsEmail: Boolean(participantEmail || (event.organizerEmail && isEmailDeliveryConfigured(env))),
     });
     if (guestProposeCheck.verdict === "bot") {
       return data({ success: true, message: `Thanks ${participantName}! Your proposed time was added.` });
