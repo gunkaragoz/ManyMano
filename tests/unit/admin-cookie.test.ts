@@ -18,6 +18,10 @@ describe("getPresentedAdminToken", () => {
     expect(getPresentedAdminToken(request("mm_admin_evt1=%E0%A4%A", "?admin=fromlink"), "evt1")).toBe("fromlink");
   });
 
+  it("prefers the last of two same-named cookies (older path-scoped one is sent first)", () => {
+    expect(getPresentedAdminToken(request("mm_admin_evt1=stale; mm_admin_evt1=current"), "evt1")).toBe("current");
+  });
+
   it("never returns another event's cookie", () => {
     expect(getPresentedAdminToken(request("mm_admin_evt2=abc"), "evt1")).toBeNull();
   });
