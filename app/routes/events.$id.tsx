@@ -4834,8 +4834,8 @@ export default function EventView() {
   // No ?admin= here: the HttpOnly admin cookie (Path=/events) authenticates
   // the download, and a token in the URL would land in download history.
   const rosterExportHref = `/events/${event.id}/export`;
-  // Print-ready sheet report; ?print=1 opens the dialog ("Save as PDF").
-  const rosterPdfHref = `/events/${event.id}/pdf?print=1`;
+  // US Letter PDF of the sheet (same cookie auth as the CSV).
+  const rosterPdfHref = `/events/${event.id}/pdf`;
   // Winning option for the finalized badge (day + time stay visible after
   // close — the result is the most useful fact on the page).
   const winningSlotForBadge = useMemo(
@@ -6136,9 +6136,8 @@ export default function EventView() {
               </a>
               <a
                 href={rosterPdfHref}
-                target="_blank"
-                rel="noopener"
-                title="Open a printable signup list and save it as PDF"
+                download
+                title="Download the signup list as a PDF"
                 className="inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl border border-slate-200 bg-white text-slate-700 text-xs font-bold shadow-sm transition-all shrink-0 hover:bg-slate-50 hover:border-slate-300"
               >
                 <FileText className="w-4 h-4 text-slate-500" />
