@@ -1,8 +1,10 @@
-// PDF (print) export of a signup sheet: organizer-only, escaped, grouped.
+// Signup-list PDF export: organizer-only, US Letter, grouped by day, paged.
 
 import { beforeEach, describe, expect, it } from "vitest";
+import { PDFDocument } from "pdf-lib";
 import { loader } from "~/routes/events.$id.pdf";
-import { buildSignupReportHtml, groupReport, MAX_BLANK_ROWS } from "~/utils/signup-report";
+import { buildSignupPdf, PAGE_HEIGHT, PAGE_WIDTH } from "~/utils/signup-pdf";
+import { groupReport, reportDateLine, reportFileName, reportSummary } from "~/utils/signup-report";
 import { createSqliteD1, type SqliteD1 } from "./helpers/sqlite-d1";
 import { SITE_URL, routeContext, seedEvent, testEnv } from "./helpers/route-harness";
 
@@ -14,7 +16,7 @@ beforeEach(() => {
 });
 
 async function run(id: string, headers: Record<string, string> = {}): Promise<Response> {
-  const request = new Request(`${SITE_URL}/events/${id}/pdf?print=1`, {
+  const request = new Request(`${SITE_URL}/events/${id}/pdf`, {
     headers: { "cf-connecting-ip": `198.51.100.${++ip}`, ...headers },
   });
   try {
@@ -25,95 +27,79 @@ async function run(id: string, headers: Record<string, string> = {}): Promise<Re
   }
 }
 
-function addSignup(id: string, slotId: string, name: string, email: string, comment = "", status = "CONFIRMED") {
+function addSignup(id: string, slotId: string, name: string, status = "CONFIRMED") {
   db.sqlite
     .prepare(
       `INSERT INTO signups (id, slot_id, event_id, participant_name, participant_email, edit_token, custom_fields, status, created_at)
-       VALUES (?, ?, ?, ?, ?, 'x', ?, ?, ?)`
+       VALUES (?, ?, ?, ?, ?, 'x', '{"comment":"hi"}', ?, ?)`
     )
-    .run(`su_${name}`, slotId, id, name, email, JSON.stringify({ comment }), status, new Date().toISOString());
+    .run(`su_${name}`, slotId, id, name, `${name}@example.com`, status, new Date().toISOString());
 }
 
 describe("GET /events/:id/pdf", () => {
   it("rejects requests without the organizer token", async () => {
     const { id } = await seedEvent(db, { slot: { id: "s1" } });
-    const res = await run(id);
-    expect(res.status).toBe(403);
+    expect((await run(id)).status).toBe(403);
   });
 
-  it("renders an escaped, nonce-scripted report for the organizer", async () => {
-    const { id, adminToken } = await seedEvent(db, {
-      eventDate: "2026-12-05",
-      slot: { id: "s1", title: "Bring <snacks>", capacity: 3, startTime: "09:00" },
-    });
-    addSignup(id, "s1", "Ayşe <b>Yılmaz</b>", "ayse@example.com", "Gluten-free");
-    addSignup(id, "s1", "Gone", "gone@example.com", "", "CANCELLED");
+  it("downloads a US Letter PDF for the organizer", async () => {
+    const { id, adminToken } = await seedEvent(db, { eventDate: "2026-12-05", slot: { id: "s1", capacity: 3 } });
+    addSignup(id, "s1", "Ayşe Yılmaz");
 
     const res = await run(id, { cookie: `mm_admin_${id}=${adminToken}` });
     expect(res.status).toBe(200);
-    expect(res.headers.get("content-type")).toContain("text/html");
+    expect(res.headers.get("content-type")).toBe("application/pdf");
     expect(res.headers.get("cache-control")).toBe("private, no-store");
-    const csp = res.headers.get("content-security-policy") || "";
-    const nonce = csp.match(/'nonce-([a-z0-9]+)'/)?.[1];
-    expect(nonce).toBeTruthy();
+    expect(res.headers.get("content-disposition")).toBe('attachment; filename="Park__Cleanup__signup-list.pdf"');
 
-    const html = await res.text();
-    expect(html).toContain(`<script nonce="${nonce}">`);
-    expect(html).toContain("Park &lt;Cleanup&gt;");
-    expect(html).toContain("Bring &lt;snacks&gt;");
-    expect(html).toContain("Ayşe &lt;b&gt;Yılmaz&lt;/b&gt;");
-    expect(html).not.toContain("<b>Yılmaz");
-    expect(html).toContain("Gluten-free");
-    expect(html).not.toContain("gone@example.com");
-    expect(html).toContain("1 of 3 filled");
-    expect(html.match(/<tr class="open">/g)?.length).toBe(2);
-    expect(html).toContain("9:00 AM");
+    const bytes = new Uint8Array(await res.arrayBuffer());
+    expect(new TextDecoder().decode(bytes.slice(0, 5))).toBe("%PDF-");
+    const pdf = await PDFDocument.load(bytes);
+    expect(pdf.getPageCount()).toBe(1);
+    expect(pdf.getPage(0).getSize()).toEqual({ width: 612, height: 792 });
+    expect(pdf.getTitle()).toBe("Park <Cleanup> – Signup list");
   });
 
   it("is not offered for polls", async () => {
     const { id, adminToken } = await seedEvent(db, { type: "TIME_POLL", slot: { id: "s1" } });
-    const res = await run(id, { cookie: `mm_admin_${id}=${adminToken}` });
-    expect(res.status).toBe(404);
+    expect((await run(id, { cookie: `mm_admin_${id}=${adminToken}` })).status).toBe(404);
   });
 });
 
-describe("signup report layout", () => {
+describe("signup list PDF", () => {
   const event = { title: "Fair", organizerName: "Sam", eventDate: "2026-12-05" };
+  const site = { siteName: "ManyMano", eventUrl: "https://example.com/events/x" };
 
-  it("groups slots by day, keeping the organizer's order within a day", () => {
-    const sections = groupReport(
-      event,
-      [
-        { id: "b", title: "B", capacity: 1, slotDate: "2026-12-07", displayOrder: 0 },
-        { id: "a", title: "A", capacity: 1, slotDate: "2026-12-06", startTime: "10:00", displayOrder: 2 },
-        { id: "c", title: "C", capacity: 1, slotDate: "2026-12-06", displayOrder: 1 },
-      ],
-      []
-    );
-    expect(sections.map((s) => s.date)).toEqual(["2026-12-06", "2026-12-07"]);
-    expect(sections[0].slots.map((s) => s.slot.id)).toEqual(["c", "a"]);
-    const html = buildSignupReportHtml({
-      event, slots: sections.flatMap((s) => s.slots.map((x) => x.slot)), signups: [],
-      siteName: "ManyMano", eventUrl: "https://example.com/events/x", nonce: "n",
-    });
-    expect(html).toContain("Sun, Dec 6 – Mon, Dec 7, 2026");
+  it("flows long sheets onto more Letter pages", async () => {
+    const slots = Array.from({ length: 12 }, (_, i) => ({ id: `s${i}`, title: `Slot ${i}`, capacity: 8, displayOrder: i }));
+    const bytes = await buildSignupPdf({ event, slots, signups: [], ...site });
+    const pdf = await PDFDocument.load(bytes);
+    expect(pdf.getPageCount()).toBeGreaterThan(2);
+    for (const p of pdf.getPages()) expect(p.getSize()).toEqual({ width: PAGE_WIDTH, height: PAGE_HEIGHT });
   });
 
-  it("caps blank rows and skips them for unlimited slots", () => {
-    const html = buildSignupReportHtml({
-      event,
-      slots: [
-        { id: "big", title: "Big", capacity: 100 },
-        { id: "inf", title: "Any", capacity: -1 },
-      ],
-      signups: [],
-      siteName: "ManyMano",
-      eventUrl: "https://example.com/events/x",
-      nonce: "n",
+  it("handles characters outside the embedded font", async () => {
+    const bytes = await buildSignupPdf({
+      event: { ...event, title: "Potluck 🍲 中文" },
+      slots: [{ id: "a", title: "Dish", capacity: 1 }],
+      signups: [{ slotId: "a", participantName: "李雷 😀", createdAt: "2026-01-01" }],
+      ...site,
     });
-    expect(html.match(/<td class="name">Available<\/td>/g)?.length).toBe(MAX_BLANK_ROWS);
-    expect(html).toContain(`+ ${100 - MAX_BLANK_ROWS} more open spots`);
-    expect(html).toContain("No signups yet");
-    expect(html).toContain("0 signups");
+    expect((await PDFDocument.load(bytes)).getTitle()).toBe("Potluck ? ?? – Signup list");
+  });
+
+  it("groups slots by day, keeping the organizer's order within a day", () => {
+    const slots = [
+      { id: "b", title: "B", capacity: 1, slotDate: "2026-12-07", displayOrder: 0 },
+      { id: "a", title: "A", capacity: 1, slotDate: "2026-12-06", startTime: "10:00", displayOrder: 2 },
+      { id: "c", title: "C", capacity: -1, slotDate: "2026-12-06", displayOrder: 1 },
+    ];
+    const sections = groupReport(event, slots, []);
+    expect(sections.map((s) => s.date)).toEqual(["2026-12-06", "2026-12-07"]);
+    expect(sections[0].slots.map((s) => s.slot.id)).toEqual(["c", "a"]);
+    expect(reportDateLine(event, sections)).toBe("Sun, Dec 6 – Mon, Dec 7, 2026");
+    expect(reportSummary(slots, sections)).toBe("0 signups");
+    expect(reportSummary(slots.slice(0, 2), sections)).toBe("0 of 2 spots filled");
+    expect(reportFileName("Bake sale!")).toBe("Bake_sale__signup-list.pdf");
   });
 });

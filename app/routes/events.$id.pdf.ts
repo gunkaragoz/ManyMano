@@ -10,10 +10,9 @@ import {
   withConcurrentPrune,
 } from "~/utils/retention";
 import { getSiteConfig } from "~/utils/site";
-import { buildSignupReportHtml } from "~/utils/signup-report";
+import { reportFileName } from "~/utils/signup-report";
 
-// Printable signup list for organizers (the roster's "Download PDF"). The
-// page opens the print dialog; "Save as PDF" writes the file.
+// Signup list as a US Letter PDF for organizers (the roster's "Download PDF").
 export async function loader({ params, request, context }: LoaderFunctionArgs) {
   const env = getCloudflareEnv(context);
   const site = getSiteConfig(env);
@@ -61,35 +60,26 @@ export async function loader({ params, request, context }: LoaderFunctionArgs) {
       .where(and(eq(signups.eventId, eventId), eq(signups.status, "CONFIRMED"))),
   ]);
 
-  const nonce = crypto.randomUUID().replace(/-/g, "");
+  // pdf-lib + the embedded fonts load only when someone downloads a PDF.
+  const { buildSignupPdf } = await import("~/utils/signup-pdf");
   const origin = new URL(request.url).origin;
-  const html = buildSignupReportHtml({
+  const pdf = await buildSignupPdf({
     event,
     slots,
     signups: eventSignups,
     siteName: site.siteName,
     eventUrl: `${origin}/events/${eventId}`,
-    nonce,
   });
 
-  return new Response(html, {
+  return new Response(pdf as Uint8Array<ArrayBuffer>, {
     status: 200,
     headers: {
-      "Content-Type": "text/html; charset=utf-8",
+      "Content-Type": "application/pdf",
+      "Content-Disposition": `attachment; filename="${reportFileName(event.title)}"`,
       "Cache-Control": "private, no-store",
       "Referrer-Policy": "no-referrer",
       "X-Content-Type-Options": "nosniff",
-      "X-Frame-Options": "DENY",
       "X-Robots-Tag": "noindex, nofollow",
-      "Content-Security-Policy": [
-        "default-src 'none'",
-        `script-src 'nonce-${nonce}'`,
-        "style-src 'unsafe-inline'",
-        "img-src 'self' data:",
-        "base-uri 'none'",
-        "form-action 'none'",
-        "frame-ancestors 'none'",
-      ].join("; "),
     },
   });
 }
