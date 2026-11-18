@@ -101,5 +101,7 @@ describe("signup list PDF", () => {
     expect(reportSummary(slots, sections)).toBe("0 signups");
     expect(reportSummary(slots.slice(0, 2), sections)).toBe("0 of 2 spots filled");
     expect(reportFileName("Bake sale!")).toBe("Bake_sale__signup-list.pdf");
+    // Capacity 0 is unlimited, as on the live sheet.
+    expect(reportSummary([{ id: "z", title: "Z", capacity: 0 }], sections)).toBe("0 signups");
   });
 });
