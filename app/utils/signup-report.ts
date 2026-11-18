@@ -112,7 +112,7 @@ export function reportDateLine(event: ReportEvent, sections: ReportSection[]): s
 /** "4 of 9 spots filled" ("4 signups" once any slot is unlimited). */
 export function reportSummary(slots: ReportSlot[], sections: ReportSection[]): string {
   const filled = sections.reduce((n, sec) => n + sec.slots.reduce((m, s) => m + s.signups.length, 0), 0);
-  if (slots.some((s) => s.capacity < 0)) return `${filled} ${filled === 1 ? "signup" : "signups"}`;
+  if (slots.some((s) => s.capacity <= 0)) return `${filled} ${filled === 1 ? "signup" : "signups"}`;
   const total = slots.reduce((n, s) => n + Math.max(0, s.capacity), 0);
   return `${filled} of ${total} ${total === 1 ? "spot" : "spots"} filled`;
 }

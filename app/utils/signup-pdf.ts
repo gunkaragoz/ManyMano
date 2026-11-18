@@ -287,8 +287,8 @@ export async function buildSignupPdf(args: {
     for (const [idx, { slot, signups: list }] of section.slots.entries()) {
       const capacity = slot.capacity;
       const count =
-        capacity < 0 ? `${list.length} signed up` : `${Math.min(list.length, capacity)} of ${capacity} filled`;
-      const open = capacity < 0 ? 0 : Math.max(0, capacity - list.length);
+        capacity <= 0 ? `${list.length} signed up` : `${Math.min(list.length, capacity)} of ${capacity} filled`;
+      const open = capacity <= 0 ? 0 : Math.max(0, capacity - list.length);
       const blanks = Math.min(open, MAX_BLANK_ROWS);
 
       const rows: Row[] = list.map((s, i) => signupRow(i + 1, s));
