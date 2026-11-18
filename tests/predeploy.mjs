@@ -234,6 +234,7 @@ const criticalRouteFiles = [
   "app/routes/events.$id.tsx",
   "app/routes/events.$id.ics.ts",
   "app/routes/events.$id.export.ts",
+  "app/routes/events.$id.pdf.ts",
   "app/routes/create.signup.tsx",
   "app/routes/create.poll.tsx",
 ];
